@@ -893,6 +893,10 @@ def normalize_usage_key(value: str) -> str:
     return "".join(ch.lower() for ch in (value or "") if ch.isalnum())
 
 
+def is_workflow_role(value: str) -> bool:
+    return normalize_usage_key(value) in {"approver", "admin"}
+
+
 TECHNICIAN_USAGE_ALIASES = {
     "ali": ["علي قراب", "علي"],
     "hamza": ["حمزه بشايره", "حمزة بشايره", "حمزه", "حمزة"],
@@ -1137,9 +1141,9 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
     if row.status not in {"pending_approval", "draft", "rejected"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be approved from status {row.status}")
     actor = data.actor.strip()
-    if row.receiver_name.strip() and actor and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor):
+    if row.receiver_name.strip() and actor and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and not is_workflow_role(data.title):
         raise HTTPException(status_code=403, detail="Only the assigned approver can approve this MR")
-    row.receiver_name = actor or row.receiver_name
+    row.receiver_name = row.receiver_name or actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
@@ -1160,9 +1164,9 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     if row.status not in {"pending_approval", "draft"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be rejected from status {row.status}")
     actor = data.actor.strip()
-    if row.receiver_name.strip() and actor and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor):
+    if row.receiver_name.strip() and actor and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and not is_workflow_role(data.title):
         raise HTTPException(status_code=403, detail="Only the assigned approver can reject this MR")
-    row.receiver_name = actor or row.receiver_name
+    row.receiver_name = row.receiver_name or actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
