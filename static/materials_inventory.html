@@ -21,6 +21,7 @@
   .mr-items table,.mr-info{min-width:0!important}
   body.fit-one-page .mr-sign{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
 }
+.ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.ops-card{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px;box-shadow:0 8px 22px rgba(23,34,52,.05)}.ops-card:before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:5px;background:var(--brand)}.ops-card.warn:before{background:var(--amber)}.ops-card.bad:before{background:var(--red)}.ops-card.good:before{background:var(--green)}.ops-card span{display:block;color:var(--muted);font-size:12px;font-weight:900}.ops-card strong{display:block;font-size:24px;margin-top:8px}.ops-card small{display:block;margin-top:6px;color:#64788d;font-weight:800}.timeline{display:grid;gap:10px}.timeline-item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border-bottom:1px solid #edf3f7;padding-bottom:9px}.timeline-dot{width:10px;height:10px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 5px rgba(0,109,143,.09)}.timeline-item b{font-size:12px}.timeline-item small{display:block;color:var(--muted);margin-top:3px}.risk-list{display:grid;gap:10px}.risk-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px;border:1px solid #edf3f7;border-radius:8px;background:#fbfdfe}.risk-row b{font-size:12px}.risk-row small{display:block;color:var(--muted);margin-top:3px}.risk-row strong{color:var(--red)}.split-panel{display:grid;grid-template-columns:1fr 1fr;gap:16px}.quick-actions{display:flex;gap:8px;flex-wrap:wrap}.quick-actions .btn{height:34px}.dashboard-note{border:1px solid #d9e9ef;background:#f4fbfd;color:#31566b;border-radius:8px;padding:12px;font-size:12px;font-weight:800;line-height:1.7}@media(max-width:960px){.ops-grid,.split-panel{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -82,20 +83,32 @@
           <div class="hero-badge" id="dashboardHealth">System healthy</div>
         </div>
         <div class="hero-metrics" id="summaryKpis"></div>
+        <div class="quick-actions">
+          <button class="btn" onclick="switchView('mr')">طلبات MR</button>
+          <button class="btn soft" onclick="switchView('receive')">استلام مخزون</button>
+          <button class="btn soft" onclick="switchView('balances')">المخزون</button>
+          <button class="btn soft" onclick="switchView('balances');document.querySelector('[data-balance=rolloutUsage]')?.click()">Rollout Usage</button>
+        </div>
       </div>
       <div class="status-strip" id="dashboardStatus"></div>
+      <div class="ops-grid" id="opsSnapshot"></div>
+      <div class="split-panel">
+        <div class="dash-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
+        <div class="dash-panel"><h3>آخر استلامات المخزون</h3><div id="recentReceipts"></div></div>
+      </div>
       <div class="dash-grid">
         <div class="dash-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
         <div class="dash-panel"><h3>حالة طلبات MR</h3><div id="mrStatusPanel"></div></div>
       </div>
       <div class="dash-grid">
         <div class="dash-panel"><h3>مخزون المستودعات</h3><div id="warehouseOverview"></div></div>
-        <div class="dash-panel"><h3>Rollout Consumption</h3><div id="rolloutOverview"></div></div>
+        <div class="dash-panel"><h3>مواد تحتاج انتباه</h3><div id="inventoryRisks"></div></div>
       </div>
       <div class="dash-grid">
+        <div class="dash-panel"><h3>Rollout Consumption</h3><div id="rolloutOverview"></div></div>
         <div class="dash-panel"><h3>أحدث الحركات</h3><div id="recentMovements"></div></div>
-        <div class="dash-panel"><h3>تنبيهات المخزون</h3><div id="lowStock"></div></div>
       </div>
+      <div class="dash-panel"><h3>ملخص تنبيهات المخزون</h3><div id="lowStock"></div></div>
     </div>
   </section>
 
@@ -371,6 +384,11 @@ const lowRows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quant
 const issuedMrs=wh.mrs.filter(r=>r.status==='issued').length;
 const approvedMrs=wh.mrs.filter(r=>r.status==='approved'||r.status==='signed').length;
 const pendingMrs=wh.mrs.filter(r=>r.status==='pending_approval'||r.status==='draft').length;
+const waitingApproval=wh.mrs.filter(r=>r.status==='pending_approval').length;
+const readyIssue=wh.mrs.filter(r=>r.status==='approved').length;
+const todayKey=today();
+const issuedToday=wh.mrs.filter(r=>r.status==='issued'&&String(r.creation_date||'')===todayKey).length;
+const receivedToday=(wh.receipts||[]).filter(r=>String(r.receipt_date||r.created_at?.slice(0,10)||'')===todayKey).reduce((s,r)=>s+(r.items||[]).reduce((a,it)=>a+Number(it.quantity||0),0),0);
 const rolloutUsed=wh.rolloutUsage.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);
 document.getElementById('dashboardHealth').textContent=lowRows.length?`${lowRows.length} Stock Alert`:'System healthy';
 document.getElementById('summaryKpis').innerHTML=[
@@ -379,6 +397,12 @@ document.getElementById('summaryKpis').innerHTML=[
 document.getElementById('dashboardStatus').innerHTML=[
 ['المستودعات',wh.summary.warehouses,'good'],['مواد منخفضة',lowRows.length,lowRows.length?'bad':'good'],['Rollout Used',rolloutUsed,rolloutUsed?'warn':'good']
 ].map(x=>`<div class="status-tile ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
+document.getElementById('opsSnapshot').innerHTML=[
+['MR بانتظار الموافقة',waitingApproval,waitingApproval?'warn':'good','طلبات تحتاج قرار من Approver'],
+['جاهزة للصرف',readyIssue,readyIssue?'warn':'good','طلبات معتمدة عند Warehouse Manager'],
+['Issued Today',issuedToday,issuedToday?'good':'','طلبات تم صرفها بتاريخ اليوم'],
+['Received Today',receivedToday,receivedToday?'good':'','كميات دخلت المخزون اليوم']
+].map(x=>`<div class="ops-card ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong><small>${esc(x[3])}</small></div>`).join('');
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
 document.getElementById('topStockOut').innerHTML=topOut.length?`<div class="mini-list">${topOut.map(r=>`<div class="mini-row"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)}</small>${meter(pct(r.total_consumed,maxOut),Number(r.usage_percent)>=60)}</div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty">لا يوجد Stock Out بعد</div>';
@@ -387,6 +411,12 @@ const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||
 const whRows=[...byWh.values()].sort((a,b)=>b.remaining-a.remaining);
 const maxRemaining=Math.max(...whRows.map(r=>r.remaining),1);
 document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-bars">${whRows.map(r=>`<div class="warehouse-row"><b>${esc(r.warehouse)}</b>${meter(pct(r.remaining,maxRemaining))}<span>${fmt(r.remaining)} left · ${fmt(r.out)} out</span></div>`).join('')}</div>`:'<div class="empty">لا توجد أرصدة</div>';
+const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
+document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="timeline">${focusRows.map(r=>`<div class="timeline-item"><span class="timeline-dot"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="dashboard-note">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
+const receiptRows=(wh.receipts||[]).slice(0,5);
+document.getElementById('recentReceipts').innerHTML=receiptRows.length?`<div class="timeline">${receiptRows.map(r=>{const qty=(r.items||[]).reduce((s,it)=>s+Number(it.quantity||0),0);const first=(r.items||[])[0]||{};return `<div class="timeline-item"><span class="timeline-dot"></span><div><b>${esc(r.order_number)} · ${esc(r.warehouse)}</b><small>${esc(first.name||'Materials')} · ${fmt(qty)} pcs · ${esc(r.supplier||'No supplier')}</small></div><small>${esc(r.receipt_date||r.created_at?.slice(0,10)||'')}</small></div>`}).join('')}</div>`:'<div class="empty">لا توجد استلامات بعد</div>';
+const riskRows=[...wh.stockUsage].filter(r=>Number(r.remaining)<=0||Number(r.usage_percent)>=60||Number(r.remaining)<=10).sort((a,b)=>Number(b.usage_percent)-Number(a.usage_percent)||Number(a.remaining)-Number(b.remaining)).slice(0,6);
+document.getElementById('inventoryRisks').innerHTML=riskRows.length?`<div class="risk-list">${riskRows.map(r=>`<div class="risk-row"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)} · Stock Out ${Number(r.usage_percent||0).toFixed(1)}%</small></div><strong>${fmt(r.remaining)}</strong></div>`).join('')}</div>`:'<div class="dashboard-note">لا توجد مواد حرجة حسب الاستهلاك أو الرصيد الحالي.</div>';
 const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort((a,b)=>Number(b.usage_percent)-Number(a.usage_percent)).slice(0,5);
 document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?compactTable([['المنطقة','area'],['المادة','material'],['MR','mr_issued_qty',(v)=>fmt(v)],['Used','rollout_used_qty',(v)=>fmt(v)],['%','usage_percent',(v)=>usageBar(v)]],rolloutRows):'<div class="empty">لا يوجد استهلاك Rollout مطابق بعد</div>';
 }
