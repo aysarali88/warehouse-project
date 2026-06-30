@@ -1,5 +1,6 @@
 import json
 import hmac
+import re
 from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -893,6 +894,39 @@ def normalize_usage_key(value: str) -> str:
     return "".join(ch.lower() for ch in (value or "") if ch.isalnum())
 
 
+def canonical_material_key(value: str) -> str:
+    key = normalize_usage_key(value)
+    if not key:
+        return ""
+
+    length_match = re.search(r"(\d+)m", key)
+    length = length_match.group(1) if length_match else ""
+    if "dropcable" in key and length:
+        return f"dropcable{length}m"
+    if "distributioncable" in key and length:
+        return f"distributioncable{length}m"
+    if "corecable" in key and length and ("4core" in key or key.endswith("4")):
+        return f"4corecable{length}m"
+
+    aliases = {
+        "subbox": ["subbox", "fat2810ss8a"],
+        "endbox": ["endbox", "fat2810se8a"],
+        "xbox": ["xbox", "ssc2802tx8b"],
+        "hubbox": ["hubbox", "fat2811sh4b"],
+        "atb": ["atb", "e00atb101"],
+        "bigtail": ["bigtail", "pigtail", "l0524vdd"],
+        "plumringhook": ["plumringhook", "itc3301p1"],
+        "stypeclamp": ["stypeclamp", "itc3103a1"],
+        "polemountingassembly": ["polemountingassembly", "e00dkba04"],
+        "plasticcablestoringassembly": ["plasticcablestoringassembly", "itc2102p2"],
+        "metalwedgeclamping": ["metalwedgeclamping", "itc3301p103"],
+    }
+    for canonical, values in aliases.items():
+        if any(alias in key for alias in values):
+            return canonical
+    return key
+
+
 def is_workflow_role(value: str) -> bool:
     return normalize_usage_key(value) in {"approver", "admin"}
 
@@ -932,7 +966,7 @@ def list_rollout_material_usage(db: Session = Depends(db_session)):
         if not area or not material:
             continue
         actual = record.actual or 0
-        material_key = normalize_usage_key(material)
+        material_key = canonical_material_key(material)
         key = (normalize_usage_key(area), material_key)
         rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
         rollout_material_usage[material_key] = rollout_material_usage.get(material_key, 0) + actual
@@ -944,7 +978,7 @@ def list_rollout_material_usage(db: Session = Depends(db_session)):
         issued = row["mr_issued_qty"] or 0
         if issued <= 0:
             continue
-        material_key = normalize_usage_key(material)
+        material_key = canonical_material_key(material)
         area_used = sum(
             rollout_area_usage.get((area_key, material_key), 0)
             for area_key in area_usage_keys(row.get("site_id", ""), row.get("site_address", ""))
