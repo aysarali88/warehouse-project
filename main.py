@@ -315,12 +315,37 @@ def row_to_record(row: RolloutRecord) -> dict:
     }
 
 
+FOUR_CORE_CABLE_NAMES = {
+    "EOSDC309I": "4-coreCable_70m",
+    "EOSDC309J": "4-coreCable_100m",
+    "EOSDC309K": "4-coreCable_150m",
+    "EOSDC309L": "4-coreCable_200m",
+    "EOSDC309M": "4-coreCable_300m",
+    "EOSDC309N": "4-coreCable_500m",
+}
+
+
+def material_display_name(name: str = "", sku: str = "") -> str:
+    sku_key = (sku or "").strip().upper()
+    if sku_key in FOUR_CORE_CABLE_NAMES:
+        return FOUR_CORE_CABLE_NAMES[sku_key]
+    text = (name or "").strip()
+    match = re.fullmatch(r"coreCable_(\d+m)-4", text, flags=re.IGNORECASE)
+    if match:
+        return f"4-coreCable_{match.group(1)}"
+    return text
+
+
+def product_display_name(product: Product | None) -> str:
+    return material_display_name(product.name, product.sku) if product else ""
+
+
 def product_to_dict(row: Product) -> dict:
     return {
         "id": row.id,
         "sku": row.sku,
         "category": row.category,
-        "name": row.name,
+        "name": material_display_name(row.name, row.sku),
         "item_detail": row.item_detail,
         "qr_code": row.qr_code,
         "unit": row.unit,
@@ -336,7 +361,7 @@ def balance_to_dict(row: StockBalance) -> dict:
         "warehouse": row.warehouse.name if row.warehouse else "",
         "product_id": row.product_id,
         "sku": row.product.sku if row.product else "",
-        "product": row.product.name if row.product else "",
+        "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
         "quantity": row.quantity,
     }
@@ -348,7 +373,7 @@ def technician_balance_to_dict(row: TechnicianBalance) -> dict:
         "technician": row.technician.name if row.technician else "",
         "product_id": row.product_id,
         "sku": row.product.sku if row.product else "",
-        "product": row.product.name if row.product else "",
+        "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
         "quantity": row.quantity,
     }
@@ -362,7 +387,7 @@ def movement_to_dict(row: StockMovement) -> dict:
         "warehouse": row.warehouse.name if row.warehouse else "",
         "technician": row.technician.name if row.technician else "",
         "sku": row.product.sku if row.product else "",
-        "product": row.product.name if row.product else "",
+        "product": product_display_name(row.product),
         "quantity": row.quantity,
         "serial_number": row.serial_number,
         "created_by": row.created_by,
@@ -378,7 +403,7 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
             {
                 "product_id": item.product_id,
                 "sku": product.sku if product else "",
-                "name": product.name if product else "",
+                "name": product_display_name(product),
                 "unit": product.unit if product else "",
                 "qr_code": product.qr_code if product else "",
                 "quantity": item.quantity,
@@ -478,7 +503,7 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition) -> str
         balance = stock_balance(db, row.warehouse_id, item.product_id)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
-            material_name = product.name or product.sku or f"product {product.id}"
+            material_name = product_display_name(product) or product.sku or f"product {product.id}"
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -675,10 +700,12 @@ def list_products(db: Session = Depends(db_session)):
 
 @app.post("/api/warehouse/products")
 def create_product(data: ProductIn, db: Session = Depends(db_session)):
+    sku = data.sku.strip()
+    name = material_display_name(data.name.strip(), sku)
     row = Product(
-        sku=data.sku.strip(),
+        sku=sku,
         category=data.category.strip(),
-        name=data.name.strip(),
+        name=name,
         item_detail=data.item_detail.strip(),
         qr_code=data.qr_code.strip(),
         unit=data.unit.strip() or "PCS",
@@ -792,7 +819,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
                 "warehouse": balance.warehouse.name if balance.warehouse else "",
                 "product_id": balance.product_id,
                 "sku": balance.product.sku if balance.product else "",
-                "product": balance.product.name if balance.product else "",
+                "product": product_display_name(balance.product),
                 "unit": balance.product.unit if balance.product else "",
                 "total_received": display_total,
                 "received_movements": total_received,
@@ -844,7 +871,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
                     "area": area,
                     "site_id": requisition.site_id,
                     "site_address": requisition.site_address,
-                    "material": item.description or (product.name if product else ""),
+                    "material": material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                     "sku": item.part_nbr or (product.sku if product else ""),
                     "mr_issued_qty": 0,
                     "current_app_balance": 0,
@@ -869,7 +896,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
                 "area": "",
                 "site_id": "",
                 "site_address": "",
-                "material": product.name if product else "",
+                "material": product_display_name(product),
                 "sku": product.sku if product else "",
                 "mr_issued_qty": 0,
                 "current_app_balance": 0,
@@ -879,7 +906,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
         )
         current["current_app_balance"] = balance.quantity or 0
         if not current["material"]:
-            current["material"] = product.name if product else ""
+            current["material"] = product_display_name(product)
         if not current["sku"]:
             current["sku"] = product.sku if product else ""
 
@@ -1121,7 +1148,7 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
                 product_id=item.product_id,
                 part_nbr=item.part_nbr or (product.sku if product else ""),
                 model=item.model,
-                description=item.description or (product.name if product else ""),
+                description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
                 remark=item.remark,
@@ -1283,7 +1310,7 @@ def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
 def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session)):
     require_warehouse(db, data.warehouse_id)
     sku = data.sku.strip()
-    name = data.name.strip()
+    name = material_display_name(data.name.strip(), sku)
     if not sku:
         raise HTTPException(status_code=400, detail="SKU is required")
     if not name:
@@ -1304,7 +1331,7 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
         db.add(product)
         db.flush()
     else:
-        product.name = name or product.name
+        product.name = material_display_name(name, sku) or product.name
         product.item_detail = product.item_detail or name
         product.unit = data.unit.strip() or product.unit or "PCS"
         product.qr_code = data.qr_code.strip() or product.qr_code
@@ -1389,7 +1416,7 @@ def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_sessi
     return {
         "success": True,
         "sku": product.sku,
-        "product": product.name,
+        "product": product_display_name(product),
         "old_quantity": old_quantity,
         "new_quantity": data.quantity,
         "delta": delta,
@@ -1419,7 +1446,7 @@ def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
         if balance.quantity < item.quantity:
             warehouse = db.get(Warehouse, data.warehouse_id)
             warehouse_name = warehouse.name if warehouse else str(data.warehouse_id)
-            material_name = product.name or product.sku or f"product {product.id}"
+            material_name = product_display_name(product) or product.sku or f"product {product.id}"
             raise HTTPException(
                 status_code=400,
                 detail=(
