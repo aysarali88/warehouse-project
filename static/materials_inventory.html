@@ -1,0 +1,587 @@
+﻿<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نظام إدارة مخزون المواد</title>
+<style>
+:root{--bg:#f4f7fa;--panel:#fff;--ink:#142235;--muted:#66788a;--line:#d8e3ec;--brand:#006d8f;--teal:#13a6a7;--green:#168a4a;--amber:#c87500;--red:#c93535;--side:250px;font-family:Tahoma,Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh}button,input,select,textarea{font:inherit}button{border:0;cursor:pointer}.app{display:grid;grid-template-columns:var(--side) 1fr;min-height:100vh}.side{background:#073f58;color:#fff;padding:22px 16px;display:flex;flex-direction:column;gap:18px}.brand{display:flex;align-items:center;gap:12px;padding-bottom:18px;border-bottom:1px solid rgba(255,255,255,.18)}.logo{width:42px;height:42px;border-radius:8px;background:#fff;color:#073f58;display:grid;place-items:center;font-weight:900}.brand h1{font-size:17px;margin:0}.brand small{display:block;color:rgba(255,255,255,.68);font-size:11px;margin-top:4px}.nav{display:grid;gap:8px}.nav button{height:44px;border-radius:8px;background:transparent;color:rgba(255,255,255,.76);text-align:right;padding:0 12px;font-weight:800}.nav button.active{background:rgba(255,255,255,.14);color:#fff}.main{padding:22px;overflow:auto}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}.top h2{margin:0;font-size:26px}.top p{margin:6px 0 0;color:var(--muted);font-size:13px}.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{height:38px;border-radius:7px;padding:0 14px;font-weight:900;display:inline-flex;align-items:center;justify-content:center;gap:7px}.primary{background:var(--brand);color:#fff}.soft{background:#e8f3f7;color:var(--brand);border:1px solid #c9e1ea}.danger{background:#fdecec;color:var(--red);border:1px solid #f4c9c9}.view{display:none;gap:16px;flex-direction:column}.view.active{display:flex}.grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(4,minmax(0,1fr))}.two{grid-template-columns:repeat(2,minmax(0,1fr))}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 2px 10px rgba(23,34,52,.03);min-width:0}.card h3{margin:0 0 12px;color:var(--brand);font-size:15px}.kpi{min-height:104px;display:flex;align-items:center;justify-content:space-between}.kpi small{color:var(--muted);font-weight:900}.kpi strong{display:block;font-size:30px;margin-top:8px}.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.field{display:grid;gap:5px}.full{grid-column:1/-1}.field label{font-size:12px;color:var(--muted);font-weight:900}input,select,textarea{border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);padding:0 10px;min-width:0}input,select{height:39px}textarea{min-height:92px;padding:10px;resize:vertical;direction:ltr;text-align:left}input:focus,select:focus,textarea:focus{outline:2px solid rgba(19,166,167,.16);border-color:var(--teal)}.hint{font-size:12px;color:var(--muted);line-height:1.7}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:7px}table{width:100%;border-collapse:collapse;min-width:760px;background:#fff}th,td{padding:10px 11px;border-bottom:1px solid var(--line);font-size:12px;text-align:right;white-space:nowrap}th{background:#f0f5f8;color:#3d5065;font-weight:900}.pill{border-radius:999px;padding:3px 8px;font-weight:900;font-size:11px}.receive{background:#e7f6ed;color:var(--green)}.issue_to_technician{background:#fdecec;color:var(--red)}.bulk{background:#e8f3f7;color:var(--brand)}.serialized{background:#fff3df;color:var(--amber)}.empty{border:1px dashed var(--line);border-radius:7px;padding:22px;text-align:center;color:var(--muted)}.toast{position:fixed;left:18px;bottom:18px;background:#102638;color:#fff;padding:12px 14px;border-radius:8px;opacity:0;transform:translateY(10px);transition:.2s;z-index:20}.toast.show{opacity:1;transform:none}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.tab{height:34px;border-radius:7px;background:#e8f3f7;color:var(--brand);border:1px solid #c9e1ea;padding:0 12px;font-weight:900}.tab.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.mr-sheet{background:#fff;border:1px solid #111;color:#000;font-family:Arial,Tahoma,sans-serif;width:1120px;max-width:100%;margin:0 auto;overflow:hidden}.mr-head{display:grid;grid-template-columns:260px 1fr 355px;min-height:150px;border-bottom:1px solid #111}.mr-logo{padding:14px;border-left:1px solid #111;display:flex;align-items:center;justify-content:center}.mr-logo img{display:block;max-width:230px;max-height:120px;object-fit:contain}.mr-title{display:grid;place-items:center;font-size:34px;font-weight:900}.mr-side{display:grid;grid-template-columns:1fr 140px}.mr-side div{border-bottom:1px solid #111;border-right:1px solid #111;padding:14px;text-align:center;font-weight:900}.mr-purple{background:#c48cf3}.mr-grid{display:grid;grid-template-columns:180px 1fr 150px 1fr;border-bottom:1px solid #111}.mr-grid div{border-left:1px solid #111;padding:6px 8px;min-height:36px;font-weight:900}.mr-grid .value{font-weight:700}.mr-items table{min-width:100%;border:0}.mr-items th,.mr-items td{border:1px solid #111;color:#000;background:#fff;text-align:center;font-size:13px}.mr-sign{display:grid;grid-template-columns:1fr 1fr}.mr-sign>div{border-top:1px solid #111;border-left:1px solid #111}.mr-sign h4{margin:0;padding:9px;text-align:center;border-bottom:1px solid #111}.signature-pad{width:100%;height:110px;border:1px solid var(--line);border-radius:7px;background:#fff;touch-action:none}.print-only{display:none}.signature-img{display:block;max-width:210px;max-height:70px;object-fit:contain;margin:auto}.mr-list{max-height:280px;overflow:auto}.mr-line{display:grid;grid-template-columns:1.5fr 90px 1fr 42px;gap:8px;align-items:end;margin-bottom:8px}.mr-line button{height:39px;border-radius:7px;background:#fdecec;color:var(--red);font-weight:900}
+.mr-head{grid-template-columns:355px 1fr 260px;grid-template-areas:"order title logo";min-height:156px}.mr-logo{grid-area:logo;border-left:0;border-right:1px solid #111}.mr-logo img{max-width:215px;max-height:88px}.mr-title{grid-area:title;border-right:1px solid #111;border-left:1px solid #111;font-size:32px}.mr-order{grid-area:order;display:grid;grid-template-columns:140px 1fr}.mr-order div{border-bottom:1px solid #111;border-left:1px solid #111;display:grid;place-items:center;min-height:52px;font-weight:900}.mr-order .mr-purple{background:#c48cf3}.mr-info{width:100%;border-collapse:collapse;table-layout:fixed}.mr-info th,.mr-info td{border:1px solid #111;padding:8px 10px;min-height:34px;text-align:right;font-weight:900;background:#fff;color:#000}.mr-info td{font-weight:700}.mr-info .blank{background:#fff}.mr-items table,.mr-sign table,.mr-info{min-width:0!important}.mr-items th,.mr-items td{height:36px}.mr-sign{grid-template-columns:minmax(0,1fr) minmax(0,1fr);overflow:hidden}.mr-sign>div{min-width:0}.mr-sign table{width:100%;border-collapse:collapse;table-layout:fixed}.mr-sign th,.mr-sign td{border:1px solid #d8e3ec;height:38px;padding:7px 10px;text-align:right;color:#33485d;overflow:hidden;text-overflow:ellipsis}.mr-sign th{width:210px;background:#eef3f7;font-weight:900}.mr-sign .sig-row th,.mr-sign .sig-row td{height:88px}.mr-sign .sig-row td{text-align:center;vertical-align:middle}.mr-sign h4{background:#fff;color:#000}.usage-cell{min-width:190px}.usage-bar{height:10px;background:#e8eef3;border-radius:99px;overflow:hidden;margin-bottom:5px}.usage-fill{height:100%;background:var(--green)}.usage-fill.mid{background:var(--amber)}.usage-fill.high{background:var(--red)}.usage-label{font-size:11px;color:var(--muted);font-weight:900}.click-row{cursor:pointer}.click-row:hover td{background:#eef7fb}.modal{position:fixed;inset:0;background:rgba(10,24,38,.55);display:none;z-index:50;padding:24px;overflow:auto}.modal.show{display:block}.modal-box{background:#fff;border-radius:8px;max-width:1320px;margin:auto;padding:14px;box-shadow:0 14px 40px rgba(0,0,0,.24);overflow:auto}.modal-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.modal-head h3{margin:0;color:var(--brand)}.modal-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media print{body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}.side,.top,.no-print{display:none!important}.app{display:block}.main{padding:0}.view{display:none!important}.view.printing{display:block!important}.card{border:0;box-shadow:none;padding:0}.mr-sheet{border:1px solid #111;width:281mm;max-width:281mm;margin:0 auto;page-break-inside:avoid;break-inside:avoid}.print-only{display:block}.screen-only{display:none!important}body.print-modal .app,body.print-modal .toast{display:none!important}body.print-modal #mrModal{display:block!important;position:static;background:#fff;padding:0}body.print-modal .modal-box{box-shadow:none;max-width:none;margin:0;padding:0;border-radius:0}body.print-modal .modal-head{display:none!important}body.fit-one-page .mr-sheet{height:194mm;max-height:194mm}body.fit-one-page .mr-head{min-height:32mm}body.fit-one-page .mr-logo img{max-height:18mm;max-width:46mm}body.fit-one-page .mr-title{font-size:22px}body.fit-one-page .mr-order div{min-height:10.5mm;font-size:12px}body.fit-one-page .mr-info th,body.fit-one-page .mr-info td{padding:4px 6px;height:8mm;font-size:11px}body.fit-one-page .mr-items th,body.fit-one-page .mr-items td{height:8mm;padding:4px 5px;font-size:11px}body.fit-one-page .mr-sign h4{padding:5px;font-size:12px}body.fit-one-page .mr-sign th,body.fit-one-page .mr-sign td{height:7.5mm;padding:4px 6px;font-size:10.5px}body.fit-one-page .mr-sign th{width:42mm}body.fit-one-page .mr-sign .sig-row th,body.fit-one-page .mr-sign .sig-row td{height:22mm}body.fit-one-page .signature-img{max-height:17mm;max-width:46mm}@page{size:A4 landscape;margin:8mm}}
+@media(max-width:960px){.app{display:block}.side{position:sticky;top:0;z-index:5}.nav{grid-template-columns:repeat(3,1fr)}.main{padding:14px}.top{display:grid}.kpis,.two,.three,.form{grid-template-columns:1fr}.brand{padding-bottom:12px}.mr-head,.mr-grid,.mr-sign,.mr-line{grid-template-columns:1fr}.mr-title{font-size:22px;padding:18px}.mr-side{grid-template-columns:1fr 1fr}}
+.executive{display:grid;gap:16px}.executive-hero{position:relative;overflow:hidden;border-radius:8px;padding:22px;color:#fff;background:linear-gradient(135deg,#08384f 0%,#0b6f86 42%,#15814c 100%);box-shadow:0 14px 36px rgba(9,55,76,.22)}.executive-hero:before{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 0%,rgba(255,255,255,.14) 42%,transparent 58%);transform:translateX(60%);animation:shine 8s ease-in-out infinite}.executive-hero>*{position:relative}.hero-top{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.hero-title small{display:block;color:rgba(255,255,255,.76);font-weight:900;margin-bottom:7px}.hero-title h3{margin:0;font-size:28px;color:#fff}.hero-title p{margin:8px 0 0;color:rgba(255,255,255,.82);line-height:1.7}.hero-badge{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:10px 13px;font-weight:900;white-space:nowrap}.hero-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px}.hero-metric{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:14px;backdrop-filter:blur(8px)}.hero-metric span{display:block;color:rgba(255,255,255,.78);font-size:12px;font-weight:900}.hero-metric strong{display:block;font-size:29px;margin-top:7px}.dash-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}.dash-panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:0 10px 28px rgba(23,34,52,.06);min-width:0}.dash-panel h3{margin:0 0 12px;color:#0a5972;font-size:15px}.status-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.status-tile{border-radius:8px;padding:14px;border:1px solid var(--line);background:#f8fbfd}.status-tile.good{background:#ecf8f1;border-color:#c8ead4}.status-tile.warn{background:#fff8e9;border-color:#f2dba4}.status-tile.bad{background:#fff0f0;border-color:#f2c2c2}.status-tile span{display:block;color:#5d7287;font-size:12px;font-weight:900}.status-tile strong{display:block;font-size:24px;margin-top:7px}.mini-list{display:grid;gap:10px}.mini-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}.mini-row b{font-size:12px}.mini-row small{display:block;color:var(--muted);margin-top:3px}.meter{height:9px;background:#e8eef3;border-radius:99px;overflow:hidden;margin-top:8px}.meter i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#0b86a6,#19a463)}.meter i.hot{background:linear-gradient(90deg,#e0a11b,#c93535)}.warehouse-bars{display:grid;gap:12px}.warehouse-row{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:center}.warehouse-row b{font-size:12px}.warehouse-row span{font-size:12px;color:var(--muted);font-weight:900}.sparkline{height:56px;display:flex;align-items:end;gap:5px;border-bottom:1px solid #d9e4ed;padding:0 4px}.sparkline i{flex:1;min-width:6px;border-radius:5px 5px 0 0;background:linear-gradient(180deg,#16a0b4,#168a4a);box-shadow:0 4px 12px rgba(22,138,74,.2)}.mr-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.mr-status div{border:1px solid var(--line);border-radius:8px;padding:13px;background:#f8fbfd}.mr-status span{display:block;color:var(--muted);font-size:12px;font-weight:900}.mr-status strong{display:block;font-size:24px;margin-top:7px}.executive-table table{min-width:100%}.executive-table th,.executive-table td{font-size:12px}.pulse-dot{width:10px;height:10px;border-radius:50%;background:#39d275;display:inline-block;margin-left:7px;box-shadow:0 0 0 5px rgba(57,210,117,.16)}.notify-badge,.user-chip{height:38px;border-radius:7px;padding:0 12px;display:inline-flex;align-items:center;gap:7px;background:#fff8e9;color:#a46400;border:1px solid #f2dba4;font-weight:900}.notify-badge.hot{background:#fdecec;color:var(--red);border-color:#f4c9c9}.user-chip{background:#fff;color:var(--brand);border-color:#c9e1ea}.workflow-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.status-chip{border-radius:999px;padding:4px 9px;font-weight:900;font-size:11px;display:inline-flex}.status-pending_approval{background:#fff8e9;color:#a46400}.status-approved{background:#e8f3f7;color:var(--brand)}.status-issued{background:#e7f6ed;color:var(--green)}.status-rejected{background:#fdecec;color:var(--red)}.status-draft{background:#eef3f7;color:#526579}.row-actions{display:flex;gap:6px;justify-content:flex-start}.row-actions .btn{height:30px;padding:0 9px;font-size:11px}.login-screen{min-height:100vh;display:grid;place-items:center;padding:22px;background:linear-gradient(135deg,#073f58,#0b6f86 48%,#168a4a)}.login-card{width:min(430px,100%);background:#fff;border-radius:8px;padding:24px;box-shadow:0 24px 70px rgba(0,0,0,.24)}.login-card h2{margin:0 0 6px;color:#073f58}.login-card p{margin:0 0 18px;color:var(--muted)}.login-card .field{margin-bottom:12px}.login-help{margin-top:12px;border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:12px;line-height:1.8}.hidden{display:none!important}@keyframes shine{0%,62%{transform:translateX(70%)}78%,100%{transform:translateX(-70%)}}@media(max-width:960px){.hero-metrics,.dash-grid,.status-strip,.mr-status,.workflow-grid{grid-template-columns:1fr}.hero-top{display:grid}.warehouse-row{grid-template-columns:1fr}}
+@media print{
+  .mr-sheet{width:281mm!important;max-width:281mm!important;height:auto!important;max-height:none!important;overflow:visible!important}
+  .mr-head{grid-template-columns:355px 1fr 260px!important;grid-template-areas:"order title logo"!important}
+  .mr-sign{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+  .mr-sign>div{min-width:0!important}
+  .mr-sign table{width:100%!important;min-width:0!important;table-layout:fixed!important}
+  .mr-items table,.mr-info{min-width:0!important}
+  body.fit-one-page .mr-sign{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+}
+</style>
+</head>
+<body>
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <h2>Warehouse Login</h2>
+    <p>ادخل بحسابك لعرض الصلاحيات الخاصة بك.</p>
+    <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="admin / requester / approval / warehouse"></div>
+    <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
+    <button class="btn primary full" onclick="loginApp()">Login</button>
+    <div class="login-help">
+      Admin: <b>admin</b> / <b>Admin@123</b><br>
+      Requester: <b>requester</b> / <b>Requester@123</b><br>
+      Approval: <b>approval</b> / <b>Approval@123</b><br>
+      Warehouse: <b>warehouse</b> / <b>Warehouse@123</b>
+    </div>
+  </div>
+</div>
+<div class="app hidden" id="appShell">
+<aside class="side">
+  <div class="brand">
+    <div class="logo">WH</div>
+    <div><h1>إدارة مخزون المواد</h1><small>Materials Inventory Management</small></div>
+  </div>
+  <nav class="nav">
+    <button class="active" data-view="dashboard">لوحة التحكم</button>
+    <button data-view="setup">التأسيس</button>
+    <button data-view="receive">استلام مخزون</button>
+    <button data-view="mr">Material Requisition</button>
+    <button data-view="issue">صرف لفني</button>
+    <button data-view="balances">المخزون</button>
+    <button data-view="audit">الحركات والتدقيق</button>
+  </nav>
+</aside>
+<main class="main">
+  <div class="top">
+    <div>
+      <h2 id="pageTitle">لوحة التحكم</h2>
+      <p id="pageSub">متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.</p>
+    </div>
+    <div class="actions">
+      <span class="user-chip" id="currentUserLabel">User</span>
+      <span class="notify-badge" id="approvalBadge">0 approvals</span>
+      <button class="btn soft" onclick="logoutApp()">خروج</button>
+      <button class="btn soft" onclick="refreshWarehouse()">تحديث</button>
+      <a class="btn soft admin-only" href="/docs" target="_blank">API</a>
+    </div>
+  </div>
+
+  <section class="view active" id="dashboard">
+    <div class="executive">
+      <div class="executive-hero">
+        <div class="hero-top">
+          <div class="hero-title">
+            <small><span class="pulse-dot"></span>Warehouse Command Center</small>
+            <h3>لوحة إدارة مخزون المواد</h3>
+            <p>ملخص تنفيذي سريع للمخزون، الصرف، طلبات MR، واستهلاك Rollout حسب المناطق.</p>
+          </div>
+          <div class="hero-badge" id="dashboardHealth">System healthy</div>
+        </div>
+        <div class="hero-metrics" id="summaryKpis"></div>
+      </div>
+      <div class="status-strip" id="dashboardStatus"></div>
+      <div class="dash-grid">
+        <div class="dash-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
+        <div class="dash-panel"><h3>حالة طلبات MR</h3><div id="mrStatusPanel"></div></div>
+      </div>
+      <div class="dash-grid">
+        <div class="dash-panel"><h3>مخزون المستودعات</h3><div id="warehouseOverview"></div></div>
+        <div class="dash-panel"><h3>Rollout Consumption</h3><div id="rolloutOverview"></div></div>
+      </div>
+      <div class="dash-grid">
+        <div class="dash-panel"><h3>أحدث الحركات</h3><div id="recentMovements"></div></div>
+        <div class="dash-panel"><h3>تنبيهات المخزون</h3><div id="lowStock"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="setup">
+    <div class="grid two">
+      <div class="card">
+        <h3>إضافة مستودع</h3>
+        <div class="form">
+          <div class="field full"><label>اسم المستودع</label><input id="whName" placeholder="مثال: Main Warehouse"></div>
+          <div class="field full"><label>الموقع</label><input id="whLocation" placeholder="مثال: HQ"></div>
+          <button class="btn primary full" onclick="createWarehouse()">حفظ المستودع</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>إضافة فني</h3>
+        <div class="form">
+          <div class="field full"><label>اسم الفني</label><input id="techName" placeholder="اسم الفني"></div>
+          <div class="field full"><label>الهاتف</label><input id="techPhone" placeholder="اختياري"></div>
+          <button class="btn primary full" onclick="createTechnician()">حفظ الفني</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid three">
+      <div class="card"><h3>المستودعات</h3><div id="warehousesTable"></div></div>
+      <div class="card"><h3>الفنيون</h3><div id="techniciansTable"></div></div>
+      <div class="card"><h3>المواد</h3><div id="productsTable"></div></div>
+    </div>
+  </section>
+
+  <section class="view" id="receive">
+    <div class="grid two">
+      <div class="card">
+        <h3>استلام مخزون</h3>
+        <div class="form">
+          <div class="field"><label>تاريخ الاستلام</label><input id="receiveDate" type="date"></div>
+          <div class="field"><label>رقم الايصال</label><input id="receiveReceipt" placeholder="مثال: GRN-001"></div>
+          <div class="field"><label>المورد</label><input id="receiveSupplier" placeholder="اسم المورد"></div>
+          <div class="field"><label>اسم المستودع</label><select id="receiveWarehouse"></select></div>
+          <div class="field"><label>SKU</label><input id="receiveSku" placeholder="E00ATB101"></div>
+          <div class="field"><label>QR Code</label><input id="receiveQr" placeholder="اختياري"></div>
+          <div class="field full"><label>اسم المادة</label><input id="receiveMaterialName" placeholder="ATB / Cable / Box"></div>
+          <div class="field"><label>الكمية</label><input id="receiveQty" type="number" min="1" value="1"></div>
+          <div class="field"><label>الوحدة</label><input id="receiveUnit" value="PCS"></div>
+          <button class="btn primary full" onclick="receiveInventory()">إضافة للمخزون</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>آخر مادة مستلمة</h3>
+        <div id="lastReceivedItem"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>سجل استلام المخزون</h3>
+      <div id="receiveHistory"></div>
+    </div>
+    <div class="card">
+      <h3>تسوية مخزون</h3>
+      <div class="form">
+        <div class="field"><label>اسم المستودع</label><select id="adjustWarehouse" onchange="renderAdjustHint()"></select></div>
+        <div class="field"><label>SKU</label><input id="adjustSku" placeholder="E00ATB101" oninput="renderAdjustHint()"></div>
+        <div class="field"><label>الرصيد الصحيح</label><input id="adjustQty" type="number" min="0" value="0"></div>
+        <div class="field"><label>السبب</label><input id="adjustNote" placeholder="مثال: إلغاء تجربة / تصحيح جرد"></div>
+        <div class="field full"><div class="hint" id="adjustHint"></div></div>
+        <button class="btn danger full" onclick="adjustInventory()">حفظ التسوية</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="mr">
+    <div class="grid two no-print requester-work">
+      <div class="card">
+        <h3>إنشاء Material Requisition</h3>
+        <div class="form">
+          <div class="field"><label>Creation Date</label><input id="mrCreationDate" type="date"></div>
+          <div class="field"><label>Warehouse name</label><select id="mrWarehouse" onchange="renderMrLines();renderMrPreview()"></select></div>
+          <div class="field"><label>Entity</label><input id="mrEntity" value="Rollout"></div>
+          <div class="field"><label>Project Name</label><input id="mrProject" value="FTTH"></div>
+          <div class="field"><label>Site ID</label><input id="mrSiteId" placeholder="Maqawba"></div>
+          <div class="field"><label>Site Address</label><input id="mrSiteAddress" placeholder="Misurata"></div>
+          <div class="field"><label>WO No</label><input id="mrWoNo" placeholder="HLC"></div>
+          <div class="field"><label>Product Domain</label><input id="mrDomain" value="Passive"></div>
+          <div class="field"><label>Team Leader</label><input id="mrTeamLeader"></div>
+          <div class="field"><label>Receiver/TEL</label><input id="mrReceiverTel"></div>
+          <div class="field"><label>Request Shipment Time</label><input id="mrShipTime" type="date"></div>
+          <div class="field"><label>Request arrived site time</label><input id="mrArriveTime" type="date"></div>
+          <div class="field"><label>Requester Name</label><input id="mrRequesterName" placeholder="Mohammed Yousef"></div>
+          <div class="field"><label>Requester Title</label><input id="mrRequesterTitle"></div>
+          <div class="field"><label>Approver Name</label><input id="mrReceiverName"></div>
+          <div class="field"><label>Approver Title</label><input id="mrReceiverTitle"></div>
+          <div class="field full"><label>Requester Comment</label><input id="mrRequesterComment" placeholder="Material to be sent to Misurata-(Maqawba )"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>بنود المواد</h3>
+        <div id="mrLines" class="mr-list"></div>
+        <button class="btn soft" onclick="addMrLine()">إضافة بند</button>
+        <button class="btn primary" onclick="saveMr()">Submit for Approval</button>
+      </div>
+    </div>
+
+    <div class="workflow-grid no-print">
+      <div class="card approver-work">
+        <h3>My Approval Inbox</h3>
+        <div class="hint">طلبات MR المرسلة للمستخدم الحالي للموافقة.</div>
+        <div id="approvalInbox"></div>
+      </div>
+      <div class="card warehouse-work">
+        <h3>Warehouse Queue</h3>
+        <div class="hint">طلبات MR المعتمدة والجاهزة للصرف من مسؤول المستودع.</div>
+        <div id="warehouseQueue"></div>
+      </div>
+    </div>
+
+    <div class="grid two no-print requester-work">
+      <div class="card">
+        <h3>توقيع Requester</h3>
+        <div class="form">
+          <canvas id="requesterPad" class="signature-pad full"></canvas>
+          <button class="btn soft" onclick="clearSignature('requester')">مسح التوقيع</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>توقيع Approver</h3>
+        <div class="form">
+          <canvas id="receiverPad" class="signature-pad full"></canvas>
+          <button class="btn soft" onclick="clearSignature('receiver')">مسح التوقيع</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card requester-work">
+      <div class="actions no-print" style="margin-bottom:12px">
+        <button class="btn primary" onclick="printMr()">طباعة MR</button>
+        <button class="btn soft" onclick="downloadPreviewPdf()">تنزيل PDF</button>
+        <button class="btn soft" onclick="refreshWarehouse()">تحديث</button>
+      </div>
+      <div id="mrPreview" class="mr-sheet"></div>
+    </div>
+
+    <div class="card no-print">
+      <h3>طلبات MR المحفوظة</h3>
+      <div id="mrTable"></div>
+    </div>
+  </section>
+
+  <section class="view" id="issue">
+    <div class="card">
+      <h3>Issue to Technician - صرف لفني</h3>
+      <div class="form">
+        <div class="field"><label>المستودع</label><select id="issueWarehouse"></select></div>
+        <div class="field"><label>الفني</label><select id="issueTechnician"></select></div>
+        <div class="field"><label>المادة</label><select id="issueProduct" onchange="syncSerialHint('issue')"></select></div>
+        <div class="field"><label>الكمية</label><input id="issueQty" type="number" min="1" value="1"></div>
+        <div class="field full"><label>Serial Numbers</label><textarea id="issueSerials" placeholder="للمواد serialized فقط: كل سيريال في سطر"></textarea><div class="hint" id="issueHint"></div></div>
+        <button class="btn primary full" onclick="issueStock()">تأكيد الصرف</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="balances">
+    <div class="tabs">
+      <button class="tab active" data-balance="stockBalances">مخزون المستودعات</button>
+      <button class="tab" data-balance="technicianBalances">مخزون الفنيين</button>
+      <button class="tab" data-balance="rolloutUsage">Rollout Usage</button>
+    </div>
+    <div class="card" id="stockBalances"><h3>مخزون المستودعات</h3><div id="stockBalancesTable"></div></div>
+    <div class="card" id="technicianBalances" style="display:none">
+      <div class="top" style="margin-bottom:12px">
+        <div>
+          <h3>مخزون الفنيين</h3>
+          <p>اضغط على الصف لعرض MR كامل.</p>
+        </div>
+      </div>
+      <div id="technicianBalancesTable"></div>
+    </div>
+    <div class="card" id="rolloutUsage" style="display:none">
+      <div class="top" style="margin-bottom:12px">
+        <div>
+          <h3>Rollout Usage</h3>
+          <p>مقارنة المواد المصروفة للـ MR مع الاستهلاك المسجل في Daily Progress حسب المنطقة.</p>
+        </div>
+        <button class="btn soft" onclick="refreshWarehouse()">تحديث</button>
+      </div>
+      <div id="rolloutUsageTable"></div>
+    </div>
+  </section>
+
+  <section class="view" id="audit">
+    <div class="grid two">
+      <div class="card"><h3>Stock Movements</h3><div id="movementsTable"></div></div>
+      <div class="card"><h3>Audit Log</h3><div id="auditTable"></div></div>
+    </div>
+  </section>
+</main>
+</div>
+<div class="modal" id="mrModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="mrModalTitle">Material Requisition</h3>
+      <div class="modal-actions">
+        <button class="btn soft" onclick="downloadModalPdf()">تنزيل PDF</button>
+        <button class="btn soft" onclick="printModalMr()">طباعة</button>
+        <button class="btn danger" onclick="closeMrModal()">إغلاق</button>
+      </div>
+    </div>
+    <div id="mrModalBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,movements:[],audit:[],mrs:[],receipts:[]};
+let mrLineId=0;
+let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
+let activeUser=session?.name||'';
+let activeRole=session?.role||'';
+let lastApprovalCount=0;
+const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Requisition','نموذج طلب مواد مطابق لصيغة BOM - MR مع طباعة وتوقيع إلكتروني.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.']};
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
+function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
+async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
+function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+function fillSelect(id,rows,label){document.getElementById(id).innerHTML='<option value="">اختر</option>'+rows.map(r=>`<option value="${r.id}">${esc(label(r))}</option>`).join('')}
+function productById(id){return wh.products.find(p=>String(p.id)===String(id))}
+function serialLines(id){return document.getElementById(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
+async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value})});session=data.user;localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
+function logoutApp(){localStorage.removeItem('warehouseSession');localStorage.removeItem('warehouseBootstrap');session=null;activeUser='';activeRole='';document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
+function switchView(view){const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1]}
+function roleKey(){return normalizeText(userRole())}
+function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',roleKey()==='warehousemanager'&&btn.dataset.view!=='mr'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager')switchView('mr')}
+function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();pollNotifications(false)}
+function userRole(){return activeRole||'Requester'}
+function canApprove(){return ['approver','admin'].includes(roleKey())}
+function canCreateMr(){return ['requester','admin'].includes(roleKey())}
+function canViewAll(){return ['requester','approver','admin'].includes(roleKey())}
+function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=session?.role||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver'}
+function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
+function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
+function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
+function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
+function applyWarehouseData(data){wh={summary:data.summary||{},warehouses:data.warehouses||[],technicians:data.technicians||[],products:data.products||[],stockBalances:data.stockBalances||[],stockUsage:data.stockUsage||[],technicianBalances:data.technicianBalances||[],rolloutUsage:data.rolloutUsage||[],rolloutRecords:data.rolloutRecords||0,movements:data.movements||[],audit:data.audit||[],mrs:data.mrs||[],receipts:data.receipts||[]};renderWarehouse()}
+async function loadWarehouse(){try{const cached=localStorage.getItem('warehouseBootstrap');if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data)}catch(e){toast(e.message)}}
+async function refreshWarehouse(){try{localStorage.removeItem('warehouseBootstrap');toast('جاري تحديث البيانات...');const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data);toast('تم تحديث البيانات')}catch(e){toast(e.message)}}
+function syncWarehouseLater(){localStorage.removeItem('warehouseBootstrap');setTimeout(()=>loadWarehouse(),80)}
+function upsertLocalMr(req){if(!req)return;const rows=wh.mrs||[];const i=rows.findIndex(r=>String(r.id)===String(req.id));if(i>=0)rows[i]=req;else rows.unshift(req);wh.mrs=rows;renderWarehouse()}
+function pct(v,total){return total?Math.max(0,Math.min(100,(Number(v||0)/Number(total||0))*100)):0}
+function meter(width,hot=false){return `<div class="meter"><i class="${hot?'hot':''}" style="width:${Math.max(2,Math.min(100,Number(width||0)))}%"></i></div>`}
+function compactTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap executive-table"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+function renderWarehouseQueuesBadge(){let count=0,label='notifications';if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length;label='workflow'}else if(roleKey()==='approver'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'&&isAssignedToCurrent(r)).length;label='MR'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved').length;label='ready issue'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
+function setApprovalBadge(count,label='notifications'){const badge=document.getElementById('approvalBadge');if(!badge)return;badge.textContent=`${fmt(count)} ${label}`;badge.className='notify-badge'+(Number(count)?' hot':'')}
+function pendingForRequester(){return (wh.mrs||[]).filter(r=>['pending_approval','approved'].includes(r.status)&&normalizeText(r.requester_name)===normalizeText(activeUser)).length}
+async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='MR workflow needs attention'}else if(roleKey()==='approver'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.approval_count||0;label='MR';msg='New MR waiting for your approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.warehouse_queue_count||0;label='ready issue';msg='Approved MR ready for issue'}else{count=pendingForRequester();label='pending';msg='Your MR is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
+function workflowActions(req,type){if(type==='approval'){return `<div class="row-actions"><button class="btn primary" onclick="approveMr(${req.id})">Approve</button><button class="btn danger" onclick="rejectMr(${req.id})">Reject</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}return `<div class="row-actions"><button class="btn primary" onclick="issueApprovedMr(${req.id})">Issue</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}
+function renderWorkflowQueues(){
+renderWarehouseQueuesBadge();
+const inbox=(wh.mrs||[]).filter(r=>r.status==='pending_approval'&&(userRole()==='Admin'||isAssignedToCurrent(r)));
+const queue=(wh.mrs||[]).filter(r=>r.status==='approved');
+const inboxEl=document.getElementById('approvalInbox');
+const queueEl=document.getElementById('warehouseQueue');
+if(inboxEl)inboxEl.innerHTML=canApprove()?compactTable([['Order','order_number'],['Area','site_id'],['Requester','requester_name'],['Warehouse','warehouse'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>workflowActions(r,'approval')]],inbox):'<div class="empty">Approver فقط يقدر يعتمد الطلبات.</div>';
+if(queueEl)queueEl.innerHTML=canManageWarehouse()?compactTable([['Order','order_number'],['Area','site_id'],['Approver','receiver_name'],['Warehouse','warehouse'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>workflowActions(r,'warehouse')]],queue):'<div class="empty">Warehouse Manager فقط يقدر يشوف طلبات الصرف الجاهزة.</div>';
+}
+async function approveMr(id){if(!canApprove()){toast('Approver فقط يقدر يعتمد MR');return}try{toast('جاري اعتماد MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Approved'})});toast('MR approved');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
+async function rejectMr(id){if(!canApprove()){toast('Approver فقط يقدر يرفض MR');return}const comment=prompt('سبب الرفض؟')||'';try{toast('جاري رفض MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/reject`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('MR rejected');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
+async function issueApprovedMr(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يصرف المواد');return}try{toast('جاري صرف المواد...');const r=await api(`/api/warehouse/material-requisitions/${id}/issue`,{method:'POST'});toast('Materials issued '+(r.issue_order||''));upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
+function renderExecutiveDashboard(){
+const totalReceived=wh.stockUsage.reduce((s,r)=>s+Number(r.total_received||0),0);
+const totalOut=wh.stockUsage.reduce((s,r)=>s+Number(r.total_consumed||0),0);
+const totalRemaining=wh.stockUsage.reduce((s,r)=>s+Number(r.remaining||0),0);
+const usage=pct(totalOut,totalReceived||totalOut+totalRemaining);
+const lowRows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quantity)<=Number((wh.products.find(p=>p.id===b.product_id)||{}).min_stock||0));
+const issuedMrs=wh.mrs.filter(r=>r.status==='issued').length;
+const approvedMrs=wh.mrs.filter(r=>r.status==='approved'||r.status==='signed').length;
+const pendingMrs=wh.mrs.filter(r=>r.status==='pending_approval'||r.status==='draft').length;
+const rolloutUsed=wh.rolloutUsage.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);
+document.getElementById('dashboardHealth').textContent=lowRows.length?`${lowRows.length} Stock Alert`:'System healthy';
+document.getElementById('summaryKpis').innerHTML=[
+['Total Received',fmt(totalReceived)],['Stock Out',fmt(totalOut)],['Remaining',fmt(totalRemaining)],['Usage',usage.toFixed(1)+'%']
+].map(x=>`<div class="hero-metric"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong></div>`).join('');
+document.getElementById('dashboardStatus').innerHTML=[
+['المستودعات',wh.summary.warehouses,'good'],['مواد منخفضة',lowRows.length,lowRows.length?'bad':'good'],['Rollout Used',rolloutUsed,rolloutUsed?'warn':'good']
+].map(x=>`<div class="status-tile ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
+const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
+const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
+document.getElementById('topStockOut').innerHTML=topOut.length?`<div class="mini-list">${topOut.map(r=>`<div class="mini-row"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)}</small>${meter(pct(r.total_consumed,maxOut),Number(r.usage_percent)>=60)}</div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty">لا يوجد Stock Out بعد</div>';
+document.getElementById('mrStatusPanel').innerHTML=`<div class="mr-status"><div><span>Issued</span><strong>${fmt(issuedMrs)}</strong></div><div><span>Approved</span><strong>${fmt(approvedMrs)}</strong></div><div><span>Pending</span><strong>${fmt(pendingMrs)}</strong></div></div><div class="sparkline" style="margin-top:14px">${wh.mrs.slice(0,14).reverse().map((r,i)=>`<i style="height:${25+(i%5)*13}%"></i>`).join('')||'<i style="height:20%"></i>'}</div>`;
+const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,received:0,out:0,remaining:0};cur.received+=Number(r.total_received||0);cur.out+=Number(r.total_consumed||0);cur.remaining+=Number(r.remaining||0);byWh.set(r.warehouse,cur)});
+const whRows=[...byWh.values()].sort((a,b)=>b.remaining-a.remaining);
+const maxRemaining=Math.max(...whRows.map(r=>r.remaining),1);
+document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-bars">${whRows.map(r=>`<div class="warehouse-row"><b>${esc(r.warehouse)}</b>${meter(pct(r.remaining,maxRemaining))}<span>${fmt(r.remaining)} left · ${fmt(r.out)} out</span></div>`).join('')}</div>`:'<div class="empty">لا توجد أرصدة</div>';
+const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort((a,b)=>Number(b.usage_percent)-Number(a.usage_percent)).slice(0,5);
+document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?compactTable([['المنطقة','area'],['المادة','material'],['MR','mr_issued_qty',(v)=>fmt(v)],['Used','rollout_used_qty',(v)=>fmt(v)],['%','usage_percent',(v)=>usageBar(v)]],rolloutRows):'<div class="empty">لا يوجد استهلاك Rollout مطابق بعد</div>';
+}
+function renderWarehouse(){renderExecutiveDashboard();renderWorkflowQueues();
+document.getElementById('recentMovements').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المادة','sku'],['الكمية','quantity',(v)=>fmt(v)],['الفني','technician']],wh.movements.slice(0,8));
+const lows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quantity)<=Number((wh.products.find(p=>p.id===b.product_id)||{}).min_stock||0));
+document.getElementById('lowStock').innerHTML=rowsTable([['المستودع','warehouse'],['المادة','sku'],['الرصيد','quantity',(v)=>fmt(v)],['الوحدة','unit']],lows.slice(0,8));
+document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','name'],['الموقع','location'],['الحالة','status']],wh.warehouses);
+document.getElementById('techniciansTable').innerHTML=rowsTable([['الاسم','name'],['الهاتف','phone'],['الحالة','status']],wh.technicians);
+document.getElementById('productsTable').innerHTML=rowsTable([['SKU','sku'],['الاسم','name'],['الوحدة','unit'],['التتبع','tracking_type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['إجراء','id',(v,r)=>productActions(r)]],wh.products);
+renderReceiveHistory();
+document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['Adjustment','total_adjustment',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['نسبة الاستهلاك','usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
+renderTechnicianBalances();
+renderRolloutUsage();
+document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['Serial','serial_number']],wh.movements);
+document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],wh.audit);
+['receiveWarehouse','adjustWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderAdjustHint();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
+function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
+async function createWarehouse(){try{await api('/api/warehouse/warehouses',{method:'POST',body:JSON.stringify({name:whName.value.trim(),location:whLocation.value.trim()})});whName.value='';whLocation.value='';toast('تم حفظ المستودع');await loadWarehouse()}catch(e){toast(e.message)}}
+async function createTechnician(){try{await api('/api/warehouse/technicians',{method:'POST',body:JSON.stringify({name:techName.value.trim(),phone:techPhone.value.trim()})});techName.value='';techPhone.value='';toast('تم حفظ الفني');await loadWarehouse()}catch(e){toast(e.message)}}
+function productActions(row){return roleKey()==='admin'?`<button class="btn danger" onclick="deleteProduct(${row.id})">حذف</button>`:''}
+async function deleteProduct(id){
+if(roleKey()!=='admin'){toast('Admin only');return}
+const product=productById(id)||{};
+const sku=product.sku||id;
+const name=product.name||'';
+const ok=confirm(`حذف المادة نهائياً؟\n${sku} - ${name}\nسيتم حذفها من المخزون وسجل الاستلام والحركات المرتبطة بها.`);
+if(!ok)return;
+const second=confirm('تأكيد أخير: هذه العملية لا يمكن التراجع عنها من داخل البرنامج.');
+if(!second)return;
+try{
+await api(`/api/warehouse/products/${id}/purge`,{method:'POST',body:JSON.stringify({actor:activeUser||'admin',role:activeRole||'Admin'})});
+localStorage.removeItem('warehouseBootstrap');
+toast('تم حذف المادة وسجلاتها');
+await loadWarehouse();
+}catch(e){toast(e.message)}
+}
+function renderReceiveHistory(){
+const latest=(wh.receipts||[])[0];
+const latestItem=latest?.items?.[0]||null;
+const box=document.getElementById('lastReceivedItem');
+if(box)box.innerHTML=latest&&latestItem?`<div class="mini-list">
+<div class="mini-row"><div><b>${esc(latestItem.name)}</b><small>${esc(latestItem.sku)} · ${esc(latest.warehouse)}</small></div><strong>${fmt(latestItem.quantity)} ${esc(latestItem.unit)}</strong></div>
+<div class="hint">تاريخ الاستلام: ${esc(latest.receipt_date||latest.created_at?.slice(0,10)||'')}<br>رقم الايصال: ${esc(latest.order_number)}<br>المورد: ${esc(latest.supplier||'')}</div>
+${latestItem.qr_code?`<div class="hint">QR Code: ${esc(latestItem.qr_code)}</div>`:''}
+</div>`:'<div class="empty">لم يتم استلام مواد بعد</div>';
+const rows=(wh.receipts||[]).flatMap(r=>(r.items||[]).map(item=>({order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
+const history=document.getElementById('receiveHistory');
+if(history)history.innerHTML=rowsTable([['التاريخ','receipt_date'],['رقم الايصال','order_number'],['المورد','supplier'],['المستودع','warehouse'],['SKU','sku'],['QR Code','qr_code'],['اسم المادة','name'],['الكمية','quantity',(v)=>fmt(v)],['الوحدة','unit']],rows.slice(0,80));
+}
+function initReceiveDefaults(){const d=document.getElementById('receiveDate');if(d&&!d.value)d.value=today();const u=document.getElementById('receiveUnit');if(u&&!u.value)u.value='PCS'}
+async function receiveInventory(){
+try{
+const qty=Number(receiveQty.value||0);
+const body={receipt_date:receiveDate.value,receipt_number:receiveReceipt.value.trim(),supplier:receiveSupplier.value.trim(),warehouse_id:Number(receiveWarehouse.value),sku:receiveSku.value.trim(),name:receiveMaterialName.value.trim(),quantity:qty,unit:receiveUnit.value.trim()||'PCS',qr_code:receiveQr.value.trim(),created_by:activeUser||'manager'};
+if(!body.warehouse_id){toast('اختر المستودع');return}
+if(!body.sku){toast('اكتب SKU');return}
+if(!body.name){toast('اكتب اسم المادة');return}
+if(!qty||qty<=0){toast('اكتب كمية صحيحة');return}
+const r=await api('/api/warehouse/receive-inventory',{method:'POST',body:JSON.stringify(body)});
+receiveReceipt.value='';receiveSku.value='';receiveQr.value='';receiveMaterialName.value='';receiveQty.value=1;
+localStorage.removeItem('warehouseBootstrap');
+toast('تمت إضافة المخزون: '+r.order_number);
+await loadWarehouse();
+}catch(e){toast(e.message)}
+}
+function currentStockBySku(warehouseId,sku){
+const product=(wh.products||[]).find(p=>normalizeText(p.sku)===normalizeText(sku));
+if(!product)return null;
+const balance=(wh.stockBalances||[]).find(b=>String(b.warehouse_id)===String(warehouseId)&&String(b.product_id)===String(product.id));
+return {product,balance:balance||null,quantity:Number(balance?.quantity||0)};
+}
+function renderAdjustHint(){
+const hint=document.getElementById('adjustHint');if(!hint)return;
+const row=currentStockBySku(adjustWarehouse.value,adjustSku.value);
+if(!adjustSku.value.trim()){hint.textContent='اكتب SKU عشان يظهر الرصيد الحالي قبل التسوية.';return}
+if(!row){hint.textContent='هذا SKU غير موجود في هذا النظام.';return}
+hint.textContent=`الرصيد الحالي: ${fmt(row.quantity)} ${row.product.unit||'PCS'} - ${row.product.name}`;
+}
+async function adjustInventory(){
+try{
+const body={warehouse_id:Number(adjustWarehouse.value),sku:adjustSku.value.trim(),quantity:Number(adjustQty.value||0),note:adjustNote.value.trim(),created_by:activeUser||'manager'};
+if(!body.warehouse_id){toast('اختر المستودع');return}
+if(!body.sku){toast('اكتب SKU');return}
+if(body.quantity<0){toast('الرصيد الصحيح لا يمكن يكون أقل من صفر');return}
+const row=currentStockBySku(body.warehouse_id,body.sku);
+if(!row){toast('SKU غير موجود');return}
+if(!confirm(`تأكيد التسوية؟\n${row.product.name}\nمن ${fmt(row.quantity)} إلى ${fmt(body.quantity)}`))return;
+const r=await api('/api/warehouse/adjust-inventory',{method:'POST',body:JSON.stringify(body)});
+localStorage.removeItem('warehouseBootstrap');
+toast(`تمت التسوية: ${fmt(r.old_quantity)} -> ${fmt(r.new_quantity)}`);
+adjustSku.value='';adjustQty.value=0;adjustNote.value='';
+await loadWarehouse();
+}catch(e){toast(e.message)}
+}
+async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
+document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');stockBalances.style.display=b.dataset.balance==='stockBalances'?'block':'none';technicianBalances.style.display=b.dataset.balance==='technicianBalances'?'block':'none';rolloutUsage.style.display=b.dataset.balance==='rolloutUsage'?'block':'none'}));
+function today(){return new Date().toISOString().slice(0,10)}
+function formatDate(v){if(!v)return'';const d=new Date(v+'T00:00:00');return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')}
+function initMrDefaults(){mrCreationDate.value=today();mrShipTime.value=today();mrArriveTime.value=today();const box=document.getElementById('mrLines');if(box&&!box.children.length)addMrLine()}
+function productOptionHtml(selected=''){
+  const rows=[...wh.products].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const selectedWarehouse=document.getElementById('mrWarehouse')?.value||'';
+  return '<option value="">اختر المادة</option>'+rows.map(p=>{
+    const bal=wh.stockBalances.find(b=>String(b.warehouse_id)===String(selectedWarehouse)&&String(b.product_id)===String(p.id));
+    const stockText=selectedWarehouse?` - available ${fmt((bal&&bal.quantity)||0)}`:'';
+    return `<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})${stockText}</option>`;
+  }).join('')+'<option value="">Manual item</option>'
+}
+function renderMrLines(){const box=document.getElementById('mrLines');if(!box)return;if(!box.children.length){addMrLine();return}[...box.querySelectorAll('.mrProduct')].forEach(sel=>{const selected=sel.value;sel.innerHTML=productOptionHtml(selected);sel.value=selected})}
+function addMrLine(data={}){const box=document.getElementById('mrLines');if(!box)return;mrLineId++;const row=document.createElement('div');row.className='mr-line';row.dataset.id=mrLineId;row.innerHTML=`<div class="field"><label>Material</label><select class="mrProduct" onchange="syncMrLine(this)">${productOptionHtml(data.product_id||'')}</select></div><div class="field"><label>Qty</label><input class="mrQty" type="number" min="1" value="${data.quantity||1}" oninput="renderMrPreview()"></div><div class="field"><label>Remark</label><input class="mrRemark" value="${esc(data.remark||'')}" oninput="renderMrPreview()"></div><button onclick="this.parentElement.remove();renderMrPreview()">×</button><div class="field"><label>Part Nbr</label><input class="mrPart" value="${esc(data.part_nbr||'')}" oninput="renderMrPreview()"></div><div class="field"><label>Model</label><input class="mrModel" value="${esc(data.model||'')}" oninput="renderMrPreview()"></div><div class="field"><label>UOM</label><input class="mrUom" value="${esc(data.uom||'PCS')}" oninput="renderMrPreview()"></div><div class="field"><label>Description</label><input class="mrDesc" value="${esc(data.description||'')}" oninput="renderMrPreview()"></div>`;box.appendChild(row);syncMrLine(row.querySelector('.mrProduct'))}
+function syncMrLine(sel){const row=sel.closest('.mr-line');const p=productById(sel.value);if(p){row.querySelector('.mrPart').value=p.sku;row.querySelector('.mrDesc').value=p.name;row.querySelector('.mrUom').value=p.unit||'PCS'}renderMrPreview()}
+function getMrItems(){const box=document.getElementById('mrLines');return [...(box?box.querySelectorAll('.mr-line'):[])].map((row,i)=>({product_id:row.querySelector('.mrProduct').value?Number(row.querySelector('.mrProduct').value):null,part_nbr:row.querySelector('.mrPart').value.trim(),model:row.querySelector('.mrModel').value.trim(),description:row.querySelector('.mrDesc').value.trim(),uom:row.querySelector('.mrUom').value.trim()||'PCS',quantity:Number(row.querySelector('.mrQty').value||0),remark:row.querySelector('.mrRemark').value.trim()})).filter(x=>x.description&&x.quantity>0)}
+function signatureData(role){const c=document.getElementById(role+'Pad');return c?c.toDataURL('image/png'):''}
+function mrDocumentHtml(req){const items=req.items||[];return `<div class="mr-sheet"><div class="mr-head"><div class="mr-order"><div class="mr-purple">${esc(req.order_number||'Draft')}</div><div>Order No</div><div>${esc(req.warehouse||'')}</div><div>Warehouse name</div><div class="mr-purple">${esc(req.entity||'')}</div><div>Entity</div></div><div class="mr-title">BOM - Material Requisition</div><div class="mr-logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div></div>
+<table class="mr-info"><tbody><tr><th>Creation Date</th><td>${esc(formatDate(req.creation_date))}</td><th>Project Name</th><td>${esc(req.project_name)}</td></tr><tr><th>Site ID</th><td>${esc(req.site_id)}</td><th>Site Address</th><td>${esc(req.site_address)}</td></tr><tr><th>WO No</th><td>${esc(req.wo_no)}</td><th>Product Domain</th><td>${esc(req.product_domain)}</td></tr><tr><th>Request Shipment Time</th><td>${esc(formatDate(req.request_shipment_time))}</td><th>Request arrived site time</th><td>${esc(formatDate(req.request_arrived_site_time))}</td></tr><tr><th>Team Leader</th><td>${esc(req.team_leader)}</td><th>Receiver/TEL</th><td>${esc(req.receiver_tel)}</td></tr></tbody></table>
+<div class="mr-items"><table><thead><tr><th>Remark</th><th>Qty</th><th>UOM</th><th>DESCRIPTION</th><th>Model</th><th>Part Nbr</th><th>No</th></tr></thead><tbody>${items.map((it,i)=>`<tr><td>${esc(it.remark)}</td><td>${fmt(it.quantity)}</td><td>${esc(it.uom)}</td><td>${esc(it.description)}</td><td>${esc(it.model)}</td><td>${esc(it.part_nbr)}</td><td>${i+1}</td></tr>`).join('')||'<tr><td colspan="7">No items</td></tr>'}</tbody></table></div>
+<div class="mr-sign"><div><h4>Approver</h4><table><tr><th>Name</th><td>${esc(req.receiver_name)}</td></tr><tr><th>Title</th><td>${esc(req.receiver_title)}</td></tr><tr class="sig-row"><th>Signature</th><td>${req.receiver_signature?`<img class="signature-img" src="${esc(req.receiver_signature)}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(req.receiver_date||req.request_arrived_site_time))}</td></tr><tr><th>Comment (if have)</th><td>${esc(req.receiver_comment)}</td></tr></table></div><div><h4>Requester</h4><table><tr><th>Name</th><td>${esc(req.requester_name)}</td></tr><tr><th>Title</th><td>${esc(req.requester_title)}</td></tr><tr class="sig-row"><th>Signature</th><td>${req.requester_signature?`<img class="signature-img" src="${esc(req.requester_signature)}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(req.requester_date||req.creation_date))}</td></tr><tr><th>Comment (if have)</th><td>${esc(req.requester_comment)}</td></tr></table></div></div></div>`}
+function renderTechnicianBalances(){const rows=wh.technicianBalances||[];if(!rows.length){document.getElementById('technicianBalancesTable').innerHTML='<div class="empty">لا توجد بيانات بعد</div>';return}document.getElementById('technicianBalancesTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>الفني</th><th>SKU</th><th>المادة</th><th>الرصيد</th><th>الوحدة</th></tr></thead><tbody>${rows.map(r=>`<tr class="click-row" title="افتح MR" data-tech="${esc(r.technician)}" data-product="${esc(r.product_id)}" onclick="showTechnicianMr(this.dataset.tech,this.dataset.product)"><td>${esc(r.technician)}</td><td>${esc(r.sku)}</td><td>${esc(r.product)}</td><td>${fmt(r.quantity)}</td><td>${esc(r.unit)}</td></tr>`).join('')}</tbody></table></div>`}
+function rolloutMatchLabel(v){return v==='area'?'Area matched':v==='area_not_found'?'Material exists in other area':'No rollout use'}
+function renderRolloutUsage(){const rows=wh.rolloutUsage||[];if(!rows.length){document.getElementById('rolloutUsageTable').innerHTML=`<div class="empty">لا توجد بيانات MR للمقارنة. Rollout records loaded: ${fmt(wh.rolloutRecords)}</div>`;return}document.getElementById('rolloutUsageTable').innerHTML=rowsTable([['المنطقة','area'],['Site Address','site_address'],['المادة','material'],['SKU','sku'],['MR Issued','mr_issued_qty',(v)=>fmt(v)],['Rollout Used','rollout_used_qty',(v)=>fmt(v)],['Remaining','remaining_after_rollout',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['Match','usage_match',(v)=>rolloutMatchLabel(v)],['Receiver','technician'],['Last MR','last_mr']],rows)}
+function findMrForTechnicianBalance(technician,productId){return [...(wh.mrs||[])].filter(req=>String(req.receiver_name||'').trim()===String(technician||'').trim()&&(req.items||[]).some(it=>String(it.product_id)===String(productId))).sort((a,b)=>Number(b.id||0)-Number(a.id||0))[0]}
+function showMrById(id){const req=(wh.mrs||[]).find(r=>String(r.id)===String(id));if(!req){toast('MR not found');return}document.getElementById('mrModalTitle').textContent=`MR ${req.order_number||''} - ${req.status||''}`;document.getElementById('mrModalBody').innerHTML=mrDocumentHtml(req);document.getElementById('mrModal').classList.add('show')}
+function showTechnicianMr(technician,productId){const req=findMrForTechnicianBalance(technician,productId);if(!req){toast('No MR found for this technician/material');return}document.getElementById('mrModalTitle').textContent=`MR ${req.order_number||''} - ${technician}`;document.getElementById('mrModalBody').innerHTML=mrDocumentHtml(req);document.getElementById('mrModal').classList.add('show')}
+function closeMrModal(){document.getElementById('mrModal').classList.remove('show')}
+function ensureFitForPrint(){document.body.classList.add('fit-one-page')}
+async function waitForImages(root){const imgs=[...root.querySelectorAll('img')];await Promise.all(imgs.map(img=>img.complete?Promise.resolve():new Promise(resolve=>{img.onload=resolve;img.onerror=resolve})))}
+function printModalMr(){ensureFitForPrint();document.body.classList.add('print-modal');window.print();setTimeout(()=>document.body.classList.remove('print-modal'),500)}
+async function loadHtml2Pdf(){if(window.html2pdf)return window.html2pdf;await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)});return window.html2pdf}
+async function downloadMrPdf(el,name='material-requisition.pdf'){try{document.body.classList.add('fit-one-page');await waitForImages(el);const html2pdf=await loadHtml2Pdf();await html2pdf().set({margin:8,filename:name,image:{type:'jpeg',quality:.98},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'mm',format:'a4',orientation:'landscape'},pagebreak:{mode:['avoid-all']}}).from(el).save();toast('تم تنزيل PDF')}catch(e){toast('تعذر التنزيل المباشر، استخدم الطباعة ثم Save as PDF');window.print()}}
+function downloadModalPdf(){const el=document.querySelector('#mrModalBody .mr-sheet');if(!el){toast('افتح MR أولاً');return}const title=(document.getElementById('mrModalTitle').textContent||'MR').replace(/[^\w\u0600-\u06FF-]+/g,'_');downloadMrPdf(el,`${title}.pdf`)}
+function downloadPreviewPdf(){const el=document.getElementById('mrPreview');if(!el){toast('لا يوجد MR preview');return}downloadMrPdf(el,'MR-Draft.pdf')}
+function technicianUsageRowsForSheet(){const groups=new Map();(wh.mrs||[]).filter(req=>req.status==='issued'||req.status==='signed').forEach(req=>{(req.items||[]).forEach(item=>{if(!item.product_id)return;const product=productById(item.product_id)||{};const technician=String(req.receiver_name||'').trim();if(!technician)return;const key=technician+'|'+item.product_id;const current=groups.get(key)||{technician,material:item.description||product.name||'',sku:item.part_nbr||product.sku||'',issued:0,balance:0,lastMr:'',lastId:0,lastSync:new Date().toISOString().slice(0,10)};current.issued+=Number(item.quantity||0);if(Number(req.id||0)>=current.lastId){current.lastId=Number(req.id||0);current.lastMr=req.order_number||''}groups.set(key,current)})});(wh.technicianBalances||[]).forEach(row=>{const key=String(row.technician||'').trim()+'|'+row.product_id;const current=groups.get(key)||{technician:row.technician,material:row.product,sku:row.sku,issued:0,balance:0,lastMr:'',lastId:0,lastSync:new Date().toISOString().slice(0,10)};current.balance=Number(row.quantity||0);if(!current.material)current.material=row.product;if(!current.sku)current.sku=row.sku;groups.set(key,current)});return [...groups.values()].filter(r=>r.issued>0||r.balance>0).sort((a,b)=>String(a.technician).localeCompare(String(b.technician))||String(a.material).localeCompare(String(b.material)))}
+async function copyTechnicianUsageForSheet(){let rows=[];try{const data=await api('/api/warehouse/technician-material-usage');rows=(data.usage||[]).map(r=>({technician:r.technician,material:r.material,sku:r.sku,issued:r.mr_issued_qty,balance:r.current_app_balance,lastMr:r.last_mr,lastSync:r.last_sync}))}catch(e){rows=technicianUsageRowsForSheet()}if(!rows.length){toast('No MR usage to copy');return}const header=['Technician','Material','SKU','MR Issued Qty','Current App Balance','Last MR','Last Sync'];const tsv=[header].concat(rows.map(r=>[r.technician,r.material,r.sku,r.issued,r.balance,r.lastMr,r.lastSync])).map(row=>row.map(v=>String(v??'').replace(/\t/g,' ').replace(/\r?\n/g,' ')).join('\t')).join('\n');try{await navigator.clipboard.writeText(tsv);toast('Copied. Paste into Technician Material Usage cell A1')}catch(e){const area=document.createElement('textarea');area.value=tsv;document.body.appendChild(area);area.select();document.execCommand('copy');area.remove();toast('Copied. Paste into Technician Material Usage cell A1')}}
+function renderMrPreview(orderNo='Draft'){const warehouse=wh.warehouses.find(w=>String(w.id)===String(mrWarehouse.value));const items=getMrItems();mrPreview.innerHTML=`<div class="mr-head"><div class="mr-order"><div class="mr-purple">${esc(orderNo)}</div><div>Order No</div><div>${esc(warehouse?warehouse.name:'')}</div><div>Warehouse name</div><div class="mr-purple">${esc(mrEntity.value)}</div><div>Entity</div></div><div class="mr-title">BOM - Material Requisition</div><div class="mr-logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div></div>
+<table class="mr-info"><tbody><tr><th>Creation Date</th><td>${esc(formatDate(mrCreationDate.value))}</td><th>Project Name</th><td>${esc(mrProject.value)}</td></tr><tr><th>Site ID</th><td>${esc(mrSiteId.value)}</td><th>Site Address</th><td>${esc(mrSiteAddress.value)}</td></tr><tr><th>WO No</th><td>${esc(mrWoNo.value)}</td><th>Product Domain</th><td>${esc(mrDomain.value)}</td></tr><tr><th>Request Shipment Time</th><td>${esc(formatDate(mrShipTime.value))}</td><th>Request arrived site time</th><td>${esc(formatDate(mrArriveTime.value))}</td></tr><tr><th>Team Leader</th><td>${esc(mrTeamLeader.value)}</td><th>Receiver/TEL</th><td>${esc(mrReceiverTel.value)}</td></tr></tbody></table>
+<div class="mr-items"><table><thead><tr><th>Remark</th><th>Qty</th><th>UOM</th><th>DESCRIPTION</th><th>Model</th><th>Part Nbr</th><th>No</th></tr></thead><tbody>${items.map((it,i)=>`<tr><td>${esc(it.remark)}</td><td>${fmt(it.quantity)}</td><td>${esc(it.uom)}</td><td>${esc(it.description)}</td><td>${esc(it.model)}</td><td>${esc(it.part_nbr)}</td><td>${i+1}</td></tr>`).join('')||'<tr><td colspan="7">No items</td></tr>'}</tbody></table></div>
+<div class="mr-sign"><div><h4>Approver</h4><table><tr><th>Name</th><td>${esc(mrReceiverName.value)}</td></tr><tr><th>Title</th><td>${esc(mrReceiverTitle.value)}</td></tr><tr class="sig-row"><th>Signature</th><td>${signatureData('receiver')?`<img class="signature-img" src="${signatureData('receiver')}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(mrArriveTime.value))}</td></tr><tr><th>Comment (if have)</th><td></td></tr></table></div><div><h4>Requester</h4><table><tr><th>Name</th><td>${esc(mrRequesterName.value)}</td></tr><tr><th>Title</th><td>${esc(mrRequesterTitle.value)}</td></tr><tr class="sig-row"><th>Signature</th><td>${signatureData('requester')?`<img class="signature-img" src="${signatureData('requester')}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(mrCreationDate.value))}</td></tr><tr><th>Comment (if have)</th><td>${esc(mrRequesterComment.value)}</td></tr></table></div></div>`}
+async function saveMr(){
+  try{
+    if(!canCreateMr()){toast('Requester فقط يقدر ينشئ MR');return}
+    const items=getMrItems();
+    if(!items.length){toast('Add at least one material');return}
+    if(!mrWarehouse.value){toast('Choose warehouse first');return}
+    const warehouseName=(wh.warehouses.find(w=>String(w.id)===String(mrWarehouse.value))||{}).name||'';
+    for(const item of items){
+      if(!item.product_id){toast('Choose material from the list, not Manual item');return}
+      const bal=wh.stockBalances.find(b=>String(b.warehouse_id)===String(mrWarehouse.value)&&String(b.product_id)===String(item.product_id));
+      const available=Number((bal&&bal.quantity)||0);
+      if(available<Number(item.quantity||0)){toast('Insufficient stock: '+item.description+' in '+warehouseName+' available '+available);return}
+    }
+    if(!mrReceiverName.value.trim())mrReceiverName.value='Approver';
+    const body={
+      creation_date:mrCreationDate.value,
+      warehouse_id:Number(mrWarehouse.value),
+      entity:mrEntity.value,
+      project_name:mrProject.value,
+      site_id:mrSiteId.value,
+      site_address:mrSiteAddress.value,
+      wo_no:mrWoNo.value,
+      product_domain:mrDomain.value,
+      team_leader:mrTeamLeader.value,
+      receiver_tel:mrReceiverTel.value,
+      request_shipment_time:mrShipTime.value,
+      request_arrived_site_time:mrArriveTime.value,
+      requester_name:mrRequesterName.value||activeUser,
+      requester_title:mrRequesterTitle.value,
+      requester_signature:signatureData('requester'),
+      requester_date:mrCreationDate.value,
+      requester_comment:mrRequesterComment.value,
+      receiver_name:mrReceiverName.value,
+      receiver_title:mrReceiverTitle.value,
+      receiver_date:mrArriveTime.value,
+      created_by:activeUser,
+      issue_immediately:false,
+      items
+    };
+    toast('جاري إرسال MR للاعتماد...');
+    const r=await api('/api/warehouse/material-requisitions',{method:'POST',body:JSON.stringify(body)});
+    const req=r.requisition;
+    toast('MR '+req.order_number+' sent to '+mrReceiverName.value+' for approval');
+    renderMrPreview(req.order_number);
+    upsertLocalMr(req);
+    syncWarehouseLater();
+  }catch(e){toast(e.message)}
+}function mrTableAction(r){const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
+function visibleMrRows(){if(roleKey()==='warehousemanager')return (wh.mrs||[]).filter(r=>r.status==='approved'||r.status==='issued');return wh.mrs||[]}
+function renderMrTable(){mrTable.innerHTML=rowsTable([['Order','order_number'],['Warehouse','warehouse'],['Site','site_id'],['Requester','requester_name'],['Approver','receiver_name'],['Status','status',(v)=>statusChip(v)],['Date','creation_date'],['Action','id',(v,r)=>mrTableAction(r)]],visibleMrRows())}
+function printMr(){ensureFitForPrint();document.getElementById('mr').classList.add('printing');window.print();setTimeout(()=>document.getElementById('mr').classList.remove('printing'),500)}
+function setupPad(id){const c=document.getElementById(id),ctx=c.getContext('2d');function size(){const r=c.getBoundingClientRect();c.width=Math.max(300,r.width);c.height=110;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111'}size();let draw=false;function pos(e){const r=c.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return{x:(p.clientX-r.left)*(c.width/r.width),y:(p.clientY-r.top)*(c.height/r.height)}}function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault()}function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();renderMrPreview();e.preventDefault()}function end(){draw=false;renderMrPreview()}c.addEventListener('mousedown',start);c.addEventListener('mousemove',move);window.addEventListener('mouseup',end);c.addEventListener('touchstart',start,{passive:false});c.addEventListener('touchmove',move,{passive:false});c.addEventListener('touchend',end)}
+function clearSignature(role){const c=document.getElementById(role+'Pad'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);renderMrPreview()}
+setupPad('requesterPad');setupPad('receiverPad');initMrDefaults();
+applyAuthState();
+if(session)loadWarehouse();
+setInterval(()=>pollNotifications(true),45000);
+</script>
+</body>
+</html>

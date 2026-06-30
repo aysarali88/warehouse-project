@@ -49,6 +49,31 @@ Then open:
 http://127.0.0.1:8000
 ```
 
+## Supabase / PostgreSQL
+
+Create a local `.env` file next to `main.py`:
+
+```env
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@db.ndhccmrxpujpqhyewoac.supabase.co:5432/postgres
+```
+
+The app also works with local SQLite when `.env` is missing:
+
+```env
+DATABASE_URL=sqlite:///./rollout.db
+```
+
+## Warehouse Phase 1 APIs
+
+- `POST /api/warehouse/warehouses` - create a warehouse.
+- `POST /api/warehouse/technicians` - create a technician.
+- `POST /api/warehouse/products` - create a bulk or serialized product.
+- `POST /api/warehouse/receive` - receive stock into a warehouse.
+- `POST /api/warehouse/issue` - issue stock from a warehouse to a technician.
+- `GET /api/warehouse/stock-balances` - warehouse balances.
+- `GET /api/warehouse/technician-balances` - technician balances.
+- `GET /api/warehouse/summary` - warehouse counters.
+
 ## GitHub Setup
 
 After Git is installed, run these commands inside this folder:
