@@ -1,7 +1,8 @@
 import json
 import hmac
-from datetime import date
+from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -63,6 +64,13 @@ APP_USERS = {
     "approval": {"name": "Approver", "role": "Approver", "password": "Approval@123"},
     "warehouse": {"name": "Warehouse Manager", "role": "Warehouse Manager", "password": "Warehouse@123"},
 }
+
+
+TRIPOLI_TZ = ZoneInfo("Africa/Tripoli")
+
+
+def local_today() -> str:
+    return datetime.now(TRIPOLI_TZ).date().isoformat()
 
 
 class LoginIn(BaseModel):
@@ -874,7 +882,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
         if not current["sku"]:
             current["sku"] = product.sku if product else ""
 
-    today = date.today().isoformat()
+    today = local_today()
     usage = sorted(rows.values(), key=lambda row: (row["technician"], row["material"]))
     for row in usage:
         row["last_sync"] = today
@@ -1133,7 +1141,7 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
         raise HTTPException(status_code=403, detail="Only the assigned approver can approve this MR")
     row.receiver_name = actor or row.receiver_name
     row.receiver_title = data.title or row.receiver_title
-    row.receiver_date = date.today().isoformat()
+    row.receiver_date = local_today()
     row.receiver_comment = data.comment
     if data.signature:
         row.receiver_signature = data.signature
@@ -1156,7 +1164,7 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
         raise HTTPException(status_code=403, detail="Only the assigned approver can reject this MR")
     row.receiver_name = actor or row.receiver_name
     row.receiver_title = data.title or row.receiver_title
-    row.receiver_date = date.today().isoformat()
+    row.receiver_date = local_today()
     row.receiver_comment = data.comment
     row.status = "rejected"
     log_audit(db, "reject_material_requisition", "material_requisition", row.order_number, actor or "approver", data.model_dump())
@@ -1326,7 +1334,7 @@ def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_sessi
                 warehouse_id=data.warehouse_id,
                 quantity=delta,
                 serial_number="",
-                reference=f"ADJ-{date.today().isoformat()}",
+                reference=f"ADJ-{local_today()}",
                 created_by=data.created_by,
                 note=data.note.strip() or f"Stock adjusted from {old_quantity} to {data.quantity}",
             )
