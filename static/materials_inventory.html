@@ -347,6 +347,7 @@ function roleKey(){return normalizeText(userRole())}
 function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',roleKey()==='warehousemanager'&&btn.dataset.view!=='mr'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager')switchView('mr')}
 function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();if(roleKey()==='admin')loadUsers();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}
+function isAdmin(){return roleKey()==='admin'}
 function canApprove(){return ['approver','approval','admin'].includes(roleKey())}
 function canCreateMr(){return ['requester','admin'].includes(roleKey())}
 function canViewAll(){return ['requester','approver','approval','admin'].includes(roleKey())}
@@ -354,6 +355,9 @@ function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=ses
 function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
 function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
 function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
+function userOwnsMr(r){if(isAdmin())return true;const me=normalizeText(activeUser);if(roleKey()==='warehousemanager')return normalizeText(r.warehouse)===me||normalizeText(r.created_by)===me;if(canApprove())return r.status==='pending_approval'||normalizeText(r.receiver_name)===me;if(roleKey()==='requester')return normalizeText(r.requester_name)===me||normalizeText(r.created_by)===me;return normalizeText(r.created_by)===me}
+function userOwnsMovement(r){if(isAdmin())return true;const me=normalizeText(activeUser);return normalizeText(r.created_by)===me||normalizeText(r.technician)===me||normalizeText(r.warehouse)===me}
+function userOwnsAudit(r){if(isAdmin())return true;return normalizeText(r.actor)===normalizeText(activeUser)}
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
 function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[]};renderWarehouse()}
 async function loadWarehouse(){try{const cached=localStorage.getItem('warehouseBootstrap');if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api('/api/warehouse/bootstrap?light=1');applyWarehouseData(data,true);loadWarehouseFull(false)}catch(e){toast(e.message)}}
@@ -373,7 +377,7 @@ function workflowActions(req,type){if(type==='approval'){return `<div class="row
 function renderWorkflowQueues(){
 renderWarehouseQueuesBadge();
 const inbox=(wh.mrs||[]).filter(r=>r.status==='pending_approval'&&canApprove());
-const queue=(wh.mrs||[]).filter(r=>r.status==='approved');
+const queue=(wh.mrs||[]).filter(r=>r.status==='approved'&&userOwnsMr(r));
 const inboxEl=document.getElementById('approvalInbox');
 const queueEl=document.getElementById('warehouseQueue');
 if(inboxEl)inboxEl.innerHTML=canApprove()?compactTable([['Order','order_number'],['Area','site_id'],['Requester','requester_name'],['Warehouse','warehouse'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>workflowActions(r,'approval')]],inbox):'<div class="empty">Approver فقط يقدر يعتمد الطلبات.</div>';
@@ -381,7 +385,7 @@ if(queueEl)queueEl.innerHTML=canManageWarehouse()?compactTable([['Order','order_
 }
 async function approveMr(id){if(!canApprove()){toast('Approver فقط يقدر يعتمد MR');return}try{toast('جاري اعتماد MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Approved'})});toast('MR approved');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 async function rejectMr(id){if(!canApprove()){toast('Approver فقط يقدر يرفض MR');return}const comment=prompt('سبب الرفض؟')||'';try{toast('جاري رفض MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/reject`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('MR rejected');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
-async function issueApprovedMr(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يصرف المواد');return}try{toast('جاري صرف المواد...');const r=await api(`/api/warehouse/material-requisitions/${id}/issue`,{method:'POST'});toast('Materials issued '+(r.issue_order||''));upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
+async function issueApprovedMr(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يصرف المواد');return}try{toast('جاري صرف المواد...');const r=await api(`/api/warehouse/material-requisitions/${id}/issue`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Issued by warehouse'})});toast('Materials issued '+(r.issue_order||''));upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 function renderExecutiveDashboard(){
 const totalReceived=wh.stockUsage.reduce((s,r)=>s+Number(r.total_received||0),0);
 const totalOut=wh.stockUsage.reduce((s,r)=>s+Number(r.total_consumed||0),0);
@@ -428,7 +432,9 @@ const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort
 document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?compactTable([['المنطقة','area'],['المادة','material'],['MR','mr_issued_qty',(v)=>fmt(v)],['Used','rollout_used_qty',(v)=>fmt(v)],['%','usage_percent',(v)=>usageBar(v)]],rolloutRows):'<div class="empty">لا يوجد استهلاك Rollout مطابق بعد</div>';
 }
 function renderWarehouse(){renderExecutiveDashboard();renderWorkflowQueues();
-document.getElementById('recentMovements').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المادة','sku'],['الكمية','quantity',(v)=>fmt(v)],['الفني','technician']],wh.movements.slice(0,8));
+const myMovements=(wh.movements||[]).filter(userOwnsMovement);
+const myAudit=(wh.audit||[]).filter(userOwnsAudit);
+document.getElementById('recentMovements').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المادة','sku'],['الكمية','quantity',(v)=>fmt(v)],['الفني','technician'],['المستخدم','created_by']],myMovements.slice(0,8));
 const lows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quantity)<=Number((wh.products.find(p=>p.id===b.product_id)||{}).min_stock||0));
 document.getElementById('lowStock').innerHTML=rowsTable([['المستودع','warehouse'],['المادة','sku'],['الرصيد','quantity',(v)=>fmt(v)],['الوحدة','unit']],lows.slice(0,8));
 document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','name'],['الموقع','location'],['الحالة','status']],wh.warehouses);
@@ -438,8 +444,8 @@ renderReceiveHistory();
 document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['Adjustment','total_adjustment',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['نسبة الاستهلاك','usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
 renderTechnicianBalances();
 renderRolloutUsage();
-document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['Serial','serial_number']],wh.movements);
-document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],wh.audit);
+document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['المستخدم','created_by'],['Serial','serial_number']],myMovements);
+document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],myAudit);
 renderUsers();
 ['receiveWarehouse','adjustWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderAdjustHint();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
 function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
@@ -520,7 +526,7 @@ adjustSku.value='';adjustQty.value=0;adjustNote.value='';
 await loadWarehouse();
 }catch(e){toast(e.message)}
 }
-async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
+async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');stockBalances.style.display=b.dataset.balance==='stockBalances'?'block':'none';technicianBalances.style.display=b.dataset.balance==='technicianBalances'?'block':'none';rolloutUsage.style.display=b.dataset.balance==='rolloutUsage'?'block':'none'}));
 function today(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
@@ -612,7 +618,7 @@ async function saveMr(){
     syncWarehouseLater();
   }catch(e){toast(e.message)}
 }function mrTableAction(r){const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
-function visibleMrRows(){if(roleKey()==='warehousemanager')return (wh.mrs||[]).filter(r=>r.status==='approved'||r.status==='issued');return wh.mrs||[]}
+function visibleMrRows(){return (wh.mrs||[]).filter(userOwnsMr)}
 function renderMrTable(){mrTable.innerHTML=rowsTable([['Order','order_number'],['Warehouse','warehouse'],['Site','site_id'],['Requester','requester_name'],['Approver','receiver_name'],['Status','status',(v)=>statusChip(v)],['Date','creation_date'],['Action','id',(v,r)=>mrTableAction(r)]],visibleMrRows())}
 function printMr(){ensureFitForPrint();document.getElementById('mr').classList.add('printing');window.print();setTimeout(()=>document.getElementById('mr').classList.remove('printing'),500)}
 function setupPad(id){const c=document.getElementById(id),ctx=c.getContext('2d');function size(){const r=c.getBoundingClientRect();c.width=Math.max(300,r.width);c.height=110;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111'}size();let draw=false;function pos(e){const r=c.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return{x:(p.clientX-r.left)*(c.width/r.width),y:(p.clientY-r.top)*(c.height/r.height)}}function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault()}function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();renderMrPreview();e.preventDefault()}function end(){draw=false;renderMrPreview()}c.addEventListener('mousedown',start);c.addEventListener('mousemove',move);window.addEventListener('mouseup',end);c.addEventListener('touchstart',start,{passive:false});c.addEventListener('touchmove',move,{passive:false});c.addEventListener('touchend',end)}

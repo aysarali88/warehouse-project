@@ -499,7 +499,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
     }
 
 
-def issue_material_requisition_row(db: Session, row: MaterialRequisition) -> str:
+def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "") -> str:
     if row.status == "issued":
         raise HTTPException(status_code=400, detail="Material requisition is already issued")
     if row.status not in {"approved", "signed"}:
@@ -514,12 +514,13 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition) -> str
         db.add(technician)
         db.flush()
 
+    issued_by = actor.strip() or row.created_by
     issue = IssueOrder(
         order_number=next_number(db, IssueOrder, "MR-ISS"),
         warehouse_id=row.warehouse_id,
         technician_id=technician.id,
         status="confirmed",
-        created_by=row.created_by,
+        created_by=issued_by,
     )
     db.add(issue)
     db.flush()
@@ -551,12 +552,12 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition) -> str
                 quantity=-item.quantity,
                 reference=row.order_number,
                 note="Issued from material requisition",
-                created_by=row.created_by,
+                created_by=issued_by,
             )
         )
 
     row.status = "issued"
-    log_audit(db, "issue_material_requisition", "material_requisition", row.order_number, row.created_by, {"issue_order": issue.order_number})
+    log_audit(db, "issue_material_requisition", "material_requisition", row.order_number, issued_by, {"issue_order": issue.order_number})
     return issue.order_number
 
 
@@ -1346,11 +1347,11 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/issue")
-def issue_material_requisition(requisition_id: int, db: Session = Depends(db_session)):
+def issue_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
     row = db.get(MaterialRequisition, requisition_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    issue_order = issue_material_requisition_row(db, row)
+    issue_order = issue_material_requisition_row(db, row, data.actor)
     db.commit()
     db.refresh(row)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
