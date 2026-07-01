@@ -29,6 +29,18 @@ class RolloutRecord(Base):
     labeling = Column(String, default="")
 
 
+class AppUser(Base):
+    __tablename__ = "app_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    role = Column(String, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    status = Column(String, default="active", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Warehouse(Base):
     __tablename__ = "warehouses"
 

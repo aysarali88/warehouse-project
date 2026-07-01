@@ -32,12 +32,7 @@
     <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="admin / requester / approval / warehouse"></div>
     <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
     <button class="btn primary full" onclick="loginApp()">Login</button>
-    <div class="login-help">
-      Admin: <b>admin</b> / <b>Admin@123</b><br>
-      Requester: <b>requester</b> / <b>Requester@123</b><br>
-      Approval: <b>approval</b> / <b>Approval@123</b><br>
-      Warehouse: <b>warehouse</b> / <b>Warehouse@123</b>
-    </div>
+    <div class="login-help">Default Admin: <b>admin</b> / <b>Admin@123</b><br>بعد الدخول كـ Admin يمكنك إضافة المستخدمين من صفحة المستخدمين.</div>
   </div>
 </div>
 <div class="app hidden" id="appShell">
@@ -54,6 +49,7 @@
     <button data-view="issue">صرف لفني</button>
     <button data-view="balances">المخزون</button>
     <button data-view="audit">الحركات والتدقيق</button>
+    <button class="admin-only" data-view="users">المستخدمين</button>
   </nav>
 </aside>
 <main class="main">
@@ -168,6 +164,29 @@
         <div class="field full"><div class="hint" id="adjustHint"></div></div>
         <button class="btn danger full" onclick="adjustInventory()">حفظ التسوية</button>
       </div>
+    </div>
+  </section>
+
+  <section class="view" id="users">
+    <div class="grid two">
+      <div class="card">
+        <h3>إضافة مستخدم</h3>
+        <div class="form">
+          <div class="field"><label>Username</label><input id="newUsername" placeholder="aysar"></div>
+          <div class="field"><label>Name</label><input id="newUserName" placeholder="Aysar"></div>
+          <div class="field"><label>Role</label><select id="newUserRole"><option>Admin</option><option>Requester</option><option>Approval</option><option>Warehouse Manager</option></select></div>
+          <div class="field"><label>Password</label><input id="newUserPassword" type="password" placeholder="Password"></div>
+          <button class="btn primary full" onclick="createAppUser()">حفظ المستخدم</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>الصلاحيات</h3>
+        <div class="hint">Admin: يشوف ويدير كل شيء.<br>Requester: ينشئ MR ويتابع الطلبات.<br>Approval: يعتمد أو يرفض MR.<br>Warehouse Manager: يشوف الطلبات المعتمدة ويصرف المواد.</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>المستخدمين</h3>
+      <div id="usersTable"></div>
     </div>
   </section>
 
@@ -313,13 +332,13 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
-let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,movements:[],audit:[],mrs:[],receipts:[]};
+let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,movements:[],audit:[],mrs:[],receipts:[],users:[]};
 let mrLineId=0;
 let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
 let activeUser=session?.name||'';
 let activeRole=session?.role||'';
 let lastApprovalCount=0;
-const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Requisition','نموذج طلب مواد مطابق لصيغة BOM - MR مع طباعة وتوقيع إلكتروني.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.']};
+const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],users:['المستخدمين','إضافة المستخدمين وتحديد صلاحياتهم داخل النظام.'],mr:['Material Requisition','نموذج طلب مواد مطابق لصيغة BOM - MR مع طباعة وتوقيع إلكتروني.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
@@ -332,18 +351,20 @@ async function loginApp(){try{const data=await api('/api/auth/login',{method:'PO
 function logoutApp(){localStorage.removeItem('warehouseSession');localStorage.removeItem('warehouseBootstrap');session=null;activeUser='';activeRole='';document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
 function switchView(view){const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(view==='mr')refreshMrsFast()}
 function roleKey(){return normalizeText(userRole())}
-function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',roleKey()==='warehousemanager'&&btn.dataset.view!=='mr'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager')switchView('mr')}
-function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();pollNotifications(false);refreshMrsFast()}
+function isWarehouseRole(){return ['warehousemanager','warehousemanger'].includes(roleKey())}
+function isApprovalRole(){return ['approval','approver'].includes(roleKey())}
+function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',isWarehouseRole()&&btn.dataset.view!=='mr'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(isWarehouseRole())switchView('mr')}
+function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();pollNotifications(false);refreshMrsFast();if(roleKey()==='admin')loadUsers()}
 function userRole(){return activeRole||'Requester'}
-function canApprove(){return ['approver','admin'].includes(roleKey())}
+function canApprove(){return isApprovalRole()||roleKey()==='admin'}
 function canCreateMr(){return ['requester','admin'].includes(roleKey())}
-function canViewAll(){return ['requester','approver','admin'].includes(roleKey())}
+function canViewAll(){return ['requester','approval','approver','admin'].includes(roleKey())}
 function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=session?.role||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver'}
 function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
 function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
-function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
+function canManageWarehouse(){return isWarehouseRole()||roleKey()==='admin'}
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
-function applyWarehouseData(data){wh={summary:data.summary||{},warehouses:data.warehouses||[],technicians:data.technicians||[],products:data.products||[],stockBalances:data.stockBalances||[],stockUsage:data.stockUsage||[],technicianBalances:data.technicianBalances||[],rolloutUsage:data.rolloutUsage||[],rolloutRecords:data.rolloutRecords||0,movements:data.movements||[],audit:data.audit||[],mrs:data.mrs||[],receipts:data.receipts||[]};renderWarehouse()}
+function applyWarehouseData(data){wh={summary:data.summary||{},warehouses:data.warehouses||[],technicians:data.technicians||[],products:data.products||[],stockBalances:data.stockBalances||[],stockUsage:data.stockUsage||[],technicianBalances:data.technicianBalances||[],rolloutUsage:data.rolloutUsage||[],rolloutRecords:data.rolloutRecords||0,movements:data.movements||[],audit:data.audit||[],mrs:data.mrs||[],receipts:data.receipts||[],users:wh.users||[]};renderWarehouse()}
 async function loadWarehouse(){try{const cached=localStorage.getItem('warehouseBootstrap');if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data)}catch(e){toast(e.message)}}
 async function refreshWarehouse(){try{localStorage.removeItem('warehouseBootstrap');toast('جاري تحديث البيانات...');const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data);toast('تم تحديث البيانات')}catch(e){toast(e.message)}}
 function syncWarehouseLater(){localStorage.removeItem('warehouseBootstrap');setTimeout(()=>loadWarehouse(),80)}
@@ -352,10 +373,10 @@ async function refreshMrsFast(){try{const d=await api('/api/warehouse/material-r
 function pct(v,total){return total?Math.max(0,Math.min(100,(Number(v||0)/Number(total||0))*100)):0}
 function meter(width,hot=false){return `<div class="meter"><i class="${hot?'hot':''}" style="width:${Math.max(2,Math.min(100,Number(width||0)))}%"></i></div>`}
 function compactTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap executive-table"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
-function renderWarehouseQueuesBadge(){let count=0,label='notifications';if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length;label='workflow'}else if(roleKey()==='approver'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length;label='MR'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved').length;label='ready issue'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
+function renderWarehouseQueuesBadge(){let count=0,label='notifications';if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length;label='workflow'}else if(isApprovalRole()){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length;label='MR'}else if(isWarehouseRole()){count=(wh.mrs||[]).filter(r=>r.status==='approved').length;label='ready issue'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
 function setApprovalBadge(count,label='notifications'){const badge=document.getElementById('approvalBadge');if(!badge)return;badge.textContent=`${fmt(count)} ${label}`;badge.className='notify-badge'+(Number(count)?' hot':'')}
 function pendingForRequester(){return (wh.mrs||[]).filter(r=>['pending_approval','approved'].includes(r.status)&&normalizeText(r.requester_name)===normalizeText(activeUser)).length}
-async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='MR workflow needs attention'}else if(roleKey()==='approver'){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New MR waiting for approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.warehouse_queue_count||0;label='ready issue';msg='Approved MR ready for issue'}else{count=pendingForRequester();label='pending';msg='Your MR is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
+async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='MR workflow needs attention'}else if(isApprovalRole()){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New MR waiting for approval'}else if(isWarehouseRole()){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.warehouse_queue_count||0;label='ready issue';msg='Approved MR ready for issue'}else{count=pendingForRequester();label='pending';msg='Your MR is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
 function workflowActions(req,type){if(type==='approval'){return `<div class="row-actions"><button class="btn primary" onclick="approveMr(${req.id})">Approve</button><button class="btn danger" onclick="rejectMr(${req.id})">Reject</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}return `<div class="row-actions"><button class="btn primary" onclick="issueApprovedMr(${req.id})">Issue</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}
 function renderWorkflowQueues(){
 renderWarehouseQueuesBadge();
@@ -427,10 +448,14 @@ renderTechnicianBalances();
 renderRolloutUsage();
 document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['Serial','serial_number']],wh.movements);
 document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],wh.audit);
+renderUsers();
 ['receiveWarehouse','adjustWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderAdjustHint();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
 function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
 async function createWarehouse(){try{await api('/api/warehouse/warehouses',{method:'POST',body:JSON.stringify({name:whName.value.trim(),location:whLocation.value.trim()})});whName.value='';whLocation.value='';toast('تم حفظ المستودع');await loadWarehouse()}catch(e){toast(e.message)}}
 async function createTechnician(){try{await api('/api/warehouse/technicians',{method:'POST',body:JSON.stringify({name:techName.value.trim(),phone:techPhone.value.trim()})});techName.value='';techPhone.value='';toast('تم حفظ الفني');await loadWarehouse()}catch(e){toast(e.message)}}
+function renderUsers(){const box=document.getElementById('usersTable');if(!box)return;box.innerHTML=rowsTable([['Username','username'],['Name','name'],['Role','role'],['Status','status']],wh.users||[])}
+async function loadUsers(){if(roleKey()!=='admin')return;try{const data=await api('/api/auth/users');wh.users=data.users||[];renderUsers()}catch(e){toast(e.message)}}
+async function createAppUser(){if(roleKey()!=='admin'){toast('Admin only');return}try{const body={username:newUsername.value.trim(),name:newUserName.value.trim(),role:newUserRole.value,password:newUserPassword.value,status:'active'};await api('/api/auth/users',{method:'POST',body:JSON.stringify(body)});newUsername.value='';newUserName.value='';newUserPassword.value='';toast('تم حفظ المستخدم');await loadUsers()}catch(e){toast(e.message)}}
 function productActions(row){return roleKey()==='admin'?`<button class="btn danger" onclick="deleteProduct(${row.id})">حذف</button>`:''}
 async function deleteProduct(id){
 if(roleKey()!=='admin'){toast('Admin only');return}
@@ -598,7 +623,7 @@ async function saveMr(){
     syncWarehouseLater();
   }catch(e){toast(e.message)}
 }function mrTableAction(r){const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
-function visibleMrRows(){if(roleKey()==='warehousemanager')return (wh.mrs||[]).filter(r=>r.status==='approved'||r.status==='issued');return wh.mrs||[]}
+function visibleMrRows(){if(isWarehouseRole())return (wh.mrs||[]).filter(r=>r.status==='approved'||r.status==='issued');return wh.mrs||[]}
 function renderMrTable(){mrTable.innerHTML=rowsTable([['Order','order_number'],['Warehouse','warehouse'],['Site','site_id'],['Requester','requester_name'],['Approver','receiver_name'],['Status','status',(v)=>statusChip(v)],['Date','creation_date'],['Action','id',(v,r)=>mrTableAction(r)]],visibleMrRows())}
 function printMr(){ensureFitForPrint();document.getElementById('mr').classList.add('printing');window.print();setTimeout(()=>document.getElementById('mr').classList.remove('printing'),500)}
 function setupPad(id){const c=document.getElementById(id),ctx=c.getContext('2d');function size(){const r=c.getBoundingClientRect();c.width=Math.max(300,r.width);c.height=110;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111'}size();let draw=false;function pos(e){const r=c.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return{x:(p.clientX-r.left)*(c.width/r.width),y:(p.clientY-r.top)*(c.height/r.height)}}function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault()}function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();renderMrPreview();e.preventDefault()}function end(){draw=false;renderMrPreview()}c.addEventListener('mousedown',start);c.addEventListener('mousemove',move);window.addEventListener('mouseup',end);c.addEventListener('touchstart',start,{passive:false});c.addEventListener('touchmove',move,{passive:false});c.addEventListener('touchend',end)}
