@@ -1,6 +1,7 @@
 import json
 import hmac
 import re
+import time
 from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -30,6 +31,9 @@ from models import (
     TechnicianBalance,
     Warehouse,
 )
+
+WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
+WAREHOUSE_CACHE_TTL = 25
 
 Base.metadata.create_all(bind=engine)
 
@@ -225,7 +229,12 @@ def next_number(db: Session, model, prefix: str) -> str:
     return f"{prefix}-{db.query(model).count() + 1:05d}"
 
 
+def clear_warehouse_cache():
+    WAREHOUSE_CACHE.clear()
+
+
 def log_audit(db: Session, action: str, entity_type: str, entity_id: str, actor: str, details: dict):
+    clear_warehouse_cache()
     db.add(
         AuditLog(
             action=action,
@@ -428,6 +437,21 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
     }
 
 
+def receive_order_header_to_dict(row: ReceiveOrder) -> dict:
+    return {
+        "id": row.id,
+        "order_number": row.order_number,
+        "receipt_date": row.receipt_date,
+        "supplier": row.supplier,
+        "warehouse_id": row.warehouse_id,
+        "warehouse": row.warehouse.name if row.warehouse else "",
+        "status": row.status,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "items": [],
+    }
+
+
 def requisition_to_dict(row: MaterialRequisition) -> dict:
     return {
         "id": row.id,
@@ -574,6 +598,38 @@ def login(data: LoginIn):
     }
 
 
+def requisition_header_to_dict(row: MaterialRequisition) -> dict:
+    return {
+        "id": row.id,
+        "order_number": row.order_number,
+        "creation_date": row.creation_date,
+        "warehouse_id": row.warehouse_id,
+        "warehouse": row.warehouse.name if row.warehouse else "",
+        "entity": row.entity,
+        "project_name": row.project_name,
+        "site_id": row.site_id,
+        "site_address": row.site_address,
+        "wo_no": row.wo_no,
+        "product_domain": row.product_domain,
+        "team_leader": row.team_leader,
+        "receiver_tel": row.receiver_tel,
+        "request_shipment_time": row.request_shipment_time,
+        "request_arrived_site_time": row.request_arrived_site_time,
+        "requester_name": row.requester_name,
+        "requester_title": row.requester_title,
+        "requester_date": row.requester_date,
+        "requester_comment": row.requester_comment,
+        "receiver_name": row.receiver_name,
+        "receiver_title": row.receiver_title,
+        "receiver_date": row.receiver_date,
+        "receiver_comment": row.receiver_comment,
+        "status": row.status,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "items": [],
+    }
+
+
 @app.get("/api/auth/users")
 def list_app_users():
     return {
@@ -620,6 +676,7 @@ def save_record(data: dict, db: Session = Depends(db_session)):
     row.labeling = data.get("labeling", "")
 
     db.commit()
+    clear_warehouse_cache()
     db.refresh(row)
 
     return {
@@ -642,31 +699,44 @@ def warehouse_summary(db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/bootstrap")
-def warehouse_bootstrap(db: Session = Depends(db_session)):
+def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
+    cache_key = "light" if light else "full"
+    cached = WAREHOUSE_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < WAREHOUSE_CACHE_TTL:
+        return {**cached[1], "cached": True}
+
     stock = list_stock_balances(db)
     usage = list_stock_usage(db)
-    tech = list_technician_balances(db)
-    rollout = list_rollout_material_usage(db)
-    movements = list_stock_movements(40, db)
-    audit = list_audit_logs(40, db)
-    mrs = list_material_requisitions(200, db)
-    receipts = list_receive_orders(60, db)
-    return {
+    movements = list_stock_movements(12 if light else 40, db)
+    mrs = list_material_requisition_headers(80, db) if light else list_material_requisitions(200, db)
+    receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
+    payload = {
         "success": True,
+        "partial": light,
         "summary": warehouse_summary(db),
         "warehouses": list_warehouses(db)["warehouses"],
         "technicians": list_technicians(db)["technicians"],
         "products": list_products(db)["products"],
         "stockBalances": stock["balances"],
         "stockUsage": usage["usage"],
-        "technicianBalances": tech["balances"],
-        "rolloutUsage": rollout["usage"],
-        "rolloutRecords": rollout["rollout_records"],
         "movements": movements["movements"],
-        "audit": audit["logs"],
         "mrs": mrs["requisitions"],
         "receipts": receipts["receipts"],
     }
+    if not light:
+        tech = list_technician_balances(db)
+        rollout = list_rollout_material_usage(db)
+        audit = list_audit_logs(40, db)
+        payload.update(
+            {
+                "technicianBalances": tech["balances"],
+                "rolloutUsage": rollout["usage"],
+                "rolloutRecords": rollout["rollout_records"],
+                "audit": audit["logs"],
+            }
+        )
+    WAREHOUSE_CACHE[cache_key] = (time.monotonic(), payload)
+    return payload
 
 
 @app.get("/api/warehouse/warehouses")
@@ -685,6 +755,7 @@ def create_warehouse(data: WarehouseIn, db: Session = Depends(db_session)):
         db.rollback()
         raise HTTPException(status_code=400, detail="Warehouse name already exists") from exc
     db.refresh(row)
+    clear_warehouse_cache()
     return {"success": True, "warehouse": {"id": row.id, "name": row.name, "location": row.location, "status": row.status}}
 
 
@@ -700,6 +771,7 @@ def create_technician(data: TechnicianIn, db: Session = Depends(db_session)):
     db.add(row)
     db.commit()
     db.refresh(row)
+    clear_warehouse_cache()
     return {"success": True, "technician": {"id": row.id, "name": row.name, "phone": row.phone, "status": row.status}}
 
 
@@ -730,6 +802,7 @@ def create_product(data: ProductIn, db: Session = Depends(db_session)):
         db.rollback()
         raise HTTPException(status_code=400, detail="Product SKU already exists") from exc
     db.refresh(row)
+    clear_warehouse_cache()
     return {"success": True, "product": product_to_dict(row)}
 
 
@@ -1085,6 +1158,17 @@ def list_material_requisitions(limit: int = 50, db: Session = Depends(db_session
     return {"success": True, "requisitions": [requisition_to_dict(r) for r in rows]}
 
 
+def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse))
+        .order_by(MaterialRequisition.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in rows]}
+
+
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, db: Session = Depends(db_session)):
     row = db.get(MaterialRequisition, requisition_id)
@@ -1112,6 +1196,17 @@ def list_receive_orders(limit: int = 50, db: Session = Depends(db_session)):
         .all()
     )
     return {"success": True, "receipts": [receive_order_to_dict(r) for r in rows]}
+
+
+def list_receive_order_headers(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(ReceiveOrder)
+        .options(joinedload(ReceiveOrder.warehouse))
+        .order_by(ReceiveOrder.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "receipts": [receive_order_header_to_dict(r) for r in rows]}
 
 
 @app.post("/api/warehouse/material-requisitions")
