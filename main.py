@@ -1,8 +1,6 @@
 import json
 import hmac
-import hashlib
 import re
-import secrets
 from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -17,7 +15,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from database import Base, SessionLocal, engine
 from models import (
     AuditLog,
-    AppUser,
     IssueOrder,
     IssueOrderItem,
     MaterialRequisition,
@@ -62,10 +59,10 @@ app = FastAPI(title="FTTH Rollout")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-DEFAULT_APP_USERS = {
+APP_USERS = {
     "admin": {"name": "Admin", "role": "Admin", "password": "Admin@123"},
     "requester": {"name": "Requester", "role": "Requester", "password": "Requester@123"},
-    "approval": {"name": "Approver", "role": "Approval", "password": "Approval@123"},
+    "approval": {"name": "Approver", "role": "Approver", "password": "Approval@123"},
     "warehouse": {"name": "Warehouse Manager", "role": "Warehouse Manager", "password": "Warehouse@123"},
 }
 
@@ -77,70 +74,9 @@ def local_today() -> str:
     return datetime.now(TRIPOLI_TZ).date().isoformat()
 
 
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
-    return f"pbkdf2_sha256${salt}${digest}"
-
-
-def verify_password(password: str, stored_hash: str) -> bool:
-    try:
-        method, salt, digest = stored_hash.split("$", 2)
-    except ValueError:
-        return False
-    if method != "pbkdf2_sha256":
-        return False
-    test = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
-    return hmac.compare_digest(test, digest)
-
-
-def user_to_dict(row: AppUser) -> dict:
-    return {
-        "id": row.id,
-        "username": row.username,
-        "name": row.name,
-        "role": row.role,
-        "status": row.status,
-    }
-
-
-def seed_app_users():
-    db = SessionLocal()
-    try:
-        for username, data in DEFAULT_APP_USERS.items():
-            exists = db.query(AppUser).filter(AppUser.username == username).first()
-            if exists:
-                continue
-            db.add(
-                AppUser(
-                    username=username,
-                    name=data["name"],
-                    role=data["role"],
-                    password_hash=hash_password(data["password"]),
-                    status="active",
-                )
-            )
-        db.commit()
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
-
-
-seed_app_users()
-
-
 class LoginIn(BaseModel):
     username: str
     password: str
-
-
-class AppUserIn(BaseModel):
-    username: str
-    name: str
-    role: Literal["Admin", "Requester", "Approval", "Approver", "Warehouse Manager"]
-    password: str = Field(min_length=4)
-    status: str = "active"
 
 
 class WarehouseIn(BaseModel):
@@ -612,46 +548,30 @@ def warehouse_home():
 
 
 @app.post("/api/auth/login")
-def login(data: LoginIn, db: Session = Depends(db_session)):
+def login(data: LoginIn):
     key = data.username.strip().lower()
-    user = db.query(AppUser).filter(AppUser.username == key, AppUser.status == "active").first()
-    if user is None or not verify_password(data.password, user.password_hash):
+    user = APP_USERS.get(key)
+    if user is None or not hmac.compare_digest(data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return {
         "success": True,
         "user": {
             "username": key,
-            "name": user.name,
-            "role": user.role,
+            "name": user["name"],
+            "role": user["role"],
         },
     }
 
 
 @app.get("/api/auth/users")
-def list_app_users(db: Session = Depends(db_session)):
-    users = db.query(AppUser).order_by(AppUser.role, AppUser.name).all()
-    return {"success": True, "users": [user_to_dict(row) for row in users]}
-
-
-@app.post("/api/auth/users")
-def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
-    username = data.username.strip().lower()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
-    exists = db.query(AppUser).filter(AppUser.username == username).first()
-    if exists:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    user = AppUser(
-        username=username,
-        name=data.name.strip() or username,
-        role=data.role,
-        password_hash=hash_password(data.password),
-        status=data.status.strip() or "active",
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return {"success": True, "user": user_to_dict(user)}
+def list_app_users():
+    return {
+        "success": True,
+        "users": [
+            {"username": username, "name": data["name"], "role": data["role"]}
+            for username, data in APP_USERS.items()
+        ],
+    }
 
 
 @app.get("/api/records")
@@ -1035,7 +955,7 @@ def canonical_material_key(value: str) -> str:
 
 
 def is_workflow_role(value: str) -> bool:
-    return normalize_usage_key(value) in {"approver", "approval", "admin"}
+    return normalize_usage_key(value) in {"approver", "admin"}
 
 
 TECHNICIAN_USAGE_ALIASES = {
