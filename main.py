@@ -1011,8 +1011,8 @@ def list_rollout_material_usage(db: Session = Depends(db_session)):
             for area_key in area_usage_keys(row.get("site_id", ""), row.get("site_address", ""))
         )
         material_used = rollout_material_usage.get(material_key, 0)
-        used = min(area_used, issued)
-        remaining = max(issued - used, 0)
+        used = area_used
+        remaining = issued - used
         rows.append(
             {
                 **row,
