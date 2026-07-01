@@ -55,12 +55,20 @@ app = FastAPI(title="FTTH Rollout")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-APP_USERS = {
-    "admin": {"name": "Admin", "role": "Admin", "password": "Admin@123"},
-    "requester": {"name": "Requester", "role": "Requester", "password": "Requester@123"},
-    "approval": {"name": "Approver", "role": "Approver", "password": "Approval@123"},
-    "warehouse": {"name": "Warehouse Manager", "role": "Warehouse Manager", "password": "Warehouse@123"},
-}
+APP_USERS = [
+    {"username": "Aysar", "name": "Aysar", "role": "Admin", "password": "Aysar@1"},
+    {"username": "Hamza", "name": "Hamza", "role": "Admin", "password": "Hamza@2"},
+    {"username": "Aysar", "name": "Aysar", "role": "Requester", "password": "Aysar@2"},
+    {"username": "Hamza", "name": "Hamza", "role": "Requester", "password": "Hamza@3"},
+    {"username": "Ryadh", "name": "Ryadh", "role": "Requester", "password": "Ryadh@1"},
+    {"username": "Adel", "name": "Adel", "role": "Requester", "password": "Adel@1"},
+    {"username": "Nadeer", "name": "Nadeer", "role": "Requester", "password": "Nadeer@1"},
+    {"username": "Ghassan", "name": "Ghassan", "role": "Requester", "password": "Ghassan@1"},
+    {"username": "Mustafa", "name": "Mustafa", "role": "Approval", "password": "Mustafa@1"},
+    {"username": "Tripoli", "name": "Tripoli", "role": "Warehouse Manager", "password": "WH@123"},
+    {"username": "Misurata", "name": "Misurata", "role": "Warehouse Manager", "password": "WH@123"},
+    {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password": "Wh@123"},
+]
 
 
 TRIPOLI_TZ = ZoneInfo("Africa/Tripoli")
@@ -546,13 +554,20 @@ def warehouse_home():
 @app.post("/api/auth/login")
 def login(data: LoginIn):
     key = data.username.strip().lower()
-    user = APP_USERS.get(key)
-    if user is None or not hmac.compare_digest(data.password, user["password"]):
+    user = next(
+        (
+            row
+            for row in APP_USERS
+            if row["username"].lower() == key and hmac.compare_digest(data.password, row["password"])
+        ),
+        None,
+    )
+    if user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return {
         "success": True,
         "user": {
-            "username": key,
+            "username": user["username"],
             "name": user["name"],
             "role": user["role"],
         },
@@ -564,8 +579,8 @@ def list_app_users():
     return {
         "success": True,
         "users": [
-            {"username": username, "name": data["name"], "role": data["role"]}
-            for username, data in APP_USERS.items()
+            {"username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
+            for row in APP_USERS
         ],
     }
 
@@ -951,7 +966,7 @@ def canonical_material_key(value: str) -> str:
 
 
 def is_workflow_role(value: str) -> bool:
-    return normalize_usage_key(value) in {"approver", "admin"}
+    return normalize_usage_key(value) in {"approver", "approval", "admin"}
 
 
 TECHNICIAN_USAGE_ALIASES = {
