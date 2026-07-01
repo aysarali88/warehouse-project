@@ -15,7 +15,15 @@ is_sqlite = DATABASE_URL.startswith("sqlite")
 if "pooler.supabase.com:5432" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
 
-connect_args = {"check_same_thread": False} if is_sqlite else {"prepare_threshold": None}
+connect_args = (
+    {"check_same_thread": False}
+    if is_sqlite
+    else {
+        "prepare_threshold": None,
+        "connect_timeout": 8,
+        "options": "-c lock_timeout=5000 -c statement_timeout=10000",
+    }
+)
 pool_options = (
     {}
     if is_sqlite

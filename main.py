@@ -36,15 +36,11 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_optional_columns():
     if engine.dialect.name == "postgresql":
-        statements = [
-            "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
-            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
-        ]
-    else:
-        statements = [
-            "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
-            "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
-        ]
+        return
+    statements = [
+        "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
+        "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
+    ]
     with engine.begin() as conn:
         for statement in statements:
             try:
