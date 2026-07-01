@@ -244,6 +244,51 @@ class MaterialRequisitionItem(Base):
     product = relationship("Product")
 
 
+class MaterialTransfer(Base):
+    __tablename__ = "material_transfers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transfer_number = Column(String, unique=True, nullable=False, index=True)
+    transfer_date = Column(String, default="")
+    from_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
+    to_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
+    reference_no = Column(String, default="")
+    reason = Column(Text, default="")
+    requester_name = Column(String, default="")
+    requester_title = Column(String, default="")
+    approver_name = Column(String, default="")
+    approver_title = Column(String, default="")
+    approver_date = Column(String, default="")
+    approver_comment = Column(Text, default="")
+    receiver_name = Column(String, default="")
+    receiver_date = Column(String, default="")
+    receiver_comment = Column(Text, default="")
+    status = Column(String, default="pending_approval", index=True)
+    created_by = Column(String, default="manager")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    from_warehouse = relationship("Warehouse", foreign_keys=[from_warehouse_id])
+    to_warehouse = relationship("Warehouse", foreign_keys=[to_warehouse_id])
+    items = relationship("MaterialTransferItem", back_populates="transfer", cascade="all, delete-orphan")
+
+
+class MaterialTransferItem(Base):
+    __tablename__ = "material_transfer_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transfer_id = Column(Integer, ForeignKey("material_transfers.id"), nullable=False, index=True)
+    line_no = Column(Integer, default=1)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    part_nbr = Column(String, default="")
+    description = Column(Text, default="")
+    uom = Column(String, default="PCS")
+    quantity = Column(Float, default=0)
+    remark = Column(Text, default="")
+
+    transfer = relationship("MaterialTransfer", back_populates="items")
+    product = relationship("Product")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

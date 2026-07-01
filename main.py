@@ -20,6 +20,8 @@ from models import (
     IssueOrderItem,
     MaterialRequisition,
     MaterialRequisitionItem,
+    MaterialTransfer,
+    MaterialTransferItem,
     Product,
     ProductSerial,
     ReceiveOrder,
@@ -215,6 +217,27 @@ class MaterialRequisitionActionIn(BaseModel):
     title: str = ""
     comment: str = ""
     signature: str = ""
+
+
+class MaterialTransferItemIn(BaseModel):
+    product_id: int
+    quantity: float = Field(gt=0)
+    remark: str = ""
+
+
+class MaterialTransferIn(BaseModel):
+    transfer_date: str = ""
+    from_warehouse_id: int
+    to_warehouse_id: int
+    reference_no: str = ""
+    reason: str = ""
+    requester_name: str = ""
+    requester_title: str = ""
+    approver_name: str = ""
+    approver_title: str = ""
+    receiver_name: str = ""
+    created_by: str = "manager"
+    items: list[MaterialTransferItemIn]
 
 
 def db_session():
@@ -631,6 +654,48 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
     }
 
 
+def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
+    items = []
+    if include_items:
+        items = [
+            {
+                "id": item.id,
+                "line_no": item.line_no,
+                "product_id": item.product_id,
+                "part_nbr": item.part_nbr,
+                "description": item.description,
+                "uom": item.uom,
+                "quantity": item.quantity,
+                "remark": item.remark,
+            }
+            for item in row.items
+        ]
+    return {
+        "id": row.id,
+        "transfer_number": row.transfer_number,
+        "transfer_date": row.transfer_date,
+        "from_warehouse_id": row.from_warehouse_id,
+        "from_warehouse": row.from_warehouse.name if row.from_warehouse else "",
+        "to_warehouse_id": row.to_warehouse_id,
+        "to_warehouse": row.to_warehouse.name if row.to_warehouse else "",
+        "reference_no": row.reference_no,
+        "reason": row.reason,
+        "requester_name": row.requester_name,
+        "requester_title": row.requester_title,
+        "approver_name": row.approver_name,
+        "approver_title": row.approver_title,
+        "approver_date": row.approver_date,
+        "approver_comment": row.approver_comment,
+        "receiver_name": row.receiver_name,
+        "receiver_date": row.receiver_date,
+        "receiver_comment": row.receiver_comment,
+        "status": row.status,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "items": items,
+    }
+
+
 @app.get("/api/auth/users")
 def list_app_users():
     return {
@@ -711,6 +776,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     movements = list_stock_movements(12 if light else 40, db)
     mrs = list_material_requisition_headers(80, db) if light else list_material_requisitions(200, db)
     receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
+    transfers = list_material_transfer_headers(120, db) if light else list_material_transfers(200, db)
     payload = {
         "success": True,
         "partial": light,
@@ -723,6 +789,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
         "movements": movements["movements"],
         "mrs": mrs["requisitions"],
         "receipts": receipts["receipts"],
+        "transfers": transfers["transfers"],
     }
     if not light:
         tech = list_technician_balances(db)
@@ -1178,13 +1245,55 @@ def get_material_requisition(requisition_id: int, db: Session = Depends(db_sessi
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
+def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialTransfer)
+        .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
+        .order_by(MaterialTransfer.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "transfers": [transfer_to_dict(r, include_items=False) for r in rows]}
+
+
+@app.get("/api/warehouse/material-transfers")
+def list_material_transfers(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialTransfer)
+        .options(
+            joinedload(MaterialTransfer.from_warehouse),
+            joinedload(MaterialTransfer.to_warehouse),
+            selectinload(MaterialTransfer.items).joinedload(MaterialTransferItem.product),
+        )
+        .order_by(MaterialTransfer.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "transfers": [transfer_to_dict(r) for r in rows]}
+
+
+@app.get("/api/warehouse/material-transfers/{transfer_id}")
+def get_material_transfer(transfer_id: int, db: Session = Depends(db_session)):
+    row = db.get(MaterialTransfer, transfer_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
 @app.get("/api/warehouse/notifications")
 def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     pending = db.query(MaterialRequisition).filter(MaterialRequisition.status == "pending_approval").all()
+    pending_transfers = db.query(MaterialTransfer).filter(MaterialTransfer.status == "pending_approval").all()
     user_key = normalize_usage_key(user)
     approval_count = len(pending) if not user_key else sum(1 for row in pending if normalize_usage_key(row.receiver_name) == user_key)
+    transfer_approval_count = len(pending_transfers) if not user_key else sum(1 for row in pending_transfers if normalize_usage_key(row.approver_name) in {"", user_key})
     approved_count = db.query(MaterialRequisition).filter(MaterialRequisition.status == "approved").count()
-    return {"success": True, "approval_count": approval_count, "warehouse_queue_count": approved_count}
+    approved_transfer_count = db.query(MaterialTransfer).filter(MaterialTransfer.status == "approved").count()
+    return {
+        "success": True,
+        "approval_count": approval_count + transfer_approval_count,
+        "warehouse_queue_count": approved_count + approved_transfer_count,
+    }
 
 
 @app.get("/api/warehouse/receive-orders")
@@ -1275,6 +1384,154 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     db.commit()
     db.refresh(row)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers")
+def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_session)):
+    require_warehouse(db, data.from_warehouse_id)
+    require_warehouse(db, data.to_warehouse_id)
+    if data.from_warehouse_id == data.to_warehouse_id:
+        raise HTTPException(status_code=400, detail="From and To warehouse must be different")
+    if not data.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    row = MaterialTransfer(
+        transfer_number=next_number(db, MaterialTransfer, "TR"),
+        transfer_date=data.transfer_date or local_today(),
+        from_warehouse_id=data.from_warehouse_id,
+        to_warehouse_id=data.to_warehouse_id,
+        reference_no=data.reference_no.strip(),
+        reason=data.reason.strip(),
+        requester_name=data.requester_name.strip(),
+        requester_title=data.requester_title.strip(),
+        approver_name=data.approver_name.strip(),
+        approver_title=data.approver_title.strip(),
+        receiver_name=data.receiver_name.strip(),
+        status="pending_approval",
+        created_by=data.created_by.strip() or data.requester_name.strip() or "manager",
+    )
+    db.add(row)
+    db.flush()
+
+    for index, item in enumerate(data.items, start=1):
+        product = require_product(db, item.product_id)
+        available = stock_balance(db, data.from_warehouse_id, item.product_id).quantity or 0
+        if available < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {available}.",
+            )
+        db.add(
+            MaterialTransferItem(
+                transfer_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=product.sku,
+                description=product_display_name(product),
+                uom=product.unit,
+                quantity=item.quantity,
+                remark=item.remark.strip(),
+            )
+        )
+
+    log_audit(db, "create_material_transfer", "material_transfer", row.transfer_number, row.created_by, data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "transfer_number": row.transfer_number, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
+def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+    row = db.get(MaterialTransfer, transfer_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be approved from status {row.status}")
+    actor = data.actor.strip()
+    row.approver_name = actor or row.approver_name
+    row.approver_title = data.title or row.approver_title
+    row.approver_date = local_today()
+    row.approver_comment = data.comment
+    row.status = "approved"
+    log_audit(db, "approve_material_transfer", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/reject")
+def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+    row = db.get(MaterialTransfer, transfer_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be rejected from status {row.status}")
+    actor = data.actor.strip()
+    row.approver_name = actor or row.approver_name
+    row.approver_title = data.title or row.approver_title
+    row.approver_date = local_today()
+    row.approver_comment = data.comment
+    row.status = "rejected"
+    log_audit(db, "reject_material_transfer", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/confirm")
+def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
+    row = db.get(MaterialTransfer, transfer_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "approved":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be confirmed from status {row.status}")
+    actor = data.actor.strip() or row.receiver_name or "warehouse"
+
+    for item in row.items:
+        product = require_product(db, item.product_id)
+        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id)
+        if from_balance.quantity < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {from_balance.quantity}.",
+            )
+
+    for item in row.items:
+        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id)
+        to_balance = stock_balance(db, row.to_warehouse_id, item.product_id)
+        from_balance.quantity -= item.quantity
+        to_balance.quantity += item.quantity
+        db.add(
+            StockMovement(
+                movement_type="transfer_out",
+                product_id=item.product_id,
+                warehouse_id=row.from_warehouse_id,
+                quantity=-item.quantity,
+                reference=row.transfer_number,
+                note=f"Transfer to {row.to_warehouse.name if row.to_warehouse else row.to_warehouse_id}",
+                created_by=actor,
+            )
+        )
+        db.add(
+            StockMovement(
+                movement_type="transfer_in",
+                product_id=item.product_id,
+                warehouse_id=row.to_warehouse_id,
+                quantity=item.quantity,
+                reference=row.transfer_number,
+                note=f"Transfer from {row.from_warehouse.name if row.from_warehouse else row.from_warehouse_id}",
+                created_by=actor,
+            )
+        )
+
+    row.receiver_name = actor
+    row.receiver_date = local_today()
+    row.receiver_comment = data.comment
+    row.status = "transferred"
+    log_audit(db, "confirm_material_transfer", "material_transfer", row.transfer_number, actor, data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "transfer": transfer_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/signature")

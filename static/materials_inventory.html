@@ -162,6 +162,11 @@
   </section>
 
   <section class="view" id="mr">
+    <div class="tabs no-print">
+      <button class="tab active" data-mr-mode="mrForm">Material Requisition</button>
+      <button class="tab" data-mr-mode="transferForm">Material Transfer</button>
+    </div>
+    <div id="mrForm" class="mr-mode">
     <div class="grid two no-print requester-work">
       <div class="card">
         <h3>إنشاء Material Requisition</h3>
@@ -235,6 +240,48 @@
     <div class="card no-print">
       <h3>طلبات MR المحفوظة</h3>
       <div id="mrTable"></div>
+    </div>
+    </div>
+
+    <div id="transferForm" class="mr-mode" style="display:none">
+      <div class="grid two no-print requester-work">
+        <div class="card">
+          <h3>إنشاء Material Transfer</h3>
+          <div class="form">
+            <div class="field"><label>Transfer Date</label><input id="trDate" type="date"></div>
+            <div class="field"><label>Reference No</label><input id="trReference" placeholder="TR-REF-001"></div>
+            <div class="field"><label>From Warehouse</label><select id="trFromWarehouse" onchange="renderTransferLines()"></select></div>
+            <div class="field"><label>To Warehouse</label><select id="trToWarehouse"></select></div>
+            <div class="field"><label>Requester Name</label><input id="trRequesterName"></div>
+            <div class="field"><label>Requester Title</label><input id="trRequesterTitle" value="Requester"></div>
+            <div class="field"><label>Approver Name</label><input id="trApproverName" value="Mustafa"></div>
+            <div class="field"><label>Receiver Name</label><input id="trReceiverName" placeholder="Destination warehouse manager"></div>
+            <div class="field full"><label>Reason</label><input id="trReason" placeholder="Project reallocation / stock balancing"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>بنود التحويل</h3>
+          <div id="transferLines" class="mr-list"></div>
+          <button class="btn soft" onclick="addTransferLine()">إضافة بند</button>
+          <button class="btn primary" onclick="saveTransfer()">Submit Transfer for Approval</button>
+        </div>
+      </div>
+      <div class="workflow-grid no-print">
+        <div class="card approver-work">
+          <h3>Transfer Approval Inbox</h3>
+          <div class="hint">طلبات التحويل بانتظار موافقة Approval.</div>
+          <div id="transferApprovalInbox"></div>
+        </div>
+        <div class="card warehouse-work">
+          <h3>Transfer Queue</h3>
+          <div class="hint">التحويلات المعتمدة والجاهزة للتنفيذ بين المستودعات.</div>
+          <div id="transferWarehouseQueue"></div>
+        </div>
+      </div>
+      <div class="card no-print">
+        <h3>Material Transfers المحفوظة</h3>
+        <div id="transferTable"></div>
+      </div>
     </div>
   </section>
 
@@ -311,8 +358,9 @@
 </div>
 <div class="toast" id="toast"></div>
 <script>
-let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,movements:[],audit:[],mrs:[],receipts:[]};
+let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,movements:[],audit:[],mrs:[],receipts:[],transfers:[]};
 let mrLineId=0;
+let transferLineId=0;
 let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
 let activeUser=session?.name||'';
 let activeRole=session?.role||'';
@@ -340,37 +388,46 @@ function isAdmin(){return roleKey()==='admin'}
 function canApprove(){return ['approver','approval','admin'].includes(roleKey())}
 function canCreateMr(){return ['requester','admin'].includes(roleKey())}
 function canViewAll(){return ['requester','approver','approval','admin'].includes(roleKey())}
-function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=session?.role||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver'}
+function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=session?.role||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver';if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa'}
 function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
 function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
 function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
 function userOwnsMr(r){if(isAdmin())return true;const me=normalizeText(activeUser);if(roleKey()==='warehousemanager')return normalizeText(r.warehouse)===me||normalizeText(r.created_by)===me;if(canApprove())return r.status==='pending_approval'||normalizeText(r.receiver_name)===me;if(roleKey()==='requester')return normalizeText(r.requester_name)===me||normalizeText(r.created_by)===me;return normalizeText(r.created_by)===me}
+function userOwnsTransfer(r){if(isAdmin())return true;const me=normalizeText(activeUser);if(roleKey()==='warehousemanager')return normalizeText(r.from_warehouse)===me||normalizeText(r.to_warehouse)===me||normalizeText(r.receiver_name)===me;if(canApprove())return r.status==='pending_approval'||normalizeText(r.approver_name)===me;if(roleKey()==='requester')return normalizeText(r.requester_name)===me||normalizeText(r.created_by)===me;return normalizeText(r.created_by)===me}
 function userOwnsMovement(r){if(isAdmin())return true;const me=normalizeText(activeUser);return normalizeText(r.created_by)===me||normalizeText(r.technician)===me||normalizeText(r.warehouse)===me}
 function userOwnsAudit(r){if(isAdmin())return true;return normalizeText(r.actor)===normalizeText(activeUser)}
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
-function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[]};renderWarehouse()}
+function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[]};renderWarehouse()}
 async function loadWarehouse(){try{const cached=localStorage.getItem('warehouseBootstrap');if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api('/api/warehouse/bootstrap?light=1');applyWarehouseData(data,true);loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function loadWarehouseFull(showToast=true){try{const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
 async function refreshWarehouse(){try{toast('تحديث سريع...');const data=await api('/api/warehouse/bootstrap?light=1');applyWarehouseData(data,true);toast('ظهرت البيانات الأساسية، جاري تحديث التفاصيل...');loadWarehouseFull(false)}catch(e){toast(e.message)}}
 function syncWarehouseLater(){localStorage.removeItem('warehouseBootstrap');setTimeout(()=>loadWarehouse(),80)}
 function upsertLocalMr(req){if(!req)return;const rows=wh.mrs||[];const i=rows.findIndex(r=>String(r.id)===String(req.id));if(i>=0)rows[i]=req;else rows.unshift(req);wh.mrs=rows;renderWarehouse()}
+function upsertLocalTransfer(row){if(!row)return;const rows=wh.transfers||[];const i=rows.findIndex(r=>String(r.id)===String(row.id));if(i>=0)rows[i]=row;else rows.unshift(row);wh.transfers=rows;renderWarehouse()}
 async function refreshMrsFast(){try{const d=await api('/api/warehouse/material-requisitions?limit=200');wh.mrs=d.requisitions||[];renderWorkflowQueues();renderMrTable();pollNotifications(false)}catch(e){}}
 function pct(v,total){return total?Math.max(0,Math.min(100,(Number(v||0)/Number(total||0))*100)):0}
 function meter(width,hot=false){return `<div class="meter"><i class="${hot?'hot':''}" style="width:${Math.max(2,Math.min(100,Number(width||0)))}%"></i></div>`}
 function compactTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap executive-table"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
-function renderWarehouseQueuesBadge(){let count=0,label='notifications';if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length;label='workflow'}else if(canApprove()){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length;label='MR'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved').length;label='ready issue'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
+function renderWarehouseQueuesBadge(){let count=0,label='notifications';const pendingTransfers=(wh.transfers||[]).filter(r=>r.status==='pending_approval').length;const approvedTransfers=(wh.transfers||[]).filter(r=>r.status==='approved'&&userOwnsTransfer(r)).length;if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length+pendingTransfers+approvedTransfers;label='workflow'}else if(canApprove()){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length+pendingTransfers;label='MR'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved'&&userOwnsMr(r)).length+approvedTransfers;label='ready issue'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
 function setApprovalBadge(count,label='notifications'){const badge=document.getElementById('approvalBadge');if(!badge)return;badge.textContent=`${fmt(count)} ${label}`;badge.className='notify-badge'+(Number(count)?' hot':'')}
 function pendingForRequester(){return (wh.mrs||[]).filter(r=>['pending_approval','approved'].includes(r.status)&&normalizeText(r.requester_name)===normalizeText(activeUser)).length}
-async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='MR workflow needs attention'}else if(canApprove()){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New MR waiting for approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.warehouse_queue_count||0;label='ready issue';msg='Approved MR ready for issue'}else{count=pendingForRequester();label='pending';msg='Your MR is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
+async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='Workflow needs attention'}else if(canApprove()){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New request waiting for approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(activeUser));count=d.warehouse_queue_count||0;label='ready issue';msg='Approved request ready for warehouse'}else{count=pendingForRequester();label='pending';msg='Your request is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
 function workflowActions(req,type){if(type==='approval'){return `<div class="row-actions"><button class="btn primary" onclick="approveMr(${req.id})">Approve</button><button class="btn danger" onclick="rejectMr(${req.id})">Reject</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}return `<div class="row-actions"><button class="btn primary" onclick="issueApprovedMr(${req.id})">Issue</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}
+function transferActions(row,type){if(type==='approval')return `<div class="row-actions"><button class="btn primary" onclick="approveTransfer(${row.id})">Approve</button><button class="btn danger" onclick="rejectTransfer(${row.id})">Reject</button></div>`;if(type==='warehouse')return `<div class="row-actions"><button class="btn primary" onclick="confirmTransfer(${row.id})">Confirm Transfer</button></div>`;return ''}
 function renderWorkflowQueues(){
 renderWarehouseQueuesBadge();
 const inbox=(wh.mrs||[]).filter(r=>r.status==='pending_approval'&&canApprove());
 const queue=(wh.mrs||[]).filter(r=>r.status==='approved'&&userOwnsMr(r));
+const transferInbox=(wh.transfers||[]).filter(r=>r.status==='pending_approval'&&canApprove());
+const transferQueue=(wh.transfers||[]).filter(r=>r.status==='approved'&&userOwnsTransfer(r));
 const inboxEl=document.getElementById('approvalInbox');
 const queueEl=document.getElementById('warehouseQueue');
 if(inboxEl)inboxEl.innerHTML=canApprove()?compactTable([['Order','order_number'],['Area','site_id'],['Requester','requester_name'],['Warehouse','warehouse'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>workflowActions(r,'approval')]],inbox):'<div class="empty">Approver فقط يقدر يعتمد الطلبات.</div>';
 if(queueEl)queueEl.innerHTML=canManageWarehouse()?compactTable([['Order','order_number'],['Area','site_id'],['Approver','receiver_name'],['Warehouse','warehouse'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>workflowActions(r,'warehouse')]],queue):'<div class="empty">Warehouse Manager فقط يقدر يشوف طلبات الصرف الجاهزة.</div>';
+const transferInboxEl=document.getElementById('transferApprovalInbox');
+const transferQueueEl=document.getElementById('transferWarehouseQueue');
+if(transferInboxEl)transferInboxEl.innerHTML=canApprove()?compactTable([['Transfer','transfer_number'],['From','from_warehouse'],['To','to_warehouse'],['Requester','requester_name'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>transferActions(r,'approval')]],transferInbox):'<div class="empty">Approver فقط يقدر يعتمد التحويلات.</div>';
+if(transferQueueEl)transferQueueEl.innerHTML=canManageWarehouse()?compactTable([['Transfer','transfer_number'],['From','from_warehouse'],['To','to_warehouse'],['Approver','approver_name'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>transferActions(r,'warehouse')]],transferQueue):'<div class="empty">Warehouse Manager فقط يقدر يؤكد التحويلات الجاهزة.</div>';
 }
 async function approveMr(id){if(!canApprove()){toast('Approver فقط يقدر يعتمد MR');return}try{toast('جاري اعتماد MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Approved'})});toast('MR approved');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 async function rejectMr(id){if(!canApprove()){toast('Approver فقط يقدر يرفض MR');return}const comment=prompt('سبب الرفض؟')||'';try{toast('جاري رفض MR...');const r=await api(`/api/warehouse/material-requisitions/${id}/reject`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('MR rejected');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
@@ -436,7 +493,7 @@ renderRolloutUsage();
 document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['المستخدم','created_by'],['Serial','serial_number']],myMovements);
 document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],myAudit);
 renderUsers();
-['receiveWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
+['receiveWarehouse','issueWarehouse','mrWarehouse','trFromWarehouse','trToWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();initTransferDefaults();renderMrLines();renderTransferLines();renderMrPreview();renderMrTable();renderTransferTable();syncSerialHint('issue')}
 function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
 async function createWarehouse(){try{await api('/api/warehouse/warehouses',{method:'POST',body:JSON.stringify({name:whName.value.trim(),location:whLocation.value.trim()})});whName.value='';whLocation.value='';toast('تم حفظ المستودع');await loadWarehouse()}catch(e){toast(e.message)}}
 async function createTechnician(){try{await api('/api/warehouse/technicians',{method:'POST',body:JSON.stringify({name:techName.value.trim(),phone:techPhone.value.trim()})});techName.value='';techPhone.value='';toast('تم حفظ الفني');await loadWarehouse()}catch(e){toast(e.message)}}
@@ -517,7 +574,10 @@ await loadWarehouse();
 }
 async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');stockBalances.style.display=b.dataset.balance==='stockBalances'?'block':'none';technicianBalances.style.display=b.dataset.balance==='technicianBalances'?'block':'none';rolloutUsage.style.display=b.dataset.balance==='rolloutUsage'?'block':'none'}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+if(b.dataset.balance){document.querySelectorAll('[data-balance]').forEach(x=>x.classList.remove('active'));b.classList.add('active');stockBalances.style.display=b.dataset.balance==='stockBalances'?'block':'none';technicianBalances.style.display=b.dataset.balance==='technicianBalances'?'block':'none';rolloutUsage.style.display=b.dataset.balance==='rolloutUsage'?'block':'none';return}
+if(b.dataset.mrMode){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===b.dataset.mrMode?'block':'none');if(b.dataset.mrMode==='transferForm'){renderTransferLines();renderTransferTable()}}
+}));
 function today(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 function formatDate(v){if(!v)return'';const d=new Date(v+'T00:00:00');return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')}
 function initMrDefaults(){mrCreationDate.value=today();mrShipTime.value=today();mrArriveTime.value=today();const box=document.getElementById('mrLines');if(box&&!box.children.length)addMrLine()}
@@ -530,6 +590,46 @@ function productOptionHtml(selected=''){
     return `<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})${stockText}</option>`;
   }).join('')+'<option value="">Manual item</option>'
 }
+function warehouseBalanceQty(warehouseId,productId){const row=(wh.stockBalances||[]).find(b=>String(b.warehouse_id)===String(warehouseId)&&String(b.product_id)===String(productId));return Number(row?.quantity||0)}
+function transferProductOptionHtml(selected=''){
+  const rows=[...wh.products].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const fromWarehouse=document.getElementById('trFromWarehouse')?.value||'';
+  return '<option value="">اختر المادة</option>'+rows.map(p=>{
+    const stockText=fromWarehouse?` - available ${fmt(warehouseBalanceQty(fromWarehouse,p.id))}`:'';
+    return `<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})${stockText}</option>`;
+  }).join('')
+}
+function initTransferDefaults(){const d=document.getElementById('trDate');if(d&&!d.value)d.value=today();if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa';const box=document.getElementById('transferLines');if(box&&!box.children.length)addTransferLine()}
+function renderTransferLines(){const box=document.getElementById('transferLines');if(!box)return;if(!box.children.length){addTransferLine();return}[...box.querySelectorAll('.trProduct')].forEach(sel=>{const selected=sel.value;sel.innerHTML=transferProductOptionHtml(selected);sel.value=selected;const row=sel.closest('.mr-line');const p=productById(selected);row.querySelector('.trSku').value=p?.sku||'';row.querySelector('.trUom').value=p?.unit||'PCS';row.querySelector('.trAvailable').value=selected?fmt(warehouseBalanceQty(trFromWarehouse.value,selected)):''})}
+function addTransferLine(data={}){const box=document.getElementById('transferLines');if(!box)return;transferLineId++;const row=document.createElement('div');row.className='mr-line';row.dataset.id=transferLineId;row.innerHTML=`<div class="field"><label>Material</label><select class="trProduct" onchange="renderTransferLines()">${transferProductOptionHtml(data.product_id||'')}</select></div><div class="field"><label>Available</label><input class="trAvailable" readonly></div><div class="field"><label>Qty</label><input class="trQty" type="number" min="1" value="${data.quantity||1}"></div><button onclick="this.parentElement.remove()">×</button><div class="field"><label>SKU</label><input class="trSku" readonly></div><div class="field"><label>UOM</label><input class="trUom" value="PCS" readonly></div><div class="field full"><label>Remark</label><input class="trRemark" value="${esc(data.remark||'')}" placeholder="Optional note"></div>`;box.appendChild(row);renderTransferLines()}
+function getTransferItems(){const box=document.getElementById('transferLines');return [...(box?box.querySelectorAll('.mr-line'):[])].map(row=>({product_id:row.querySelector('.trProduct').value?Number(row.querySelector('.trProduct').value):null,quantity:Number(row.querySelector('.trQty').value||0),remark:row.querySelector('.trRemark')?.value.trim()||''})).filter(x=>x.product_id&&x.quantity>0)}
+function visibleTransfers(){return (wh.transfers||[]).filter(userOwnsTransfer)}
+function transferTableAction(r){const approve=(r.status==='pending_approval'&&canApprove())?`<button class="btn primary" onclick="approveTransfer(${r.id})">Approve</button>`:'';const reject=(r.status==='pending_approval'&&canApprove())?`<button class="btn danger" onclick="rejectTransfer(${r.id})">Reject</button>`:'';const confirm=(r.status==='approved'&&canManageWarehouse()&&userOwnsTransfer(r))?`<button class="btn primary" onclick="confirmTransfer(${r.id})">Confirm</button>`:'';return `<div class="row-actions">${approve}${reject}${confirm}</div>`}
+function renderTransferTable(){const box=document.getElementById('transferTable');if(!box)return;box.innerHTML=rowsTable([['Transfer','transfer_number'],['Date','transfer_date'],['From','from_warehouse'],['To','to_warehouse'],['Requester','requester_name'],['Approver','approver_name'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>transferTableAction(r)]],visibleTransfers())}
+async function saveTransfer(){
+  try{
+    if(!canCreateMr()){toast('Requester فقط يقدر ينشئ تحويل');return}
+    const fromId=Number(trFromWarehouse.value),toId=Number(trToWarehouse.value);
+    if(!fromId||!toId){toast('اختر مستودع المصدر والوجهة');return}
+    if(fromId===toId){toast('لا يمكن التحويل لنفس المستودع');return}
+    const items=getTransferItems();
+    if(!items.length){toast('أضف مادة واحدة على الأقل');return}
+    for(const item of items){
+      const p=productById(item.product_id)||{};
+      const available=warehouseBalanceQty(fromId,item.product_id);
+      if(available<Number(item.quantity||0)){toast(`Insufficient stock: ${p.name||item.product_id} available ${available}`);return}
+    }
+    const body={transfer_date:trDate.value,from_warehouse_id:fromId,to_warehouse_id:toId,reference_no:trReference.value.trim(),reason:trReason.value.trim(),requester_name:trRequesterName.value.trim()||activeUser,requester_title:trRequesterTitle.value.trim(),approver_name:trApproverName.value.trim()||'Mustafa',approver_title:'Approval',receiver_name:trReceiverName.value.trim(),created_by:activeUser,items};
+    toast('جاري إرسال التحويل للاعتماد...');
+    const r=await api('/api/warehouse/material-transfers',{method:'POST',body:JSON.stringify(body)});
+    toast('Transfer '+r.transfer.transfer_number+' sent for approval');
+    upsertLocalTransfer(r.transfer);
+    syncWarehouseLater();
+  }catch(e){toast(e.message)}
+}
+async function approveTransfer(id){if(!canApprove()){toast('Approver فقط يقدر يعتمد التحويل');return}try{toast('جاري اعتماد التحويل...');const r=await api(`/api/warehouse/material-transfers/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Approved'})});toast('Transfer approved');upsertLocalTransfer(r.transfer);syncWarehouseLater()}catch(e){toast(e.message)}}
+async function rejectTransfer(id){if(!canApprove()){toast('Approver فقط يقدر يرفض التحويل');return}const comment=prompt('سبب الرفض؟')||'';try{toast('جاري رفض التحويل...');const r=await api(`/api/warehouse/material-transfers/${id}/reject`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('Transfer rejected');upsertLocalTransfer(r.transfer);syncWarehouseLater()}catch(e){toast(e.message)}}
+async function confirmTransfer(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يؤكد التحويل');return}if(!confirm('تأكيد تنفيذ التحويل؟ سيتم نقل الكمية فعليا بين المستودعات.'))return;try{toast('جاري تنفيذ التحويل...');const r=await api(`/api/warehouse/material-transfers/${id}/confirm`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Transfer confirmed'})});toast('Transfer completed');upsertLocalTransfer(r.transfer);syncWarehouseLater()}catch(e){toast(e.message)}}
 function renderMrLines(){const box=document.getElementById('mrLines');if(!box)return;if(!box.children.length){addMrLine();return}[...box.querySelectorAll('.mrProduct')].forEach(sel=>{const selected=sel.value;sel.innerHTML=productOptionHtml(selected);sel.value=selected})}
 function addMrLine(data={}){const box=document.getElementById('mrLines');if(!box)return;mrLineId++;const row=document.createElement('div');row.className='mr-line';row.dataset.id=mrLineId;row.innerHTML=`<div class="field"><label>Material</label><select class="mrProduct" onchange="syncMrLine(this)">${productOptionHtml(data.product_id||'')}</select></div><div class="field"><label>Qty</label><input class="mrQty" type="number" min="1" value="${data.quantity||1}" oninput="renderMrPreview()"></div><div class="field"><label>Remark</label><input class="mrRemark" value="${esc(data.remark||'')}" oninput="renderMrPreview()"></div><button onclick="this.parentElement.remove();renderMrPreview()">×</button><div class="field"><label>Part Nbr</label><input class="mrPart" value="${esc(data.part_nbr||'')}" oninput="renderMrPreview()"></div><div class="field"><label>Model</label><input class="mrModel" value="${esc(data.model||'')}" oninput="renderMrPreview()"></div><div class="field"><label>UOM</label><input class="mrUom" value="${esc(data.uom||'PCS')}" oninput="renderMrPreview()"></div><div class="field"><label>Description</label><input class="mrDesc" value="${esc(data.description||'')}" oninput="renderMrPreview()"></div>`;box.appendChild(row);syncMrLine(row.querySelector('.mrProduct'))}
 function syncMrLine(sel){const row=sel.closest('.mr-line');const p=productById(sel.value);if(p){row.querySelector('.mrPart').value=p.sku;row.querySelector('.mrDesc').value=p.name;row.querySelector('.mrUom').value=p.unit||'PCS'}renderMrPreview()}
