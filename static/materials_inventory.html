@@ -159,17 +159,6 @@
       <h3>سجل استلام المخزون</h3>
       <div id="receiveHistory"></div>
     </div>
-    <div class="card">
-      <h3>تسوية مخزون</h3>
-      <div class="form">
-        <div class="field"><label>اسم المستودع</label><select id="adjustWarehouse" onchange="renderAdjustHint()"></select></div>
-        <div class="field"><label>SKU</label><input id="adjustSku" placeholder="E00ATB101" oninput="renderAdjustHint()"></div>
-        <div class="field"><label>الرصيد الصحيح</label><input id="adjustQty" type="number" min="0" value="0"></div>
-        <div class="field"><label>السبب</label><input id="adjustNote" placeholder="مثال: إلغاء تجربة / تصحيح جرد"></div>
-        <div class="field full"><div class="hint" id="adjustHint"></div></div>
-        <button class="btn danger full" onclick="adjustInventory()">حفظ التسوية</button>
-      </div>
-    </div>
   </section>
 
   <section class="view" id="mr">
@@ -441,13 +430,13 @@ document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','n
 document.getElementById('techniciansTable').innerHTML=rowsTable([['الاسم','name'],['الهاتف','phone'],['الحالة','status']],wh.technicians);
 document.getElementById('productsTable').innerHTML=rowsTable([['SKU','sku'],['الاسم','name'],['الوحدة','unit'],['التتبع','tracking_type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['إجراء','id',(v,r)=>productActions(r)]],wh.products);
 renderReceiveHistory();
-document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['Adjustment','total_adjustment',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['نسبة الاستهلاك','usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
+document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['نسبة الاستهلاك','usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
 renderTechnicianBalances();
 renderRolloutUsage();
 document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['المستخدم','created_by'],['Serial','serial_number']],myMovements);
 document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],myAudit);
 renderUsers();
-['receiveWarehouse','adjustWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderAdjustHint();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
+['receiveWarehouse','issueWarehouse','mrWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();renderMrLines();renderMrPreview();renderMrTable();syncSerialHint('issue')}
 function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
 async function createWarehouse(){try{await api('/api/warehouse/warehouses',{method:'POST',body:JSON.stringify({name:whName.value.trim(),location:whLocation.value.trim()})});whName.value='';whLocation.value='';toast('تم حفظ المستودع');await loadWarehouse()}catch(e){toast(e.message)}}
 async function createTechnician(){try{await api('/api/warehouse/technicians',{method:'POST',body:JSON.stringify({name:techName.value.trim(),phone:techPhone.value.trim()})});techName.value='';techPhone.value='';toast('تم حفظ الفني');await loadWarehouse()}catch(e){toast(e.message)}}
