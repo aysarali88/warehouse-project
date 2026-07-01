@@ -15,6 +15,10 @@ is_sqlite = DATABASE_URL.startswith("sqlite")
 if "pooler.supabase.com:5432" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
 
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+
 connect_args = (
     {"check_same_thread": False}
     if is_sqlite
@@ -28,9 +32,9 @@ pool_options = (
     {}
     if is_sqlite
     else {
-        "pool_size": 2,
-        "max_overflow": 0,
-        "pool_timeout": 10,
+        "pool_size": DB_POOL_SIZE,
+        "max_overflow": DB_MAX_OVERFLOW,
+        "pool_timeout": DB_POOL_TIMEOUT,
         "pool_recycle": 300,
     }
 )
