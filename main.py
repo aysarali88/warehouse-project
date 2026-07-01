@@ -20,6 +20,8 @@ from models import (
     IssueOrderItem,
     MaterialRequisition,
     MaterialRequisitionItem,
+    MaterialReturn,
+    MaterialReturnItem,
     MaterialTransfer,
     MaterialTransferItem,
     Product,
@@ -238,6 +240,25 @@ class MaterialTransferIn(BaseModel):
     receiver_name: str = ""
     created_by: str = "manager"
     items: list[MaterialTransferItemIn]
+
+
+class MaterialReturnItemIn(BaseModel):
+    product_id: int
+    quantity: float = Field(gt=0)
+    condition: str = "Good"
+    remark: str = ""
+
+
+class MaterialReturnIn(BaseModel):
+    return_date: str = ""
+    site_id: str = ""
+    site_address: str = ""
+    warehouse_id: int
+    returned_by: str = ""
+    received_by: str = ""
+    reason: str = ""
+    created_by: str = "manager"
+    items: list[MaterialReturnItemIn]
 
 
 def db_session():
@@ -696,6 +717,41 @@ def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
     }
 
 
+def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> dict:
+    items = []
+    if include_items:
+        items = [
+            {
+                "id": item.id,
+                "line_no": item.line_no,
+                "product_id": item.product_id,
+                "part_nbr": item.part_nbr,
+                "description": item.description,
+                "uom": item.uom,
+                "quantity": item.quantity,
+                "condition": item.condition,
+                "remark": item.remark,
+            }
+            for item in row.items
+        ]
+    return {
+        "id": row.id,
+        "return_number": row.return_number,
+        "return_date": row.return_date,
+        "site_id": row.site_id,
+        "site_address": row.site_address,
+        "warehouse_id": row.warehouse_id,
+        "warehouse": row.warehouse.name if row.warehouse else "",
+        "returned_by": row.returned_by,
+        "received_by": row.received_by,
+        "reason": row.reason,
+        "status": row.status,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "items": items,
+    }
+
+
 @app.get("/api/auth/users")
 def list_app_users():
     return {
@@ -777,6 +833,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     mrs = list_material_requisition_headers(80, db) if light else list_material_requisitions(200, db)
     receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
     transfers = list_material_transfer_headers(120, db) if light else list_material_transfers(200, db)
+    returns = list_material_return_headers(120, db) if light else list_material_returns(200, db)
     payload = {
         "success": True,
         "partial": light,
@@ -790,6 +847,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
         "mrs": mrs["requisitions"],
         "receipts": receipts["receipts"],
         "transfers": transfers["transfers"],
+        "returns": returns["returns"],
     }
     if not light:
         tech = list_technician_balances(db)
@@ -884,6 +942,8 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
 
     receive_order_ids = [row[0] for row in db.query(ReceiveOrderItem.receive_order_id).filter(ReceiveOrderItem.product_id == product.id).distinct().all()]
     issue_order_ids = [row[0] for row in db.query(IssueOrderItem.issue_order_id).filter(IssueOrderItem.product_id == product.id).distinct().all()]
+    return_order_ids = [row[0] for row in db.query(MaterialReturnItem.return_id).filter(MaterialReturnItem.product_id == product.id).distinct().all()]
+    transfer_order_ids = [row[0] for row in db.query(MaterialTransferItem.transfer_id).filter(MaterialTransferItem.product_id == product.id).distinct().all()]
     snapshot = product_to_dict(product)
 
     db.query(ProductSerial).filter(ProductSerial.product_id == product.id).delete(synchronize_session=False)
@@ -893,6 +953,8 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
     db.query(ReceiveOrderItem).filter(ReceiveOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(IssueOrderItem).filter(IssueOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.product_id == product.id).delete(synchronize_session=False)
+    db.query(MaterialReturnItem).filter(MaterialReturnItem.product_id == product.id).delete(synchronize_session=False)
+    db.query(MaterialTransferItem).filter(MaterialTransferItem.product_id == product.id).delete(synchronize_session=False)
 
     for order_id in receive_order_ids:
         has_items = db.query(ReceiveOrderItem).filter(ReceiveOrderItem.receive_order_id == order_id).first()
@@ -902,6 +964,14 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
         has_items = db.query(IssueOrderItem).filter(IssueOrderItem.issue_order_id == order_id).first()
         if has_items is None:
             db.query(IssueOrder).filter(IssueOrder.id == order_id).delete(synchronize_session=False)
+    for order_id in return_order_ids:
+        has_items = db.query(MaterialReturnItem).filter(MaterialReturnItem.return_id == order_id).first()
+        if has_items is None:
+            db.query(MaterialReturn).filter(MaterialReturn.id == order_id).delete(synchronize_session=False)
+    for order_id in transfer_order_ids:
+        has_items = db.query(MaterialTransferItem).filter(MaterialTransferItem.transfer_id == order_id).first()
+        if has_items is None:
+            db.query(MaterialTransfer).filter(MaterialTransfer.id == order_id).delete(synchronize_session=False)
 
     db.delete(product)
     log_audit(db, "purge_product", "product", snapshot["sku"], data.actor, snapshot)
@@ -932,7 +1002,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
             db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(StockMovement.quantity))
-            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "receive")
+            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["receive", "return_in", "transfer_in"]))
             .group_by(StockMovement.warehouse_id, StockMovement.product_id)
             .all()
         )
@@ -941,7 +1011,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
             db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "issue_to_technician")
+            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]))
             .group_by(StockMovement.warehouse_id, StockMovement.product_id)
             .all()
         )
@@ -1280,6 +1350,40 @@ def get_material_transfer(transfer_id: int, db: Session = Depends(db_session)):
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
+def list_material_return_headers(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialReturn)
+        .options(joinedload(MaterialReturn.warehouse))
+        .order_by(MaterialReturn.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "returns": [material_return_to_dict(r, include_items=False) for r in rows]}
+
+
+@app.get("/api/warehouse/material-returns")
+def list_material_returns(limit: int = 50, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialReturn)
+        .options(
+            joinedload(MaterialReturn.warehouse),
+            selectinload(MaterialReturn.items).joinedload(MaterialReturnItem.product),
+        )
+        .order_by(MaterialReturn.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {"success": True, "returns": [material_return_to_dict(r) for r in rows]}
+
+
+@app.get("/api/warehouse/material-returns/{return_id}")
+def get_material_return(return_id: int, db: Session = Depends(db_session)):
+    row = db.get(MaterialReturn, return_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material return not found")
+    return {"success": True, "return": material_return_to_dict(row)}
+
+
 @app.get("/api/warehouse/notifications")
 def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     pending = db.query(MaterialRequisition).filter(MaterialRequisition.status == "pending_approval").all()
@@ -1532,6 +1636,61 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
     db.commit()
     db.refresh(row)
     return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-returns")
+def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_session)):
+    require_warehouse(db, data.warehouse_id)
+    if not data.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    row = MaterialReturn(
+        return_number=next_number(db, MaterialReturn, "RET"),
+        return_date=data.return_date or local_today(),
+        site_id=data.site_id.strip(),
+        site_address=data.site_address.strip(),
+        warehouse_id=data.warehouse_id,
+        returned_by=data.returned_by.strip(),
+        received_by=data.received_by.strip(),
+        reason=data.reason.strip(),
+        status="confirmed",
+        created_by=data.created_by.strip() or data.received_by.strip() or "manager",
+    )
+    db.add(row)
+    db.flush()
+
+    for index, item in enumerate(data.items, start=1):
+        product = require_product(db, item.product_id)
+        stock_balance(db, data.warehouse_id, item.product_id).quantity += item.quantity
+        db.add(
+            MaterialReturnItem(
+                return_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=product.sku,
+                description=product_display_name(product),
+                uom=product.unit,
+                quantity=item.quantity,
+                condition=item.condition.strip() or "Good",
+                remark=item.remark.strip(),
+            )
+        )
+        db.add(
+            StockMovement(
+                movement_type="return_in",
+                product_id=item.product_id,
+                warehouse_id=data.warehouse_id,
+                quantity=item.quantity,
+                reference=row.return_number,
+                note=f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}",
+                created_by=row.created_by,
+            )
+        )
+
+    log_audit(db, "create_material_return", "material_return", row.return_number, row.created_by, data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "return_number": row.return_number, "return": material_return_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/signature")

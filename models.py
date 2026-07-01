@@ -289,6 +289,44 @@ class MaterialTransferItem(Base):
     product = relationship("Product")
 
 
+class MaterialReturn(Base):
+    __tablename__ = "material_returns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    return_number = Column(String, unique=True, nullable=False, index=True)
+    return_date = Column(String, default="")
+    site_id = Column(String, default="")
+    site_address = Column(String, default="")
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
+    returned_by = Column(String, default="")
+    received_by = Column(String, default="")
+    reason = Column(Text, default="")
+    status = Column(String, default="confirmed", index=True)
+    created_by = Column(String, default="manager")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    warehouse = relationship("Warehouse")
+    items = relationship("MaterialReturnItem", back_populates="return_order", cascade="all, delete-orphan")
+
+
+class MaterialReturnItem(Base):
+    __tablename__ = "material_return_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    return_id = Column(Integer, ForeignKey("material_returns.id"), nullable=False, index=True)
+    line_no = Column(Integer, default=1)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    part_nbr = Column(String, default="")
+    description = Column(Text, default="")
+    uom = Column(String, default="PCS")
+    quantity = Column(Float, default=0)
+    condition = Column(String, default="Good")
+    remark = Column(Text, default="")
+
+    return_order = relationship("MaterialReturn", back_populates="items")
+    product = relationship("Product")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
