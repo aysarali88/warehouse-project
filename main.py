@@ -465,8 +465,8 @@ def scan_log_to_dict(row: MaterialScanLog) -> dict:
     return {
         "id": row.id,
         "material_requisition_id": row.material_requisition_id,
-        "mr_order": requisition.order_number if requisition else "",
-        "mr_status": requisition.status if requisition else "",
+        "mr_order": requisition.order_number if requisition else "Stock Scan",
+        "mr_status": requisition.status if requisition else row.status,
         "site_id": requisition.site_id if requisition else "",
         "site_address": requisition.site_address if requisition else "",
         "warehouse_id": row.warehouse_id,
@@ -983,12 +983,31 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
         raise HTTPException(status_code=404, detail=f"Material not found for scan: {scanned}")
 
     balance = None
+    balances = []
     if warehouse_id:
         balance = (
             db.query(StockBalance)
             .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id)
             .first()
         )
+    elif serial_row and serial_row.warehouse_id:
+        warehouse_id = serial_row.warehouse_id
+        balance = (
+            db.query(StockBalance)
+            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id)
+            .first()
+        )
+    else:
+        balances = (
+            db.query(StockBalance)
+            .options(joinedload(StockBalance.warehouse))
+            .filter(StockBalance.product_id == product.id, StockBalance.quantity > 0)
+            .order_by(StockBalance.quantity.desc())
+            .all()
+        )
+        if balances:
+            balance = balances[0]
+            warehouse_id = balance.warehouse_id
 
     return {
         "success": True,
@@ -1005,6 +1024,15 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
         else None,
         "balance": balance.quantity if balance else 0,
         "warehouse_id": warehouse_id,
+        "warehouse": balance.warehouse.name if balance and balance.warehouse else "",
+        "balances": [
+            {
+                "warehouse_id": b.warehouse_id,
+                "warehouse": b.warehouse.name if b.warehouse else "",
+                "quantity": b.quantity,
+            }
+            for b in balances
+        ],
     }
 
 
@@ -1022,6 +1050,56 @@ def list_material_scans(limit: int = 300, db: Session = Depends(db_session)):
         .all()
     )
     return {"success": True, "scans": [scan_log_to_dict(r) for r in rows]}
+
+
+@app.post("/api/warehouse/material-scans/scan-record")
+def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_session)):
+    scanned = data.code.strip()
+    found = scan_material(scanned, None, db)
+    product = db.get(Product, found["product"]["id"])
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    warehouse_id = found.get("warehouse_id")
+    balance = float(found.get("balance") or 0)
+    if not warehouse_id or balance <= 0:
+        raise HTTPException(status_code=404, detail=f"Material found but not available in warehouse stock: {product.sku}")
+
+    serial_number = found["serial"]["serial_number"] if found.get("serial") else ""
+    if serial_number:
+        duplicate = (
+            db.query(MaterialScanLog)
+            .filter(MaterialScanLog.material_requisition_id.is_(None), MaterialScanLog.serial_number == serial_number)
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(status_code=400, detail=f"Serial already scanned in Scan History: {serial_number}")
+
+    log = MaterialScanLog(
+        material_requisition_id=None,
+        product_id=product.id,
+        warehouse_id=warehouse_id,
+        scan_code=scanned,
+        serial_number=serial_number,
+        match_type=found["match_type"],
+        status="in_stock",
+        scanned_by=data.actor.strip() or "system",
+        note="Warehouse stock scan",
+    )
+    db.add(log)
+    log_audit(db, "scan_stock_lookup", "product", product.sku, data.actor, {"scan": scanned, "warehouse_id": warehouse_id})
+    db.commit()
+    db.refresh(log)
+    clear_warehouse_cache()
+    return {
+        "success": True,
+        "scan": scan_log_to_dict(log),
+        "product": product_to_dict(product),
+        "serial": found.get("serial"),
+        "match_type": found["match_type"],
+        "balance": balance,
+        "warehouse": found.get("warehouse", ""),
+    }
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/scan-record")

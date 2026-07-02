@@ -331,7 +331,7 @@ class MaterialScanLog(Base):
     __tablename__ = "material_scan_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    material_requisition_id = Column(Integer, ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    material_requisition_id = Column(Integer, ForeignKey("material_requisitions.id"), nullable=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     scan_code = Column(String, nullable=False, index=True)
