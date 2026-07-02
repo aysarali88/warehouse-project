@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from database import Base, SessionLocal, engine
@@ -905,6 +905,73 @@ def create_technician(data: TechnicianIn, db: Session = Depends(db_session)):
 def list_products(db: Session = Depends(db_session)):
     rows = db.query(Product).order_by(Product.sku).all()
     return {"success": True, "products": [product_to_dict(r) for r in rows]}
+
+
+@app.get("/api/warehouse/scan-material")
+def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depends(db_session)):
+    scanned = code.strip()
+    if not scanned:
+        raise HTTPException(status_code=400, detail="Scan code is required")
+
+    serial_row = (
+        db.query(ProductSerial)
+        .options(joinedload(ProductSerial.product))
+        .filter(ProductSerial.serial_number == scanned)
+        .first()
+    )
+    product = serial_row.product if serial_row else None
+    match_type = "serial_number" if serial_row else ""
+
+    if product is None:
+        product = (
+            db.query(Product)
+            .filter(
+                or_(
+                    Product.qr_code == scanned,
+                    Product.sku == scanned,
+                    Product.name == scanned,
+                    Product.item_detail == scanned,
+                )
+            )
+            .first()
+        )
+        if product:
+            if product.qr_code == scanned:
+                match_type = "qr_code"
+            elif product.sku == scanned:
+                match_type = "sku"
+            elif product.name == scanned:
+                match_type = "name"
+            else:
+                match_type = "item_detail"
+
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Material not found for scan: {scanned}")
+
+    balance = None
+    if warehouse_id:
+        balance = (
+            db.query(StockBalance)
+            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id)
+            .first()
+        )
+
+    return {
+        "success": True,
+        "scan": scanned,
+        "match_type": match_type,
+        "product": product_to_dict(product),
+        "serial": {
+            "serial_number": serial_row.serial_number,
+            "status": serial_row.status,
+            "warehouse_id": serial_row.warehouse_id,
+            "technician_id": serial_row.technician_id,
+        }
+        if serial_row
+        else None,
+        "balance": balance.quantity if balance else 0,
+        "warehouse_id": warehouse_id,
+    }
 
 
 @app.post("/api/warehouse/products")
