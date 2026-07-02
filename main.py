@@ -941,16 +941,24 @@ def list_products(db: Session = Depends(db_session)):
     return {"success": True, "products": [product_to_dict(r) for r in rows]}
 
 
+def scan_code_candidates(scanned: str) -> list[str]:
+    candidates = [scanned]
+    if re.fullmatch(r"\d+\.0+", scanned):
+        candidates.append(scanned.split(".", 1)[0])
+    return list(dict.fromkeys(candidates))
+
+
 @app.get("/api/warehouse/scan-material")
 def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depends(db_session)):
     scanned = code.strip()
     if not scanned:
         raise HTTPException(status_code=400, detail="Scan code is required")
+    candidates = scan_code_candidates(scanned)
 
     serial_row = (
         db.query(ProductSerial)
         .options(joinedload(ProductSerial.product))
-        .filter(ProductSerial.serial_number == scanned)
+        .filter(ProductSerial.serial_number.in_(candidates))
         .first()
     )
     product = serial_row.product if serial_row else None
@@ -961,20 +969,20 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
             db.query(Product)
             .filter(
                 or_(
-                    Product.qr_code == scanned,
-                    Product.sku == scanned,
-                    Product.name == scanned,
-                    Product.item_detail == scanned,
+                    Product.qr_code.in_(candidates),
+                    Product.sku.in_(candidates),
+                    Product.name.in_(candidates),
+                    Product.item_detail.in_(candidates),
                 )
             )
             .first()
         )
         if product:
-            if product.qr_code == scanned:
+            if product.qr_code in candidates:
                 match_type = "qr_code"
-            elif product.sku == scanned:
+            elif product.sku in candidates:
                 match_type = "sku"
-            elif product.name == scanned:
+            elif product.name in candidates:
                 match_type = "name"
             else:
                 match_type = "item_detail"
