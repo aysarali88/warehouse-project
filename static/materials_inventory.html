@@ -46,7 +46,6 @@
     <button class="active" data-view="dashboard">لوحة التحكم</button>
     <button data-view="setup">التأسيس</button>
     <button data-view="receive">استلام مخزون</button>
-    <button data-view="returns">Material Returned</button>
     <button data-view="mr">Material Requisition</button>
     <button data-view="issue">صرف لفني</button>
     <button data-view="balances">المخزون</button>
@@ -158,37 +157,11 @@
     </div>
   </section>
 
-  <section class="view" id="returns">
-    <div class="grid two return-work">
-      <div class="card">
-        <h3>Material Returned</h3>
-        <div class="form">
-          <div class="field"><label>Return Date</label><input id="retDate" type="date"></div>
-          <div class="field"><label>Return To Warehouse</label><select id="retWarehouse"></select></div>
-          <div class="field"><label>Site ID</label><select id="retSiteId"><option value="">اختر</option><option>Hay Al Andalus</option><option>Hay Demashq</option><option>Maqawba</option></select></div>
-          <div class="field"><label>Site Address</label><select id="retSiteAddress"><option value="">اختر</option><option>Tripoli</option><option>Misurata</option></select></div>
-          <div class="field"><label>Returned By</label><input id="retReturnedBy" placeholder="Technician / Team"></div>
-          <div class="field"><label>Received By</label><input id="retReceivedBy" placeholder="Warehouse manager"></div>
-          <div class="field full"><label>Reason</label><input id="retReason" placeholder="Unused material / damaged / project return"></div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>بنود المرتجع</h3>
-        <div id="returnLines" class="mr-list"></div>
-        <button class="btn soft" onclick="addReturnLine()">إضافة بند</button>
-        <button class="btn primary" onclick="saveMaterialReturn()">حفظ وإضافة للمخزون</button>
-      </div>
-    </div>
-    <div class="card">
-      <h3>سجل Material Returned</h3>
-      <div id="returnsTable"></div>
-    </div>
-  </section>
-
   <section class="view" id="mr">
     <div class="tabs no-print">
       <button class="tab active" data-mr-mode="mrForm">Material Requisition</button>
       <button class="tab" data-mr-mode="transferForm">Material Transfer</button>
+      <button class="tab" data-mr-mode="returnForm">Material Returned</button>
     </div>
     <div id="mrForm" class="mr-mode">
     <div class="grid two no-print requester-work">
@@ -314,6 +287,33 @@
         <div id="transferTable"></div>
       </div>
     </div>
+
+    <div id="returnForm" class="mr-mode" style="display:none">
+      <div class="grid two return-work">
+        <div class="card">
+          <h3>Material Returned</h3>
+          <div class="form">
+            <div class="field"><label>Return Date</label><input id="retDate" type="date"></div>
+            <div class="field"><label>Return To Warehouse</label><select id="retWarehouse"></select></div>
+            <div class="field"><label>Site ID</label><select id="retSiteId"><option value="">اختر</option><option>Hay Al Andalus</option><option>Hay Demashq</option><option>Maqawba</option></select></div>
+            <div class="field"><label>Site Address</label><select id="retSiteAddress"><option value="">اختر</option><option>Tripoli</option><option>Misurata</option></select></div>
+            <div class="field"><label>Returned By</label><input id="retReturnedBy" placeholder="Technician / Team"></div>
+            <div class="field"><label>Received By</label><input id="retReceivedBy" placeholder="Warehouse manager"></div>
+            <div class="field full"><label>Reason</label><input id="retReason" placeholder="Unused material / damaged / project return"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>بنود المرتجع</h3>
+          <div id="returnLines" class="mr-list"></div>
+          <button class="btn soft" onclick="addReturnLine()">إضافة بند</button>
+          <button class="btn primary" onclick="saveMaterialReturn()">حفظ وإضافة للمخزون</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>سجل Material Returned</h3>
+        <div id="returnsTable"></div>
+      </div>
+    </div>
   </section>
 
   <section class="view" id="issue">
@@ -398,7 +398,7 @@ let activeUser=session?.name||'';
 let activeRole=session?.role||'';
 let lastApprovalCount=0;
 let appUsers=[];
-const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],returns:['Material Returned','إرجاع مواد من Site إلى مستودع وزيادة رصيد المستودع تلقائيا.'],mr:['Material Requisition','نموذج طلب مواد مطابق لصيغة BOM - MR مع طباعة وتوقيع إلكتروني.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
+const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Requisition','طلبات المواد والتحويلات والمرتجعات من نفس الصفحة.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
@@ -413,7 +413,7 @@ async function loginApp(){try{const data=await api('/api/auth/login',{method:'PO
 function logoutApp(){localStorage.removeItem('warehouseSession');localStorage.removeItem('warehouseBootstrap');session=null;activeUser='';activeRole='';document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
 function switchView(view){const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(view==='mr')refreshMrsFast()}
 function roleKey(){return normalizeText(userRole())}
-function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',roleKey()==='warehousemanager'&&!['mr','returns'].includes(btn.dataset.view)));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.return-work').forEach(el=>el.classList.toggle('hidden',!canReturnMaterials()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager')switchView('mr')}
+function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',roleKey()==='warehousemanager'&&btn.dataset.view!=='mr'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.return-work').forEach(el=>el.classList.toggle('hidden',!canReturnMaterials()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager')switchView('mr')}
 function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();if(roleKey()==='admin')loadUsers();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}
 function isAdmin(){return roleKey()==='admin'}
@@ -631,7 +631,7 @@ async function issueStock(){try{const product=productById(issueProduct.value);co
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
 if(b.dataset.balance){document.querySelectorAll('[data-balance]').forEach(x=>x.classList.remove('active'));b.classList.add('active');stockBalances.style.display=b.dataset.balance==='stockBalances'?'block':'none';technicianBalances.style.display=b.dataset.balance==='technicianBalances'?'block':'none';rolloutUsage.style.display=b.dataset.balance==='rolloutUsage'?'block':'none';return}
-if(b.dataset.mrMode){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===b.dataset.mrMode?'block':'none');if(b.dataset.mrMode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}}
+if(b.dataset.mrMode){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===b.dataset.mrMode?'block':'none');if(b.dataset.mrMode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}if(b.dataset.mrMode==='returnForm'){renderReturnLines();renderReturnsTable()}}
 }));
 function today(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 function formatDate(v){if(!v)return'';const d=new Date(v+'T00:00:00');return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')}
