@@ -24,6 +24,7 @@
   body.fit-one-page .mr-sign.transfer-sign{grid-template-columns:repeat(3,minmax(0,1fr))!important}
 }
 .ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.ops-card{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px;box-shadow:0 8px 22px rgba(23,34,52,.05)}.ops-card:before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:5px;background:var(--brand)}.ops-card.warn:before{background:var(--amber)}.ops-card.bad:before{background:var(--red)}.ops-card.good:before{background:var(--green)}.ops-card span{display:block;color:var(--muted);font-size:12px;font-weight:900}.ops-card strong{display:block;font-size:24px;margin-top:8px}.ops-card small{display:block;margin-top:6px;color:#64788d;font-weight:800}.timeline{display:grid;gap:10px}.timeline-item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border-bottom:1px solid #edf3f7;padding-bottom:9px}.timeline-dot{width:10px;height:10px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 5px rgba(0,109,143,.09)}.timeline-item b{font-size:12px}.timeline-item small{display:block;color:var(--muted);margin-top:3px}.risk-list{display:grid;gap:10px}.risk-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px;border:1px solid #edf3f7;border-radius:8px;background:#fbfdfe}.risk-row b{font-size:12px}.risk-row small{display:block;color:var(--muted);margin-top:3px}.risk-row strong{color:var(--red)}.split-panel{display:grid;grid-template-columns:1fr 1fr;gap:16px}.dashboard-note{border:1px solid #d9e9ef;background:#f4fbfd;color:#31566b;border-radius:8px;padding:12px;font-size:12px;font-weight:800;line-height:1.7}@media(max-width:960px){.ops-grid,.split-panel{grid-template-columns:1fr}}
+.command-dashboard{display:grid;gap:18px}.command-hero{position:relative;overflow:hidden;border-radius:8px;padding:24px;background:radial-gradient(circle at 12% 15%,rgba(255,255,255,.24),transparent 24%),linear-gradient(120deg,#062f48 0%,#007c8b 48%,#23a05a 100%);color:#fff;box-shadow:0 22px 55px rgba(0,82,104,.28)}.command-hero:after{content:"";position:absolute;inset:-60% -20%;background:conic-gradient(from 90deg,transparent,rgba(255,255,255,.16),transparent 28%);animation:orbit 12s linear infinite}.command-hero>*{position:relative;z-index:1}.command-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.command-title small{display:inline-flex;gap:8px;align-items:center;opacity:.86;font-weight:900}.command-title h3{margin:8px 0 0;font-size:34px;color:#fff}.command-title p{margin:8px 0 0;color:rgba(255,255,255,.82);font-weight:800}.command-health{border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.14);backdrop-filter:blur(8px);border-radius:8px;padding:12px 14px;font-weight:900;white-space:nowrap}.command-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:22px}.command-kpi{border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:14px;background:rgba(255,255,255,.12);backdrop-filter:blur(10px)}.command-kpi span{display:block;color:rgba(255,255,255,.72);font-weight:900;font-size:12px}.command-kpi strong{display:block;font-size:30px;margin-top:7px}.viz-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}.viz-panel{position:relative;overflow:hidden;border:1px solid #cfdfe7;border-radius:8px;background:linear-gradient(180deg,#fff,#f7fbfd);padding:16px;box-shadow:0 14px 32px rgba(20,45,70,.08)}.viz-panel:before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:linear-gradient(#0087a8,#20a262)}.viz-panel h3{margin:0 0 12px;color:#064b65;font-size:15px}.chart-row{display:grid;grid-template-columns:140px 1fr 72px;gap:10px;align-items:center;margin:10px 0}.chart-row b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chart-track{height:13px;background:#e8eef3;border-radius:99px;overflow:hidden}.chart-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#0087a8,#22a766);animation:growBar .7s ease both}.chart-fill.hot{background:linear-gradient(90deg,#e1a11f,#c93535)}.chart-row strong{text-align:left;font-size:12px}.donut-wrap{display:grid;grid-template-columns:190px 1fr;gap:18px;align-items:center}.donut{width:170px;height:170px;border-radius:50%;background:conic-gradient(#20a262 var(--p),#e1a11f 0 78%,#e8eef3 0);display:grid;place-items:center;box-shadow:inset 0 0 0 18px #fff,0 14px 34px rgba(0,109,143,.16)}.donut strong{font-size:28px;color:#063a50}.donut-legend{display:grid;gap:10px}.legend-item{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #e8eef3;padding-bottom:8px;font-weight:900}.legend-dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-left:8px}.dot-green{background:#20a262}.dot-amber{background:#e1a11f}.dot-blue{background:#0087a8}.movement-stream{display:grid;gap:10px}.movement-card{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border:1px solid #e6f0f5;border-radius:8px;padding:10px;background:#fff}.movement-type{width:12px;height:42px;border-radius:99px;background:#0087a8}.movement-type.issue_to_technician,.movement-type.transfer_out{background:#c93535}.movement-type.receive,.movement-type.return_in,.movement-type.transfer_in{background:#20a262}.movement-card b{font-size:12px}.movement-card small{display:block;color:#66788a;margin-top:3px}.workflow-lane{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.workflow-pill{border-radius:8px;padding:14px;color:#fff;background:linear-gradient(135deg,#064b65,#0087a8);box-shadow:0 12px 26px rgba(0,109,143,.18)}.workflow-pill.warn{background:linear-gradient(135deg,#9c5b00,#e1a11f)}.workflow-pill.good{background:linear-gradient(135deg,#116c3d,#20a262)}.workflow-pill strong{display:block;font-size:26px;margin-top:7px}.heat-list{display:grid;gap:9px}.heat-item{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px;border-radius:8px;background:linear-gradient(90deg,#fff4f4,#fff)}.heat-item b{font-size:12px}.heat-item small{display:block;color:#66788a;margin-top:3px}.heat-item strong{color:#c93535}.empty-soft{border:1px dashed #cfdfe7;border-radius:8px;padding:18px;text-align:center;color:#66788a;background:#f8fbfd;font-weight:900}@keyframes orbit{to{transform:rotate(360deg)}}@keyframes growBar{from{width:0}}@media(max-width:960px){.command-head,.donut-wrap{display:grid}.command-kpis,.viz-grid,.workflow-lane{grid-template-columns:1fr}.chart-row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -69,37 +70,35 @@
   </div>
 
   <section class="view active" id="dashboard">
-    <div class="executive">
-      <div class="executive-hero">
-        <div class="hero-top">
-          <div class="hero-title">
-            <small><span class="pulse-dot"></span>Warehouse Command Center</small>
-            <h3>لوحة إدارة مخزون المواد</h3>
-            <p>ملخص تنفيذي سريع للمخزون، الصرف، طلبات MR، واستهلاك Rollout حسب المناطق.</p>
+    <div class="command-dashboard">
+      <div class="command-hero">
+        <div class="command-head">
+          <div class="command-title">
+            <small><span class="pulse-dot"></span>Live Materials Command Center</small>
+            <h3>لوحة قيادة المخزون</h3>
+            <p>مؤشرات فورية للمخزون، الصرف، التحويلات، المرتجعات، ومتابعة Rollout.</p>
           </div>
-          <div class="hero-badge" id="dashboardHealth">System healthy</div>
+          <div class="command-health" id="dashboardHealth">System healthy</div>
         </div>
-        <div class="hero-metrics" id="summaryKpis"></div>
+        <div class="command-kpis" id="summaryKpis"></div>
       </div>
-      <div class="status-strip" id="dashboardStatus"></div>
-      <div class="ops-grid" id="opsSnapshot"></div>
-      <div class="split-panel">
-        <div class="dash-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
-        <div class="dash-panel"><h3>آخر استلامات المخزون</h3><div id="recentReceipts"></div></div>
+      <div class="workflow-lane" id="opsSnapshot"></div>
+      <div class="viz-grid">
+        <div class="viz-panel"><h3>مخزون المستودعات - Bar Chart</h3><div id="warehouseOverview"></div></div>
+        <div class="viz-panel"><h3>استهلاك المخزون - Donut</h3><div id="mrStatusPanel"></div></div>
       </div>
-      <div class="dash-grid">
-        <div class="dash-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
-        <div class="dash-panel"><h3>حالة طلبات MR</h3><div id="mrStatusPanel"></div></div>
+      <div class="viz-grid">
+        <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
+        <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
       </div>
-      <div class="dash-grid">
-        <div class="dash-panel"><h3>مخزون المستودعات</h3><div id="warehouseOverview"></div></div>
-        <div class="dash-panel"><h3>مواد تحتاج انتباه</h3><div id="inventoryRisks"></div></div>
+      <div class="viz-grid">
+        <div class="viz-panel"><h3>مواد تحتاج انتباه</h3><div id="inventoryRisks"></div></div>
+        <div class="viz-panel"><h3>أحدث الحركات</h3><div id="recentMovements"></div></div>
       </div>
-      <div class="dash-grid">
-        <div class="dash-panel"><h3>Rollout Consumption</h3><div id="rolloutOverview"></div></div>
-        <div class="dash-panel"><h3>أحدث الحركات</h3><div id="recentMovements"></div></div>
-      </div>
-      <div class="dash-panel"><h3>ملخص تنبيهات المخزون</h3><div id="lowStock"></div></div>
+      <div class="viz-panel"><h3>Rollout Consumption</h3><div id="rolloutOverview"></div></div>
+      <div id="dashboardStatus" style="display:none"></div>
+      <div id="recentReceipts" style="display:none"></div>
+      <div id="lowStock" style="display:none"></div>
     </div>
   </section>
 
@@ -480,41 +479,40 @@ const readyIssue=wh.mrs.filter(r=>r.status==='approved').length;
 const todayKey=today();
 const issuedToday=wh.mrs.filter(r=>r.status==='issued'&&String(r.creation_date||'')===todayKey).length;
 const receivedToday=(wh.receipts||[]).filter(r=>String(r.receipt_date||r.created_at?.slice(0,10)||'')===todayKey).reduce((s,r)=>s+(r.items||[]).reduce((a,it)=>a+Number(it.quantity||0),0),0);
+const returnedToday=(wh.returns||[]).filter(r=>String(r.return_date||r.created_at?.slice(0,10)||'')===todayKey).reduce((s,r)=>s+(r.items||[]).reduce((a,it)=>a+Number(it.quantity||0),0),0);
 const rolloutUsed=wh.rolloutUsage.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);
 document.getElementById('dashboardHealth').textContent=lowRows.length?`${lowRows.length} Stock Alert`:'System healthy';
 document.getElementById('summaryKpis').innerHTML=[
 ['Total Received',fmt(totalReceived)],['Stock Out',fmt(totalOut)],['Remaining',fmt(totalRemaining)],['Usage',usage.toFixed(1)+'%']
-].map(x=>`<div class="hero-metric"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong></div>`).join('');
+].map(x=>`<div class="command-kpi"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong></div>`).join('');
 document.getElementById('dashboardStatus').innerHTML=[
 ['المستودعات',wh.summary.warehouses,'good'],['مواد منخفضة',lowRows.length,lowRows.length?'bad':'good'],['Rollout Used',rolloutUsed,rolloutUsed?'warn':'good']
 ].map(x=>`<div class="status-tile ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
 document.getElementById('opsSnapshot').innerHTML=[
-['MR بانتظار الموافقة',waitingApproval,waitingApproval?'warn':'good','طلبات تحتاج قرار من Approver'],
-['جاهزة للصرف',readyIssue,readyIssue?'warn':'good','طلبات معتمدة عند Warehouse Manager'],
-['Issued Today',issuedToday,issuedToday?'good':'','طلبات تم صرفها بتاريخ اليوم'],
-['Received Today',receivedToday,receivedToday?'good':'','كميات دخلت المخزون اليوم']
-].map(x=>`<div class="ops-card ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong><small>${esc(x[3])}</small></div>`).join('');
+['Pending Approval',waitingApproval,'warn'],['Ready Issue',readyIssue,'warn'],['Issued Today',issuedToday,'good'],['Returned Today',returnedToday,'good']
+].map(x=>`<div class="workflow-pill ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
-document.getElementById('topStockOut').innerHTML=topOut.length?`<div class="mini-list">${topOut.map(r=>`<div class="mini-row"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)}</small>${meter(pct(r.total_consumed,maxOut),Number(r.usage_percent)>=60)}</div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty">لا يوجد Stock Out بعد</div>';
-document.getElementById('mrStatusPanel').innerHTML=`<div class="mr-status"><div><span>Issued</span><strong>${fmt(issuedMrs)}</strong></div><div><span>Approved</span><strong>${fmt(approvedMrs)}</strong></div><div><span>Pending</span><strong>${fmt(pendingMrs)}</strong></div></div><div class="sparkline" style="margin-top:14px">${wh.mrs.slice(0,14).reverse().map((r,i)=>`<i style="height:${25+(i%5)*13}%"></i>`).join('')||'<i style="height:20%"></i>'}</div>`;
+document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.map(r=>`<div class="chart-row"><b title="${esc(r.product)}">${esc(r.product)}</b><div class="chart-track"><div class="chart-fill ${Number(r.usage_percent)>=60?'hot':''}" style="width:${pct(r.total_consumed,maxOut)}%"></div></div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد Stock Out بعد</div>';
+document.getElementById('mrStatusPanel').innerHTML=`<div class="donut-wrap"><div class="donut" style="--p:${usage}%"><strong>${usage.toFixed(1)}%</strong></div><div class="donut-legend"><div class="legend-item"><span><i class="legend-dot dot-green"></i>Issued MR</span><strong>${fmt(issuedMrs)}</strong></div><div class="legend-item"><span><i class="legend-dot dot-amber"></i>Pending / Draft</span><strong>${fmt(pendingMrs)}</strong></div><div class="legend-item"><span><i class="legend-dot dot-blue"></i>Approved</span><strong>${fmt(approvedMrs)}</strong></div><div class="legend-item"><span><i class="legend-dot dot-green"></i>Returned Today</span><strong>${fmt(returnedToday)}</strong></div></div></div>`;
 const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,received:0,out:0,remaining:0};cur.received+=Number(r.total_received||0);cur.out+=Number(r.total_consumed||0);cur.remaining+=Number(r.remaining||0);byWh.set(r.warehouse,cur)});
 const whRows=[...byWh.values()].sort((a,b)=>b.remaining-a.remaining);
 const maxRemaining=Math.max(...whRows.map(r=>r.remaining),1);
-document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-bars">${whRows.map(r=>`<div class="warehouse-row"><b>${esc(r.warehouse)}</b>${meter(pct(r.remaining,maxRemaining))}<span>${fmt(r.remaining)} left · ${fmt(r.out)} out</span></div>`).join('')}</div>`:'<div class="empty">لا توجد أرصدة</div>';
+document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div>${whRows.map(r=>`<div class="chart-row"><b>${esc(r.warehouse)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.remaining,maxRemaining)}%"></div></div><strong>${fmt(r.remaining)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد أرصدة</div>';
 const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
-document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="timeline">${focusRows.map(r=>`<div class="timeline-item"><span class="timeline-dot"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="dashboard-note">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
+document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="movement-stream">${focusRows.map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
 const receiptRows=(wh.receipts||[]).slice(0,5);
 document.getElementById('recentReceipts').innerHTML=receiptRows.length?`<div class="timeline">${receiptRows.map(r=>{const qty=(r.items||[]).reduce((s,it)=>s+Number(it.quantity||0),0);const first=(r.items||[])[0]||{};return `<div class="timeline-item"><span class="timeline-dot"></span><div><b>${esc(r.order_number)} · ${esc(r.warehouse)}</b><small>${esc(first.name||'Materials')} · ${fmt(qty)} pcs · ${esc(r.supplier||'No supplier')}</small></div><small>${esc(r.receipt_date||r.created_at?.slice(0,10)||'')}</small></div>`}).join('')}</div>`:'<div class="empty">لا توجد استلامات بعد</div>';
 const riskRows=[...wh.stockUsage].filter(r=>Number(r.remaining)<=0||Number(r.usage_percent)>=60||Number(r.remaining)<=10).sort((a,b)=>Number(b.usage_percent)-Number(a.usage_percent)||Number(a.remaining)-Number(b.remaining)).slice(0,6);
-document.getElementById('inventoryRisks').innerHTML=riskRows.length?`<div class="risk-list">${riskRows.map(r=>`<div class="risk-row"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)} · Stock Out ${Number(r.usage_percent||0).toFixed(1)}%</small></div><strong>${fmt(r.remaining)}</strong></div>`).join('')}</div>`:'<div class="dashboard-note">لا توجد مواد حرجة حسب الاستهلاك أو الرصيد الحالي.</div>';
+document.getElementById('inventoryRisks').innerHTML=riskRows.length?`<div class="heat-list">${riskRows.map(r=>`<div class="heat-item"><div><b>${esc(r.product)}</b><small>${esc(r.sku)} · ${esc(r.warehouse)} · Stock Out ${Number(r.usage_percent||0).toFixed(1)}%</small></div><strong>${fmt(r.remaining)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد مواد حرجة حسب الاستهلاك أو الرصيد الحالي.</div>';
 const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort((a,b)=>Number(b.usage_percent)-Number(a.usage_percent)).slice(0,5);
-document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?compactTable([['المنطقة','area'],['المادة','material'],['MR','mr_issued_qty',(v)=>fmt(v)],['Used','rollout_used_qty',(v)=>fmt(v)],['%','usage_percent',(v)=>usageBar(v)]],rolloutRows):'<div class="empty">لا يوجد استهلاك Rollout مطابق بعد</div>';
+const maxRollout=Math.max(...rolloutRows.map(r=>Number(r.rollout_used_qty||0)),1);
+document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?`<div>${rolloutRows.map(r=>`<div class="chart-row"><b>${esc(r.area)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.rollout_used_qty,maxRollout)}%"></div></div><strong>${fmt(r.rollout_used_qty)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد استهلاك Rollout مطابق بعد</div>';
 }
 function renderWarehouse(){renderExecutiveDashboard();renderWorkflowQueues();
 const myMovements=(wh.movements||[]).filter(userOwnsMovement);
 const myAudit=(wh.audit||[]).filter(userOwnsAudit);
-document.getElementById('recentMovements').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المادة','sku'],['الكمية','quantity',(v)=>fmt(v)],['الفني','technician'],['المستخدم','created_by']],myMovements.slice(0,8));
+document.getElementById('recentMovements').innerHTML=myMovements.slice(0,8).length?`<div class="movement-stream">${myMovements.slice(0,8).map(r=>`<div class="movement-card"><span class="movement-type ${esc(r.type)}"></span><div><b>${esc(r.type)} · ${esc(r.sku)}</b><small>${esc(r.reference)} · ${esc(r.warehouse||r.technician||'')} · ${esc(r.created_by)}</small></div><strong>${fmt(r.quantity)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد حركات حديثة</div>';
 const lows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quantity)<=Number((wh.products.find(p=>p.id===b.product_id)||{}).min_stock||0));
 document.getElementById('lowStock').innerHTML=rowsTable([['المستودع','warehouse'],['المادة','sku'],['الرصيد','quantity',(v)=>fmt(v)],['الوحدة','unit']],lows.slice(0,8));
 document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','name'],['الموقع','location'],['الحالة','status']],wh.warehouses);
