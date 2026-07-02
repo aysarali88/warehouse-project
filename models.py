@@ -327,6 +327,26 @@ class MaterialReturnItem(Base):
     product = relationship("Product")
 
 
+class MaterialScanLog(Base):
+    __tablename__ = "material_scan_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    material_requisition_id = Column(Integer, ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
+    scan_code = Column(String, nullable=False, index=True)
+    serial_number = Column(String, default="", index=True)
+    match_type = Column(String, default="")
+    status = Column(String, default="matched", index=True)
+    scanned_by = Column(String, default="system")
+    note = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    requisition = relationship("MaterialRequisition")
+    product = relationship("Product")
+    warehouse = relationship("Warehouse")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

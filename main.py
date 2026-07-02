@@ -22,6 +22,7 @@ from models import (
     MaterialRequisitionItem,
     MaterialReturn,
     MaterialReturnItem,
+    MaterialScanLog,
     MaterialTransfer,
     MaterialTransferItem,
     Product,
@@ -110,6 +111,11 @@ class ProductIn(BaseModel):
     unit: str = "PCS"
     tracking_type: Literal["bulk", "serialized"] = "bulk"
     min_stock: float = 0
+
+
+class MaterialScanIn(BaseModel):
+    code: str
+    actor: str = "system"
 
 
 class ReceiveItemIn(BaseModel):
@@ -448,6 +454,32 @@ def movement_to_dict(row: StockMovement) -> dict:
         "quantity": row.quantity,
         "serial_number": row.serial_number,
         "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def scan_log_to_dict(row: MaterialScanLog) -> dict:
+    requisition = row.requisition
+    product = row.product
+    warehouse = row.warehouse
+    return {
+        "id": row.id,
+        "material_requisition_id": row.material_requisition_id,
+        "mr_order": requisition.order_number if requisition else "",
+        "mr_status": requisition.status if requisition else "",
+        "site_id": requisition.site_id if requisition else "",
+        "site_address": requisition.site_address if requisition else "",
+        "warehouse_id": row.warehouse_id,
+        "warehouse": warehouse.name if warehouse else "",
+        "product_id": row.product_id,
+        "sku": product.sku if product else "",
+        "material": product_display_name(product),
+        "scan_code": row.scan_code,
+        "serial_number": row.serial_number,
+        "match_type": row.match_type,
+        "status": row.status,
+        "scanned_by": row.scanned_by,
+        "note": row.note,
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
 
@@ -834,6 +866,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
     transfers = list_material_transfer_headers(120, db) if light else list_material_transfers(200, db)
     returns = list_material_return_headers(120, db) if light else list_material_returns(200, db)
+    scans = list_material_scans(80 if light else 300, db)
     payload = {
         "success": True,
         "partial": light,
@@ -848,6 +881,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
         "receipts": receipts["receipts"],
         "transfers": transfers["transfers"],
         "returns": returns["returns"],
+        "scanLogs": scans["scans"],
     }
     if not light:
         tech = list_technician_balances(db)
@@ -974,6 +1008,90 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
     }
 
 
+@app.get("/api/warehouse/material-scans")
+def list_material_scans(limit: int = 300, db: Session = Depends(db_session)):
+    rows = (
+        db.query(MaterialScanLog)
+        .options(
+            joinedload(MaterialScanLog.requisition),
+            joinedload(MaterialScanLog.product),
+            joinedload(MaterialScanLog.warehouse),
+        )
+        .order_by(MaterialScanLog.id.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    return {"success": True, "scans": [scan_log_to_dict(r) for r in rows]}
+
+
+@app.post("/api/warehouse/material-requisitions/{requisition_id}/scan-record")
+def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session = Depends(db_session)):
+    row = (
+        db.query(MaterialRequisition)
+        .options(selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product), joinedload(MaterialRequisition.warehouse))
+        .filter(MaterialRequisition.id == requisition_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="MR not found")
+
+    scanned = data.code.strip()
+    found = scan_material(scanned, row.warehouse_id, db)
+    product = db.get(Product, found["product"]["id"])
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    requested_qty = sum((item.quantity or 0) for item in row.items if item.product_id == product.id)
+    if requested_qty <= 0:
+        raise HTTPException(status_code=400, detail=f"Scanned material is not part of MR {row.order_number}")
+
+    serial_number = found["serial"]["serial_number"] if found.get("serial") else ""
+    if serial_number:
+        duplicate = (
+            db.query(MaterialScanLog)
+            .filter(MaterialScanLog.material_requisition_id == row.id, MaterialScanLog.serial_number == serial_number)
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(status_code=400, detail=f"Serial already scanned for MR {row.order_number}: {serial_number}")
+
+    scanned_qty = (
+        db.query(func.count(MaterialScanLog.id))
+        .filter(MaterialScanLog.material_requisition_id == row.id, MaterialScanLog.product_id == product.id, MaterialScanLog.status == "matched")
+        .scalar()
+        or 0
+    )
+    if scanned_qty >= requested_qty:
+        raise HTTPException(status_code=400, detail=f"Requested quantity already scanned for {product.sku}")
+
+    log = MaterialScanLog(
+        material_requisition_id=row.id,
+        product_id=product.id,
+        warehouse_id=row.warehouse_id,
+        scan_code=scanned,
+        serial_number=serial_number,
+        match_type=found["match_type"],
+        status="matched",
+        scanned_by=data.actor.strip() or "system",
+        note=f"MR {row.order_number}",
+    )
+    db.add(log)
+    log_audit(db, "scan_material", "material_requisition", row.order_number, data.actor, {"scan": scanned, "sku": product.sku})
+    db.commit()
+    db.refresh(log)
+    clear_warehouse_cache()
+    return {
+        "success": True,
+        "scan": scan_log_to_dict(log),
+        "product": product_to_dict(product),
+        "serial": found.get("serial"),
+        "match_type": found["match_type"],
+        "balance": found["balance"],
+        "scan_count": scanned_qty + 1,
+        "requested_qty": requested_qty,
+    }
+
+
 @app.post("/api/warehouse/products")
 def create_product(data: ProductIn, db: Session = Depends(db_session)):
     sku = data.sku.strip()
@@ -1017,6 +1135,7 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
     db.query(StockBalance).filter(StockBalance.product_id == product.id).delete(synchronize_session=False)
     db.query(TechnicianBalance).filter(TechnicianBalance.product_id == product.id).delete(synchronize_session=False)
     db.query(StockMovement).filter(StockMovement.product_id == product.id).delete(synchronize_session=False)
+    db.query(MaterialScanLog).filter(MaterialScanLog.product_id == product.id).delete(synchronize_session=False)
     db.query(ReceiveOrderItem).filter(ReceiveOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(IssueOrderItem).filter(IssueOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.product_id == product.id).delete(synchronize_session=False)
