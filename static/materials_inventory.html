@@ -580,7 +580,7 @@ document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','n
 document.getElementById('techniciansTable').innerHTML=rowsTable([['الاسم','name'],['الهاتف','phone'],['الحالة','status']],wh.technicians);
 document.getElementById('productsTable').innerHTML=rowsTable([['SKU','sku'],['الاسم','name'],['الوحدة','unit'],['التتبع','tracking_type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['إجراء','id',(v,r)=>productActions(r)]],wh.products);
 renderReceiveHistory();
-document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['نسبة الاستهلاك','usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
+document.getElementById('stockBalancesTable').innerHTML=rowsTable([['المستودع','warehouse'],['SKU','sku'],['المادة','product'],['الوحدة','unit'],['العدد الكلي','total_received',(v)=>fmt(v)],['المواد المستهلكه','rollout_consumed_qty',(v)=>fmt(v)],['المتبقي','remaining_after_rollout',(v)=>fmt(v)],['نسبة الاستهلاك','rollout_usage_percent',(v)=>usageBar(v)]],wh.stockUsage);
 renderTechnicianBalances();
 renderRolloutUsage();
 renderRolloutDailyProgress();
