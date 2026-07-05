@@ -128,12 +128,6 @@ class MaterialScanIn(BaseModel):
     actor: str = "system"
 
 
-class RolloutDailyProgressSyncIn(BaseModel):
-    rows: list[dict]
-    source: str = "Google Sheets - Daily Progress"
-    token: str = ""
-
-
 class ReceiveItemIn(BaseModel):
     product_id: int
     quantity: float = Field(gt=0)
@@ -961,38 +955,6 @@ def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_sessi
         "read_only": source == "google_csv",
         "count": len(rows),
         "records": limited,
-    }
-
-
-@app.post("/api/warehouse/rollout-daily-progress/sync")
-def sync_rollout_daily_progress(payload: RolloutDailyProgressSyncIn, db: Session = Depends(db_session)):
-    expected = os.getenv("ROLLOUT_SYNC_TOKEN", "").strip()
-    if expected and not hmac.compare_digest(payload.token, expected):
-        raise HTTPException(status_code=401, detail="Invalid rollout sync token")
-
-    created = 0
-    updated = 0
-    skipped = 0
-    for data in payload.rows:
-        if not any(str(v or "").strip() for v in data.values()):
-            skipped += 1
-            continue
-        row, was_created = upsert_rollout_record(data, db)
-        if was_created:
-            created += 1
-        else:
-            updated += 1
-    db.commit()
-    clear_warehouse_cache()
-    return {
-        "success": True,
-        "name": "Rollout Daily Progress",
-        "source": payload.source,
-        "received": len(payload.rows),
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        "total": db.query(RolloutRecord).count(),
     }
 
 
