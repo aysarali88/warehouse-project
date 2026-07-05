@@ -1,8 +1,9 @@
 import json
 import hmac
+import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -80,7 +81,10 @@ APP_USERS = [
 ]
 
 
-TRIPOLI_TZ = ZoneInfo("Africa/Tripoli")
+try:
+    TRIPOLI_TZ = ZoneInfo("Africa/Tripoli")
+except Exception:
+    TRIPOLI_TZ = timezone(timedelta(hours=2))
 
 
 def local_today() -> str:
@@ -116,6 +120,12 @@ class ProductIn(BaseModel):
 class MaterialScanIn(BaseModel):
     code: str
     actor: str = "system"
+
+
+class RolloutDailyProgressSyncIn(BaseModel):
+    rows: list[dict]
+    source: str = "Google Sheets - Daily Progress"
+    token: str = ""
 
 
 class ReceiveItemIn(BaseModel):
@@ -376,6 +386,64 @@ def row_to_record(row: RolloutRecord) -> dict:
         "scan": row.scan,
         "labeling": row.labeling,
     }
+
+
+def first_value(data: dict, *keys: str, default=""):
+    for key in keys:
+        if key in data and data.get(key) is not None:
+            return data.get(key)
+    lowered = {str(k).strip().lower(): v for k, v in data.items()}
+    for key in keys:
+        value = lowered.get(key.strip().lower())
+        if value is not None:
+            return value
+    return default
+
+
+def safe_float(value) -> float:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).replace(",", "").strip()
+    if not text:
+        return 0
+    try:
+        return float(text)
+    except ValueError:
+        return 0
+
+
+def upsert_rollout_record(data: dict, db: Session) -> tuple[RolloutRecord, bool]:
+    record_id = str(first_value(data, "ID", "id", default="")).strip()
+    if not record_id:
+        seed = db.query(RolloutRecord).count() + 1
+        record_id = f"RDP-{seed:03d}"
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
+    created = row is None
+    if row is None:
+        row = RolloutRecord(record_id=record_id)
+        db.add(row)
+
+    row.date = str(first_value(data, "Date", "date", default="") or "")
+    row.supervisor_name = str(first_value(data, "Supervisor Name", "supervisor_name", default="") or "")
+    row.team_leader = str(first_value(data, "team leader", "Team Leader", "team_leader", default="") or "")
+    row.area = str(first_value(data, "Area", "area", default="") or "")
+    row.city = str(first_value(data, "city", "City", default="") or "")
+    row.activity = str(first_value(data, "Activity", "activity", default="") or "")
+    row.item = str(first_value(data, "item", "Item", default="") or "")
+    row.material_type = str(first_value(data, "material type", "Material Type", "material_type", default="") or "")
+    row.mount_type = str(first_value(data, "mount type", "Mount Type", "mount_type", default="") or "")
+    row.item_serial = str(first_value(data, "item serial", "Item Serial", "item_serial", default="") or "")
+    row.planned_quantity = safe_float(first_value(data, "planed quantity", "planned quantity", "planned_quantity", default=0))
+    row.actual = safe_float(first_value(data, "actual", "Actual", default=0))
+    row.stock_remaining = safe_float(first_value(data, "stock remaining", "Stock Remaining", "stock_remaining", default=0))
+    row.status = str(first_value(data, "staus", "status", "Status", default="") or "")
+    row.laser = str(first_value(data, "laser", "Laser", default="") or "")
+    row.acceptance = str(first_value(data, "acceptance", "Acceptance", default="") or "")
+    row.scan = str(first_value(data, "scan", "Scan", default="") or "")
+    row.labeling = str(first_value(data, "labeling", "Labeling", default="") or "")
+    return row, created
 
 
 FOUR_CORE_CABLE_NAMES = {
@@ -803,32 +871,7 @@ def list_records(db: Session = Depends(db_session)):
 
 @app.post("/api/records")
 def save_record(data: dict, db: Session = Depends(db_session)):
-    record_id = data.get("ID") or f"RDP-{db.query(RolloutRecord).count() + 1:03d}"
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
-
-    if row is None:
-        row = RolloutRecord(record_id=record_id)
-        db.add(row)
-
-    row.date = data.get("Date", "")
-    row.supervisor_name = data.get("Supervisor Name", "")
-    row.team_leader = data.get("team leader", "")
-    row.area = data.get("Area", "")
-    row.city = data.get("city", "")
-    row.activity = data.get("Activity", "")
-    row.item = data.get("item", "")
-    row.material_type = data.get("material type", "")
-    row.mount_type = data.get("mount type", "")
-    row.item_serial = data.get("item serial", "")
-    row.planned_quantity = float(data.get("planed quantity") or 0)
-    row.actual = float(data.get("actual") or 0)
-    row.stock_remaining = float(data.get("stock remaining") or 0)
-    row.status = data.get("staus", "")
-    row.laser = data.get("laser", "")
-    row.acceptance = data.get("acceptance", "")
-    row.scan = data.get("scan", "")
-    row.labeling = data.get("labeling", "")
-
+    row, _ = upsert_rollout_record(data, db)
     db.commit()
     clear_warehouse_cache()
     db.refresh(row)
@@ -837,6 +880,49 @@ def save_record(data: dict, db: Session = Depends(db_session)):
         "success": True,
         "message": "Progress saved",
         "record": row_to_record(row),
+    }
+
+
+@app.get("/api/warehouse/rollout-daily-progress")
+def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_session)):
+    rows = (
+        db.query(RolloutRecord)
+        .order_by(RolloutRecord.id.desc())
+        .limit(min(max(limit, 1), 1000))
+        .all()
+    )
+    return {"success": True, "name": "Rollout Daily Progress", "count": db.query(RolloutRecord).count(), "records": [row_to_record(row) for row in rows]}
+
+
+@app.post("/api/warehouse/rollout-daily-progress/sync")
+def sync_rollout_daily_progress(payload: RolloutDailyProgressSyncIn, db: Session = Depends(db_session)):
+    expected = os.getenv("ROLLOUT_SYNC_TOKEN", "").strip()
+    if expected and not hmac.compare_digest(payload.token, expected):
+        raise HTTPException(status_code=401, detail="Invalid rollout sync token")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    for data in payload.rows:
+        if not any(str(v or "").strip() for v in data.values()):
+            skipped += 1
+            continue
+        row, was_created = upsert_rollout_record(data, db)
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+    db.commit()
+    clear_warehouse_cache()
+    return {
+        "success": True,
+        "name": "Rollout Daily Progress",
+        "source": payload.source,
+        "received": len(payload.rows),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "total": db.query(RolloutRecord).count(),
     }
 
 
@@ -886,12 +972,14 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     if not light:
         tech = list_technician_balances(db)
         rollout = list_rollout_material_usage(db)
+        daily_progress = list_rollout_daily_progress(500, db)
         audit = list_audit_logs(40, db)
         payload.update(
             {
                 "technicianBalances": tech["balances"],
                 "rolloutUsage": rollout["usage"],
                 "rolloutRecords": rollout["rollout_records"],
+                "rolloutDailyProgress": daily_progress["records"],
                 "audit": audit["logs"],
             }
         )

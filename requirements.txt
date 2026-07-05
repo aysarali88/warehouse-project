@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.2
 sqlalchemy==2.0.40
 psycopg[binary]==3.2.13
 python-dotenv==1.1.0
+tzdata==2025.2
