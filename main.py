@@ -1657,16 +1657,24 @@ def list_rollout_material_usage(db: Session = Depends(db_session)):
             for area_key in area_usage_keys(row.get("site_id", ""), row.get("site_address", ""))
         )
         material_used = rollout_material_usage.get(material_key, 0)
-        used = area_used
-        remaining = issued - used
+        used = min(area_used, issued)
+        extra_used = max(area_used - issued, 0)
+        remaining = max(issued - used, 0)
+        if area_used > issued:
+            usage_match = "over_mr"
+        elif area_used:
+            usage_match = "area"
+        else:
+            usage_match = "area_not_found" if material_used else "none"
         rows.append(
             {
                 **row,
                 "rollout_used_qty": used,
                 "rollout_actual_qty": area_used,
+                "rollout_extra_qty": extra_used,
                 "remaining_after_rollout": remaining,
                 "usage_percent": (used / issued * 100) if issued else 0,
-                "usage_match": "area" if area_used else ("area_not_found" if material_used else "none"),
+                "usage_match": usage_match,
             }
         )
     return {"success": True, "usage": rows, "rollout_records": len(rollout_rows), "rollout_source": rollout_source}
