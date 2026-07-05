@@ -1,8 +1,11 @@
+import csv
+import io
 import json
 import hmac
 import os
 import re
 import time
+import urllib.request
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -40,6 +43,9 @@ from models import (
 
 WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
+ROLLOUT_CSV_CACHE: tuple[float, list[dict]] | None = None
+ROLLOUT_CSV_CACHE_TTL = 60
+DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
 
 Base.metadata.create_all(bind=engine)
 
@@ -388,6 +394,30 @@ def row_to_record(row: RolloutRecord) -> dict:
     }
 
 
+def normalize_rollout_row(data: dict) -> dict:
+    return {
+        "ID": str(first_value(data, "ID", "id", default="") or ""),
+        "Date": str(first_value(data, "Date", "date", default="") or ""),
+        "Supervisor Name": str(first_value(data, "Supervisor Name", "supervisor_name", default="") or ""),
+        "team leader": str(first_value(data, "team leader", "Team Leader", "team_leader", default="") or ""),
+        "Area": str(first_value(data, "Area", "area", default="") or ""),
+        "city": str(first_value(data, "city", "City", default="") or ""),
+        "Activity": str(first_value(data, "Activity", "activity", default="") or ""),
+        "item": str(first_value(data, "item", "Item", default="") or ""),
+        "material type": str(first_value(data, "material type", "Material Type", "material_type", default="") or ""),
+        "mount type": str(first_value(data, "mount type", "Mount Type", "mount_type", default="") or ""),
+        "item serial": str(first_value(data, "item serial", "Item Serial", "item_serial", default="") or ""),
+        "planed quantity": safe_float(first_value(data, "planed quantity", "planned quantity", "planned_quantity", default=0)),
+        "actual": safe_float(first_value(data, "actual", "Actual", default=0)),
+        "stock remaining": safe_float(first_value(data, "stock remaining", "Stock Remaining", "stock_remaining", default=0)),
+        "staus": str(first_value(data, "staus", "status", "Status", default="") or ""),
+        "laser": str(first_value(data, "laser", "Laser", default="") or ""),
+        "acceptance": str(first_value(data, "acceptance", "Acceptance", default="") or ""),
+        "scan": str(first_value(data, "scan", "Scan", default="") or ""),
+        "labeling": str(first_value(data, "labeling", "Labeling", default="") or ""),
+    }
+
+
 def first_value(data: dict, *keys: str, default=""):
     for key in keys:
         if key in data and data.get(key) is not None:
@@ -412,6 +442,43 @@ def safe_float(value) -> float:
         return float(text)
     except ValueError:
         return 0
+
+
+def rollout_csv_url() -> str:
+    return os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
+
+
+def fetch_rollout_daily_progress_csv(force: bool = False) -> list[dict]:
+    global ROLLOUT_CSV_CACHE
+    url = rollout_csv_url()
+    if not url:
+        return []
+    if not force and ROLLOUT_CSV_CACHE and time.monotonic() - ROLLOUT_CSV_CACHE[0] < ROLLOUT_CSV_CACHE_TTL:
+        return ROLLOUT_CSV_CACHE[1]
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "warehouse-rollout-reader/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read()
+        text = raw.decode("utf-8-sig")
+        rows = [normalize_rollout_row(row) for row in csv.DictReader(io.StringIO(text))]
+        rows = [row for row in rows if any(str(value or "").strip() for value in row.values())]
+        ROLLOUT_CSV_CACHE = (time.monotonic(), rows)
+        return rows
+    except Exception:
+        if ROLLOUT_CSV_CACHE:
+            return ROLLOUT_CSV_CACHE[1]
+        return []
+
+
+def db_rollout_records(db: Session) -> list[dict]:
+    return [row_to_record(row) for row in db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).all()]
+
+
+def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
+    rows = fetch_rollout_daily_progress_csv(force)
+    if rows:
+        return rows, "google_csv"
+    return db_rollout_records(db), "database"
 
 
 def upsert_rollout_record(data: dict, db: Session) -> tuple[RolloutRecord, bool]:
@@ -885,13 +952,16 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 
 @app.get("/api/warehouse/rollout-daily-progress")
 def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_session)):
-    rows = (
-        db.query(RolloutRecord)
-        .order_by(RolloutRecord.id.desc())
-        .limit(min(max(limit, 1), 1000))
-        .all()
-    )
-    return {"success": True, "name": "Rollout Daily Progress", "count": db.query(RolloutRecord).count(), "records": [row_to_record(row) for row in rows]}
+    rows, source = rollout_daily_progress_records(db, force=True)
+    limited = list(reversed(rows))[: min(max(limit, 1), 1000)]
+    return {
+        "success": True,
+        "name": "Rollout Daily Progress",
+        "source": source,
+        "read_only": source == "google_csv",
+        "count": len(rows),
+        "records": limited,
+    }
 
 
 @app.post("/api/warehouse/rollout-daily-progress/sync")
@@ -979,6 +1049,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
                 "technicianBalances": tech["balances"],
                 "rolloutUsage": rollout["usage"],
                 "rolloutRecords": rollout["rollout_records"],
+                "rolloutSource": rollout.get("rollout_source", ""),
                 "rolloutDailyProgress": daily_progress["records"],
                 "audit": audit["logs"],
             }
@@ -1566,15 +1637,15 @@ def area_usage_keys(site_id: str, site_address: str) -> set[str]:
 
 @app.get("/api/warehouse/rollout-material-usage")
 def list_rollout_material_usage(db: Session = Depends(db_session)):
-    rollout_rows = db.query(RolloutRecord).all()
+    rollout_rows, rollout_source = rollout_daily_progress_records(db)
     rollout_area_usage: dict[tuple[str, str], float] = {}
     rollout_material_usage: dict[str, float] = {}
     for record in rollout_rows:
-        area = (record.area or "").strip()
-        material = (record.material_type or record.item or "").strip()
+        area = str(record.get("Area") or "").strip()
+        material = str(record.get("material type") or record.get("item") or "").strip()
         if not area or not material:
             continue
-        actual = record.actual or 0
+        actual = safe_float(record.get("actual"))
         material_key = canonical_material_key(material)
         key = (normalize_usage_key(area), material_key)
         rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
@@ -1605,7 +1676,7 @@ def list_rollout_material_usage(db: Session = Depends(db_session)):
                 "usage_match": "area" if area_used else ("area_not_found" if material_used else "none"),
             }
         )
-    return {"success": True, "usage": rows, "rollout_records": len(rollout_rows)}
+    return {"success": True, "usage": rows, "rollout_records": len(rollout_rows), "rollout_source": rollout_source}
 
 
 @app.get("/api/warehouse/movements")
