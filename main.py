@@ -102,6 +102,10 @@ def local_today() -> str:
     return datetime.now(TRIPOLI_TZ).date().isoformat()
 
 
+def app_user_key(username: str, role: str, password: str = "") -> tuple[str, str, str]:
+    return (username.strip().lower(), role.strip().lower(), password)
+
+
 class LoginIn(BaseModel):
     username: str
     password: str
@@ -112,6 +116,12 @@ class AppUserIn(BaseModel):
     password: str
     role: Literal["Admin", "Requester", "Approval", "Warehouse Manager"]
     name: str = ""
+
+
+class AppUserDeleteIn(BaseModel):
+    username: str
+    role: str
+    password: str = ""
 
 
 class WarehouseIn(BaseModel):
@@ -842,6 +852,18 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             },
         }
 
+    deleted_fallback = (
+        db.query(AppUser)
+        .filter(
+            func.lower(AppUser.username) == key,
+            AppUser.password_hash == data.password,
+            AppUser.status == "inactive",
+        )
+        .first()
+    )
+    if deleted_fallback:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
     fallback_user = next(
         (
             row
@@ -974,14 +996,19 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 @app.get("/api/auth/users")
 def list_app_users(db: Session = Depends(db_session)):
     db_users = [
-        {"username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
+        {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
         for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
     ]
-    seen = {(row["username"].lower(), row["role"].lower(), row["password"]) for row in db_users}
+    seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
+    deleted = {
+        app_user_key(row.username, row.role, row.password_hash)
+        for row in db.query(AppUser).filter(AppUser.status == "inactive").all()
+    }
     fallback_users = [
-        {"username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
+        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
         for row in APP_USERS
-        if (row["username"].lower(), row["role"].lower(), row["password"]) not in seen
+        if app_user_key(row["username"], row["role"], row["password"]) not in seen
+        and app_user_key(row["username"], row["role"], row["password"]) not in deleted
     ]
     return {
         "success": True,
@@ -1025,6 +1052,38 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
         "success": True,
         "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "password": user.password_hash},
     }
+
+
+@app.post("/api/auth/users/delete")
+def delete_app_user(data: AppUserDeleteIn, db: Session = Depends(db_session)):
+    username = data.username.strip()
+    role = data.role.strip()
+    password = data.password
+    if not username or not role:
+        raise HTTPException(status_code=400, detail="User and role are required")
+    user = (
+        db.query(AppUser)
+        .filter(
+            func.lower(AppUser.username) == username.lower(),
+            AppUser.role == role,
+            AppUser.password_hash == password,
+        )
+        .first()
+    )
+    if user:
+        user.status = "inactive"
+    else:
+        db.add(
+            AppUser(
+                username=username,
+                name=username,
+                role=role,
+                password_hash=password,
+                status="inactive",
+            )
+        )
+    db.commit()
+    return {"success": True}
 
 
 @app.get("/api/records")
