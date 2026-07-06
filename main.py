@@ -5,6 +5,7 @@ import hmac
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from typing import Literal
@@ -43,8 +44,11 @@ from models import (
 
 WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
-ROLLOUT_CSV_CACHE: tuple[float, list[dict]] | None = None
+ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
+ROLLOUT_DAILY_PROGRESS_SHEET_ID = "1ZT9e9acJ9Y60J4f_DIFZiYyHa8GvNZdlTvpucHju7Ec"
+ROLLOUT_DAILY_PROGRESS_GID = "440090582"
+DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsheets/d/{ROLLOUT_DAILY_PROGRESS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ROLLOUT_DAILY_PROGRESS_GID}"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
 
 Base.metadata.create_all(bind=engine)
@@ -438,41 +442,56 @@ def safe_float(value) -> float:
         return 0
 
 
-def rollout_csv_url() -> str:
-    return os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
+def rollout_csv_urls() -> list[tuple[str, str]]:
+    live_url = os.getenv("ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL).strip()
+    published_url = os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
+    urls = []
+    if live_url:
+        urls.append(("google_live_csv", live_url))
+    if published_url and published_url != live_url:
+        urls.append(("google_published_csv", published_url))
+    return urls
 
 
-def fetch_rollout_daily_progress_csv(force: bool = False) -> list[dict]:
+def add_cache_buster(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    query = [(key, value) for key, value in query if key != "_"]
+    query.append(("_", str(int(time.time() * 1000))))
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), parts.fragment))
+
+
+def fetch_rollout_daily_progress_csv(force: bool = False) -> tuple[list[dict], str]:
     global ROLLOUT_CSV_CACHE
-    url = rollout_csv_url()
-    if not url:
-        return []
+    urls = rollout_csv_urls()
+    if not urls:
+        return [], "none"
     if not force and ROLLOUT_CSV_CACHE and time.monotonic() - ROLLOUT_CSV_CACHE[0] < ROLLOUT_CSV_CACHE_TTL:
-        return ROLLOUT_CSV_CACHE[1]
-    try:
-        fetch_url = url
-        if force:
-            separator = "&" if "?" in fetch_url else "?"
-            fetch_url = f"{fetch_url}{separator}_={int(time.time() * 1000)}"
-        request = urllib.request.Request(
-            fetch_url,
-            headers={
-                "User-Agent": "warehouse-rollout-reader/1.0",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            raw = response.read()
-        text = raw.decode("utf-8-sig")
-        rows = [normalize_rollout_row(row) for row in csv.DictReader(io.StringIO(text))]
-        rows = [row for row in rows if any(str(value or "").strip() for value in row.values())]
-        ROLLOUT_CSV_CACHE = (time.monotonic(), rows)
-        return rows
-    except Exception:
-        if ROLLOUT_CSV_CACHE:
-            return ROLLOUT_CSV_CACHE[1]
-        return []
+        return ROLLOUT_CSV_CACHE[1], ROLLOUT_CSV_CACHE[2]
+    for source, url in urls:
+        try:
+            fetch_url = add_cache_buster(url) if force else url
+            request = urllib.request.Request(
+                fetch_url,
+                headers={
+                    "User-Agent": "warehouse-rollout-reader/1.0",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                raw = response.read()
+            text = raw.decode("utf-8-sig")
+            rows = [normalize_rollout_row(row) for row in csv.DictReader(io.StringIO(text))]
+            rows = [row for row in rows if any(str(value or "").strip() for value in row.values())]
+            if rows:
+                ROLLOUT_CSV_CACHE = (time.monotonic(), rows, source)
+                return rows, source
+        except Exception:
+            continue
+    if ROLLOUT_CSV_CACHE:
+        return ROLLOUT_CSV_CACHE[1], ROLLOUT_CSV_CACHE[2]
+    return [], "none"
 
 
 def db_rollout_records(db: Session) -> list[dict]:
@@ -480,9 +499,9 @@ def db_rollout_records(db: Session) -> list[dict]:
 
 
 def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
-    rows = fetch_rollout_daily_progress_csv(force)
+    rows, source = fetch_rollout_daily_progress_csv(force)
     if rows:
-        return rows, "google_csv"
+        return rows, source
     return db_rollout_records(db), "database"
 
 
