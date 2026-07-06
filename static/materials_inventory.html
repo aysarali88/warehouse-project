@@ -47,14 +47,13 @@
   </div>
   <nav class="nav">
     <button class="active" data-view="dashboard">لوحة التحكم</button>
-    <button data-view="setup">التأسيس</button>
+    <button data-view="mr">Material Request</button>
     <button data-view="receive">استلام مخزون</button>
-    <button data-view="mr">Material Requisition</button>
-    <button data-view="scans">Scan History</button>
-    <button data-view="rolloutDaily">Rollout Daily Progress</button>
-    <button data-view="issue">صرف لفني</button>
     <button data-view="balances">المخزون</button>
-    <button data-view="audit">الحركات والتدقيق</button>
+    <button data-view="rolloutDaily">Rollout Progress</button>
+    <button data-view="scans">Scan History</button>
+    <button data-view="setup">التأسيس</button>
+    <button data-view="audit">الحركات</button>
     <button class="admin-only" data-view="users">المستخدمين</button>
   </nav>
 </aside>
@@ -477,7 +476,7 @@ let activeUser=session?.name||'';
 let activeRole=session?.role||'';
 let lastApprovalCount=0;
 let appUsers=[];
-const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Requisition','طلبات المواد والتحويلات والمرتجعات من نفس الصفحة.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Daily Progress','عرض النقاط والمواد المستهلكة القادمة من صفحة Daily Progress في Google Sheet.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات والتدقيق','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
+const titles={dashboard:['لوحة التحكم','متابعة المخزون، المواد مع الفنيين، وآخر الحركات من قاعدة Supabase.'],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request','طلبات المواد والتحويلات والمرتجعات من نفس الصفحة.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress','عرض النقاط والمواد المستهلكة القادمة من صفحة Daily Progress في Google Sheet.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
