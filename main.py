@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from database import Base, SessionLocal, engine
 from models import (
     AuditLog,
+    AppUser,
     IssueOrder,
     IssueOrderItem,
     MaterialRequisition,
@@ -104,6 +105,13 @@ def local_today() -> str:
 class LoginIn(BaseModel):
     username: str
     password: str
+
+
+class AppUserIn(BaseModel):
+    username: str
+    password: str
+    role: Literal["Admin", "Requester", "Approval", "Warehouse Manager"]
+    name: str = ""
 
 
 class WarehouseIn(BaseModel):
@@ -816,9 +824,25 @@ def warehouse_home():
 
 
 @app.post("/api/auth/login")
-def login(data: LoginIn):
+def login(data: LoginIn, db: Session = Depends(db_session)):
     key = data.username.strip().lower()
-    user = next(
+    db_user = (
+        db.query(AppUser)
+        .filter(func.lower(AppUser.username) == key, AppUser.status == "active")
+        .all()
+    )
+    user = next((row for row in db_user if hmac.compare_digest(data.password, row.password_hash)), None)
+    if user:
+        return {
+            "success": True,
+            "user": {
+                "username": user.username,
+                "name": user.name or user.username,
+                "role": user.role,
+            },
+        }
+
+    fallback_user = next(
         (
             row
             for row in APP_USERS
@@ -826,14 +850,14 @@ def login(data: LoginIn):
         ),
         None,
     )
-    if user is None:
+    if fallback_user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return {
         "success": True,
         "user": {
-            "username": user["username"],
-            "name": user["name"],
-            "role": user["role"],
+            "username": fallback_user["username"],
+            "name": fallback_user["name"],
+            "role": fallback_user["role"],
         },
     }
 
@@ -948,13 +972,58 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 
 
 @app.get("/api/auth/users")
-def list_app_users():
+def list_app_users(db: Session = Depends(db_session)):
+    db_users = [
+        {"username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
+        for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
+    ]
+    seen = {(row["username"].lower(), row["role"].lower(), row["password"]) for row in db_users}
+    fallback_users = [
+        {"username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
+        for row in APP_USERS
+        if (row["username"].lower(), row["role"].lower(), row["password"]) not in seen
+    ]
     return {
         "success": True,
-        "users": [
-            {"username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
-            for row in APP_USERS
-        ],
+        "users": db_users + fallback_users,
+    }
+
+
+@app.post("/api/auth/users")
+def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
+    username = data.username.strip()
+    password = data.password.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="User is required")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    existing = (
+        db.query(AppUser)
+        .filter(
+            func.lower(AppUser.username) == username.lower(),
+            AppUser.role == data.role,
+            AppUser.status == "active",
+        )
+        .first()
+    )
+    if existing:
+        existing.name = data.name.strip() or username
+        existing.password_hash = password
+        user = existing
+    else:
+        user = AppUser(
+            username=username,
+            name=data.name.strip() or username,
+            role=data.role,
+            password_hash=password,
+            status="active",
+        )
+        db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {
+        "success": True,
+        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "password": user.password_hash},
     }
 
 

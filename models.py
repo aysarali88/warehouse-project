@@ -41,6 +41,18 @@ class Warehouse(Base):
     balances = relationship("StockBalance", back_populates="warehouse")
 
 
+class AppUser(Base):
+    __tablename__ = "app_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False, index=True)
+    name = Column(String, default="")
+    role = Column(String, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    status = Column(String, default="active")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Technician(Base):
     __tablename__ = "technicians"
 

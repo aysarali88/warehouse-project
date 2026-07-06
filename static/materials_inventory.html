@@ -417,6 +417,17 @@
     <div class="card">
       <h3>المستخدمين والباسووردات</h3>
       <p class="hint">هذه الصفحة تظهر فقط لحسابات Admin. نفس الاسم ممكن يكون له أكثر من صلاحية حسب كلمة السر.</p>
+      <div class="form" style="margin-bottom:14px">
+        <div class="field"><label>User</label><input id="newUserName" placeholder="Aysar"></div>
+        <div class="field"><label>Pass</label><input id="newUserPass" placeholder="Aysar@1"></div>
+        <div class="field"><label>Role</label><select id="newUserRole">
+          <option value="Admin">Admin</option>
+          <option value="Requester">Requester</option>
+          <option value="Approval">Approval</option>
+          <option value="Warehouse Manager">Warehouse Manager</option>
+        </select></div>
+        <button class="btn primary" onclick="createAppUser()">إضافة مستخدم</button>
+      </div>
       <div id="usersTable"></div>
     </div>
   </section>
@@ -484,6 +495,7 @@ function bindScannerInput(id,handler){const input=document.getElementById(id);if
 function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 async function loadUsers(){try{const data=await api('/api/auth/users');appUsers=data.users||[];renderUsers()}catch(e){toast(e.message)}}
 function renderUsers(){const box=document.getElementById('usersTable');if(!box)return;const order={'Admin':1,'Requester':2,'Approval':3,'Approver':3,'Warehouse Manager':4};const rows=[...appUsers].sort((a,b)=>(order[a.role]||9)-(order[b.role]||9)||String(a.username).localeCompare(String(b.username)));box.innerHTML=rowsTable([['الصلاحية','role'],['User','username'],['Pass','password']],rows)}
+async function createAppUser(){if(!isAdmin()){toast('Admin فقط يقدر يضيف مستخدمين');return}const username=document.getElementById('newUserName').value.trim();const password=document.getElementById('newUserPass').value.trim();const role=document.getElementById('newUserRole').value;if(!username||!password){toast('اكتب User و Pass');return}try{const data=await api('/api/auth/users',{method:'POST',body:JSON.stringify({username,password,role,name:username})});const key=r=>`${String(r.username).toLowerCase()}|${String(r.role).toLowerCase()}|${r.password}`;appUsers=[data.user,...appUsers.filter(r=>key(r)!==key(data.user))];renderUsers();document.getElementById('newUserName').value='';document.getElementById('newUserPass').value='';toast('تمت إضافة المستخدم')}catch(e){toast(e.message)}}
 function fillSelect(id,rows,label){document.getElementById(id).innerHTML='<option value="">اختر</option>'+rows.map(r=>`<option value="${r.id}">${esc(label(r))}</option>`).join('')}
 function productById(id){return wh.products.find(p=>String(p.id)===String(id))}
 function serialLines(id){return document.getElementById(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
