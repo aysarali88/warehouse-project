@@ -450,7 +450,18 @@ def fetch_rollout_daily_progress_csv(force: bool = False) -> list[dict]:
     if not force and ROLLOUT_CSV_CACHE and time.monotonic() - ROLLOUT_CSV_CACHE[0] < ROLLOUT_CSV_CACHE_TTL:
         return ROLLOUT_CSV_CACHE[1]
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "warehouse-rollout-reader/1.0"})
+        fetch_url = url
+        if force:
+            separator = "&" if "?" in fetch_url else "?"
+            fetch_url = f"{fetch_url}{separator}_={int(time.time() * 1000)}"
+        request = urllib.request.Request(
+            fetch_url,
+            headers={
+                "User-Agent": "warehouse-rollout-reader/1.0",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+        )
         with urllib.request.urlopen(request, timeout=20) as response:
             raw = response.read()
         text = raw.decode("utf-8-sig")
@@ -1629,8 +1640,8 @@ def area_usage_keys(site_id: str, site_address: str) -> set[str]:
 
 
 @app.get("/api/warehouse/rollout-material-usage")
-def list_rollout_material_usage(db: Session = Depends(db_session)):
-    rollout_rows, rollout_source = rollout_daily_progress_records(db)
+def list_rollout_material_usage(db: Session = Depends(db_session), force: bool = False):
+    rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
     rollout_area_usage: dict[tuple[str, str], float] = {}
     rollout_material_usage: dict[str, float] = {}
     for record in rollout_rows:
