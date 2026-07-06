@@ -958,6 +958,7 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 @app.get("/api/warehouse/rollout-daily-progress")
 def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_session)):
     rows, source = rollout_daily_progress_records(db, force=True)
+    clear_warehouse_cache()
     limited = list(reversed(rows))[: min(max(limit, 1), 1000)]
     return {
         "success": True,
@@ -965,6 +966,7 @@ def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_sessi
         "source": source,
         "read_only": source == "google_csv",
         "count": len(rows),
+        "fetched_at": datetime.now(LOCAL_TZ).isoformat(),
         "records": limited,
     }
 
