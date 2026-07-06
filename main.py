@@ -443,8 +443,8 @@ def safe_float(value) -> float:
 
 
 def rollout_csv_urls() -> list[tuple[str, str]]:
-    live_url = os.getenv("ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL).strip()
-    published_url = os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL", DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
+    live_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL).strip()
+    published_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
     urls = []
     if live_url:
         urls.append(("google_live_csv", live_url))
@@ -461,6 +461,23 @@ def add_cache_buster(url: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), parts.fragment))
 
 
+def read_rollout_daily_progress_url(url: str, force: bool = False) -> list[dict]:
+    fetch_url = add_cache_buster(url) if force else url
+    request = urllib.request.Request(
+        fetch_url,
+        headers={
+            "User-Agent": "warehouse-rollout-reader/1.0",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        raw = response.read()
+    text = raw.decode("utf-8-sig")
+    rows = [normalize_rollout_row(row) for row in csv.DictReader(io.StringIO(text))]
+    return [row for row in rows if any(str(value or "").strip() for value in row.values())]
+
+
 def fetch_rollout_daily_progress_csv(force: bool = False) -> tuple[list[dict], str]:
     global ROLLOUT_CSV_CACHE
     urls = rollout_csv_urls()
@@ -470,20 +487,7 @@ def fetch_rollout_daily_progress_csv(force: bool = False) -> tuple[list[dict], s
         return ROLLOUT_CSV_CACHE[1], ROLLOUT_CSV_CACHE[2]
     for source, url in urls:
         try:
-            fetch_url = add_cache_buster(url) if force else url
-            request = urllib.request.Request(
-                fetch_url,
-                headers={
-                    "User-Agent": "warehouse-rollout-reader/1.0",
-                    "Cache-Control": "no-cache",
-                    "Pragma": "no-cache",
-                },
-            )
-            with urllib.request.urlopen(request, timeout=20) as response:
-                raw = response.read()
-            text = raw.decode("utf-8-sig")
-            rows = [normalize_rollout_row(row) for row in csv.DictReader(io.StringIO(text))]
-            rows = [row for row in rows if any(str(value or "").strip() for value in row.values())]
+            rows = read_rollout_daily_progress_url(url, force=force)
             if rows:
                 ROLLOUT_CSV_CACHE = (time.monotonic(), rows, source)
                 return rows, source
@@ -985,8 +989,40 @@ def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_sessi
         "source": source,
         "read_only": source == "google_csv",
         "count": len(rows),
-        "fetched_at": datetime.now(LOCAL_TZ).isoformat(),
+        "fetched_at": datetime.now(TRIPOLI_TZ).isoformat(),
         "records": limited,
+    }
+
+
+@app.get("/api/warehouse/rollout-source-check")
+def rollout_source_check():
+    sources = []
+    for source, url in rollout_csv_urls():
+        try:
+            rows = read_rollout_daily_progress_url(url, force=True)
+            latest = rows[-1] if rows else {}
+            sources.append(
+                {
+                    "source": source,
+                    "ok": True,
+                    "count": len(rows),
+                    "latest_id": latest.get("ID") or latest.get("id") or "",
+                    "latest_date": str(latest.get("Date") or latest.get("date") or "")[:10],
+                }
+            )
+        except Exception as exc:
+            sources.append(
+                {
+                    "source": source,
+                    "ok": False,
+                    "count": 0,
+                    "error": str(exc)[:240],
+                }
+            )
+    return {
+        "success": True,
+        "checked_at": datetime.now(TRIPOLI_TZ).isoformat(),
+        "sources": sources,
     }
 
 
