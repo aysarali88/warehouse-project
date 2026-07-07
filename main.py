@@ -1262,6 +1262,8 @@ def scan_code_candidates(scanned: str) -> list[str]:
     candidates = [scanned]
     if re.fullmatch(r"\d+\.0+", scanned):
         candidates.append(scanned.split(".", 1)[0])
+    elif re.fullmatch(r"\d+", scanned):
+        candidates.append(f"{scanned}.00")
     return list(dict.fromkeys(candidates))
 
 
