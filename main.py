@@ -114,7 +114,7 @@ class LoginIn(BaseModel):
 class AppUserIn(BaseModel):
     username: str
     password: str
-    role: Literal["Admin", "Requester", "Approval", "Warehouse Manager"]
+    role: Literal["Admin", "Management", "Requester", "Approval", "Warehouse Manager"]
     name: str = ""
 
 
