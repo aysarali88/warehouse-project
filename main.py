@@ -844,33 +844,38 @@ def warehouse_home():
 @app.post("/api/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
     key = data.username.strip().lower()
-    db_user = (
-        db.query(AppUser)
-        .filter(func.lower(AppUser.username) == key, AppUser.status == "active")
-        .all()
-    )
-    user = next((row for row in db_user if hmac.compare_digest(data.password, row.password_hash)), None)
-    if user:
-        return {
-            "success": True,
-            "user": {
-                "username": user.username,
-                "name": user.name or user.username,
-                "role": user.role,
-            },
-        }
-
-    deleted_fallback = (
-        db.query(AppUser)
-        .filter(
-            func.lower(AppUser.username) == key,
-            AppUser.password_hash == data.password,
-            AppUser.status == "inactive",
+    try:
+        db_user = (
+            db.query(AppUser)
+            .filter(func.lower(AppUser.username) == key, AppUser.status == "active")
+            .all()
         )
-        .first()
-    )
-    if deleted_fallback:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        user = next((row for row in db_user if hmac.compare_digest(data.password, row.password_hash)), None)
+        if user:
+            return {
+                "success": True,
+                "user": {
+                    "username": user.username,
+                    "name": user.name or user.username,
+                    "role": user.role,
+                },
+            }
+
+        deleted_fallback = (
+            db.query(AppUser)
+            .filter(
+                func.lower(AppUser.username) == key,
+                AppUser.password_hash == data.password,
+                AppUser.status == "inactive",
+            )
+            .first()
+        )
+        if deleted_fallback:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
 
     fallback_user = next(
         (
@@ -1003,15 +1008,21 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 
 @app.get("/api/auth/users")
 def list_app_users(db: Session = Depends(db_session)):
-    db_users = [
-        {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
-        for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
-    ]
-    seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
-    deleted = {
-        app_user_key(row.username, row.role, row.password_hash)
-        for row in db.query(AppUser).filter(AppUser.status == "inactive").all()
-    }
+    try:
+        db_users = [
+            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
+            for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
+        ]
+        seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
+        deleted = {
+            app_user_key(row.username, row.role, row.password_hash)
+            for row in db.query(AppUser).filter(AppUser.status == "inactive").all()
+        }
+    except Exception:
+        db.rollback()
+        db_users = []
+        seen = set()
+        deleted = set()
     fallback_users = [
         {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
         for row in APP_USERS
