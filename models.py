@@ -230,6 +230,7 @@ class MaterialRequisition(Base):
     receiver_signature = Column(Text, default="")
     receiver_date = Column(String, default="")
     receiver_comment = Column(Text, default="")
+    return_reason = Column(Text, default="")
     status = Column(String, default="draft", index=True)
     created_by = Column(String, default="manager")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

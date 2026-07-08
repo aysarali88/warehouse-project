@@ -57,11 +57,17 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_optional_columns():
     if engine.dialect.name == "postgresql":
-        return
-    statements = [
-        "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
-        "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
-    ]
+        statements = [
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
+        ]
+    else:
+        statements = [
+            "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
+        ]
     with engine.begin() as conn:
         for statement in statements:
             try:
@@ -238,6 +244,7 @@ class MaterialRequisitionIn(BaseModel):
     receiver_signature: str = ""
     receiver_date: str = ""
     receiver_comment: str = ""
+    return_reason: str = ""
     created_by: str = "manager"
     issue_immediately: bool = False
     items: list[MaterialRequisitionItemIn]
@@ -736,6 +743,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
         "receiver_signature": row.receiver_signature,
         "receiver_date": row.receiver_date,
         "receiver_comment": row.receiver_comment,
+        "return_reason": row.return_reason,
         "status": row.status,
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else "",
@@ -2084,6 +2092,7 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
         receiver_signature=data.receiver_signature,
         receiver_date=data.receiver_date,
         receiver_comment=data.receiver_comment,
+        return_reason=data.return_reason,
         status="draft",
         created_by=data.created_by,
     )
@@ -2118,6 +2127,65 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     db.commit()
     db.refresh(row)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-requisitions/{requisition_id}/resubmit")
+def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, db: Session = Depends(db_session)):
+    row = db.get(MaterialRequisition, requisition_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
+    if row.status != "returned_for_edit":
+        raise HTTPException(status_code=400, detail=f"MR cannot be edited from status {row.status}")
+    require_warehouse(db, data.warehouse_id)
+    if not data.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    row.creation_date = data.creation_date
+    row.warehouse_id = data.warehouse_id
+    row.entity = data.entity
+    row.project_name = data.project_name
+    row.site_id = data.site_id
+    row.site_address = data.site_address
+    row.wo_no = data.wo_no
+    row.product_domain = data.product_domain
+    row.team_leader = data.team_leader
+    row.receiver_tel = data.receiver_tel
+    row.request_shipment_time = data.request_shipment_time
+    row.request_arrived_site_time = data.request_arrived_site_time
+    row.requester_name = data.requester_name
+    row.requester_title = data.requester_title
+    row.requester_signature = data.requester_signature
+    row.requester_date = data.requester_date
+    row.requester_comment = data.requester_comment
+    row.receiver_name = data.receiver_name
+    row.receiver_title = data.receiver_title
+    row.receiver_signature = data.receiver_signature
+    row.receiver_date = data.receiver_date
+    row.receiver_comment = data.receiver_comment
+    row.return_reason = ""
+    row.status = "pending_approval"
+
+    db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
+    for index, item in enumerate(data.items, start=1):
+        product = db.get(Product, item.product_id) if item.product_id else None
+        db.add(
+            MaterialRequisitionItem(
+                requisition_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=item.part_nbr or (product.sku if product else ""),
+                model=item.model,
+                description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
+                uom=item.uom or (product.unit if product else "PCS"),
+                quantity=item.quantity,
+                remark=item.remark,
+            )
+        )
+
+    log_audit(db, "resubmit_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "requisition": requisition_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-transfers")
@@ -2387,6 +2455,23 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     row.receiver_comment = data.comment
     row.status = "rejected"
     log_audit(db, "reject_material_requisition", "material_requisition", row.order_number, actor or "approver", data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "requisition": requisition_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
+def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+    row = db.get(MaterialRequisition, requisition_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
+    if row.status != "approved":
+        raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
+    actor = data.actor.strip()
+    row.receiver_comment = data.comment
+    row.return_reason = data.comment
+    row.status = "returned_for_edit"
+    log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "warehouse", data.model_dump())
     db.commit()
     db.refresh(row)
     return {"success": True, "requisition": requisition_to_dict(row)}
