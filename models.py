@@ -48,6 +48,7 @@ class AppUser(Base):
     username = Column(String, nullable=False, index=True)
     name = Column(String, default="")
     role = Column(String, nullable=False, index=True)
+    email = Column(String, default="")
     password_hash = Column(String, nullable=False)
     status = Column(String, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

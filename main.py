@@ -65,12 +65,14 @@ def ensure_optional_columns():
         statements = [
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
         ]
     else:
         statements = [
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
         ]
     with engine.begin() as conn:
@@ -167,16 +169,13 @@ def send_email(to_emails: list[str], subject: str, body: str) -> bool:
 
 
 def approval_notification_emails(db: Session) -> list[str]:
-    configured = env_list("APPROVAL_EMAIL_RECIPIENTS")
-    if configured:
-        return configured
-
     rows = (
         db.query(AppUser)
         .filter(AppUser.status == "active", func.lower(AppUser.role) == "approval")
         .all()
     )
-    return [row.username.strip() for row in rows if "@" in row.username and row.username.strip()]
+    emails = [row.email.strip() for row in rows if getattr(row, "email", "") and "@" in row.email]
+    return emails or env_list("APPROVAL_EMAIL_RECIPIENTS")
 
 
 def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
@@ -215,6 +214,7 @@ class AppUserIn(BaseModel):
     password: str
     role: Literal["Admin", "Management", "Requester", "Approval", "Warehouse Manager"]
     name: str = ""
+    email: str = ""
 
 
 class AppUserDeleteIn(BaseModel):
@@ -1103,7 +1103,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 def list_app_users(db: Session = Depends(db_session)):
     try:
         db_users = [
-            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "password": row.password_hash}
+            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "email": row.email or "", "password": row.password_hash}
             for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
         ]
         seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
@@ -1117,7 +1117,7 @@ def list_app_users(db: Session = Depends(db_session)):
         seen = set()
         deleted = set()
     fallback_users = [
-        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "password": row["password"]}
+        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "email": row.get("email", ""), "password": row["password"]}
         for row in APP_USERS
         if app_user_key(row["username"], row["role"], row["password"]) not in seen
         and app_user_key(row["username"], row["role"], row["password"]) not in deleted
@@ -1147,6 +1147,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     )
     if existing:
         existing.name = data.name.strip() or username
+        existing.email = data.email.strip()
         existing.password_hash = password
         user = existing
     else:
@@ -1154,6 +1155,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
             username=username,
             name=data.name.strip() or username,
             role=data.role,
+            email=data.email.strip(),
             password_hash=password,
             status="active",
         )
@@ -1162,7 +1164,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     db.refresh(user)
     return {
         "success": True,
-        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "password": user.password_hash},
+        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "email": user.email or "", "password": user.password_hash},
     }
 
 
@@ -1190,6 +1192,7 @@ def delete_app_user(data: AppUserDeleteIn, db: Session = Depends(db_session)):
                 username=username,
                 name=username,
                 role=role,
+                email="",
                 password_hash=password,
                 status="inactive",
             )
