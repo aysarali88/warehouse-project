@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 import ssl
 from datetime import datetime, timezone, timedelta
+from email.utils import formataddr
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -141,12 +142,14 @@ def send_email(to_emails: list[str], subject: str, body: str) -> bool:
     username = os.getenv("SMTP_USERNAME", "").strip()
     password = os.getenv("SMTP_PASSWORD", "").strip()
     from_email = os.getenv("EMAIL_FROM", username).strip()
+    from_name = os.getenv("EMAIL_FROM_NAME", "Global Technology Company").strip()
     if not host or not port or not username or not password or not from_email or not to_emails:
         logger.warning("MR email skipped: SMTP settings or recipients are missing")
         return False
 
     msg = EmailMessage()
-    msg["From"] = from_email
+    msg["From"] = formataddr((from_name, from_email))
+    msg["Reply-To"] = from_email
     msg["To"] = ", ".join(to_emails)
     msg["Subject"] = subject
     msg.set_content(body)
@@ -197,19 +200,25 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
         return
     warehouse_name = row.warehouse.name if row.warehouse else ""
     lines = [
-        f"New Material Requisition is waiting for approval.",
-        f"MR No: {row.order_number}",
-        f"Requester: {row.requester_name}",
-        f"Warehouse: {warehouse_name}",
-        f"Site: {row.site_id or row.site_address}",
-        f"Status: {row.status}",
+        "Hello,",
         "",
-        "Open the warehouse app to review the request.",
+        "A new material request has been submitted and is ready for your review in the warehouse system.",
+        "",
+        f"Material Request No: {row.order_number}",
+        f"Requester: {row.requester_name or '-'}",
+        f"Warehouse: {warehouse_name or '-'}",
+        f"Site: {row.site_id or row.site_address or '-'}",
+        f"Status: Pending approval",
+        f"Date: {row.creation_date or local_today()}",
+        "",
+        "Please sign in to the warehouse system and review this request when convenient.",
+        "",
+        "This is an automated notification from Global Technology Company.",
     ]
     try:
         send_email(
             recipients,
-            f"MR {row.order_number} waiting for approval",
+            f"Approval needed: Material Request {row.order_number}",
             "\n".join(lines),
         )
         log_audit(
