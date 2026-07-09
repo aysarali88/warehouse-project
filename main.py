@@ -182,6 +182,18 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
     recipients = approval_notification_emails(db)
     if not recipients:
         logger.warning("MR email skipped: no Approval recipients configured")
+        try:
+            log_audit(
+                db,
+                "mr_email_skipped",
+                "material_requisition",
+                row.order_number,
+                "system",
+                {"reason": "no_recipients", "recipients": []},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         return
     warehouse_name = row.warehouse.name if row.warehouse else ""
     lines = [
@@ -200,8 +212,30 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
             f"MR {row.order_number} waiting for approval",
             "\n".join(lines),
         )
+        log_audit(
+            db,
+            "mr_email_sent",
+            "material_requisition",
+            row.order_number,
+            "system",
+            {"recipients": recipients},
+        )
+        db.commit()
     except Exception:
+        db.rollback()
         logger.exception("Failed to send MR creation email")
+        try:
+            log_audit(
+                db,
+                "mr_email_failed",
+                "material_requisition",
+                row.order_number,
+                "system",
+                {"recipients": recipients},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 class LoginIn(BaseModel):
