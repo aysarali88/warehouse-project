@@ -181,14 +181,48 @@ def approval_notification_emails(db: Session) -> list[str]:
     return emails or env_list("APPROVAL_EMAIL_RECIPIENTS")
 
 
-def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
-    recipients = approval_notification_emails(db)
+def normalize_email_list(values: list[str]) -> list[str]:
+    emails: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        email = str(value or "").strip()
+        if "@" not in email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        emails.append(email)
+    return emails
+
+
+def active_user_emails(db: Session, role: str, identifiers: list[str] | None = None) -> list[str]:
+    query = db.query(AppUser).filter(AppUser.status == "active", func.lower(AppUser.role) == role.strip().lower())
+    rows = query.all()
+    if identifiers:
+        keys = {normalize_usage_key(value) for value in identifiers if str(value or "").strip()}
+        rows = [row for row in rows if normalize_usage_key(row.username) in keys or normalize_usage_key(row.name) in keys]
+    return normalize_email_list([row.email for row in rows])
+
+
+def requester_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
+    identifiers = [row.requester_name, row.created_by]
+    return active_user_emails(db, "requester", identifiers)
+
+
+def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
+    identifiers = [row.warehouse.name if row.warehouse else "", row.created_by]
+    return active_user_emails(db, "warehouse manager", identifiers)
+
+
+def notify_mr_email(row: MaterialRequisition, recipients: list[str], subject: str, lines: list[str], audit_prefix: str) -> None:
+    recipients = normalize_email_list(recipients)
     if not recipients:
-        logger.warning("MR email skipped: no Approval recipients configured")
+        logger.warning("MR email skipped: no recipients configured for %s", audit_prefix)
         try:
             log_audit(
                 db,
-                "mr_email_skipped",
+                f"{audit_prefix}_skipped",
                 "material_requisition",
                 row.order_number,
                 "system",
@@ -198,6 +232,35 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
         except Exception:
             db.rollback()
         return
+    try:
+        send_email(recipients, subject, "\n".join(lines))
+        log_audit(
+            db,
+            f"{audit_prefix}_sent",
+            "material_requisition",
+            row.order_number,
+            "system",
+            {"recipients": recipients},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to send MR email: %s", audit_prefix)
+        try:
+            log_audit(
+                db,
+                f"{audit_prefix}_failed",
+                "material_requisition",
+                row.order_number,
+                "system",
+                {"recipients": recipients},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
+def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
     warehouse_name = row.warehouse.name if row.warehouse else ""
     lines = [
         "Hello,",
@@ -215,36 +278,112 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
         "",
         "This is an automated notification from Global Technology Company.",
     ]
-    try:
-        send_email(
-            recipients,
-            f"Approval needed: Material Request {row.order_number}",
-            "\n".join(lines),
-        )
-        log_audit(
-            db,
-            "mr_email_sent",
-            "material_requisition",
-            row.order_number,
-            "system",
-            {"recipients": recipients},
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception("Failed to send MR creation email")
-        try:
-            log_audit(
-                db,
-                "mr_email_failed",
-                "material_requisition",
-                row.order_number,
-                "system",
-                {"recipients": recipients},
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
+    notify_mr_email(
+        row,
+        approval_notification_emails(db),
+        f"Approval needed: Material Request {row.order_number}",
+        lines,
+        "mr_email",
+    )
+
+
+def notify_mr_approved(row: MaterialRequisition, db: Session) -> None:
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    approver_copy = approval_notification_emails(db)
+    notify_mr_email(
+        row,
+        warehouse_manager_notification_emails(row, db) + approver_copy,
+        f"Warehouse action needed: Material Request {row.order_number}",
+        [
+            "Hello,",
+            "",
+            "A material request has been approved and is now ready for warehouse action.",
+            "",
+            f"Material Request No: {row.order_number}",
+            f"Requester: {row.requester_name or '-'}",
+            f"Warehouse: {warehouse_name or '-'}",
+            f"Site: {row.site_id or row.site_address or '-'}",
+            f"Approver: {row.receiver_name or '-'}",
+            f"Status: Approved",
+            "",
+            "Please sign in to the warehouse system and continue processing this request.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "mr_approved_warehouse_email",
+    )
+    notify_mr_email(
+        row,
+        requester_notification_emails(row, db) + approver_copy,
+        f"Your material request {row.order_number} was approved",
+        [
+            "Hello,",
+            "",
+            "Your material request has been approved.",
+            "",
+            f"Material Request No: {row.order_number}",
+            f"Warehouse: {warehouse_name or '-'}",
+            f"Site: {row.site_id or row.site_address or '-'}",
+            f"Approved by: {row.receiver_name or '-'}",
+            f"Status: Approved",
+            "",
+            "The request is now with the warehouse team for the next step.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "mr_approved_requester_email",
+    )
+
+
+def notify_mr_rejected(row: MaterialRequisition, db: Session) -> None:
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    notify_mr_email(
+        row,
+        requester_notification_emails(row, db) + approval_notification_emails(db),
+        f"Your material request {row.order_number} was rejected",
+        [
+            "Hello,",
+            "",
+            "Your material request was rejected.",
+            "",
+            f"Material Request No: {row.order_number}",
+            f"Warehouse: {warehouse_name or '-'}",
+            f"Site: {row.site_id or row.site_address or '-'}",
+            f"Reviewed by: {row.receiver_name or '-'}",
+            f"Comment: {row.receiver_comment or '-'}",
+            f"Status: Rejected",
+            "",
+            "Please sign in to the warehouse system for details.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "mr_rejected_email",
+    )
+
+
+def notify_mr_returned_for_edit(row: MaterialRequisition, db: Session) -> None:
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    notify_mr_email(
+        row,
+        requester_notification_emails(row, db) + approval_notification_emails(db),
+        f"Material request {row.order_number} returned for edit",
+        [
+            "Hello,",
+            "",
+            "Your material request was returned for update.",
+            "",
+            f"Material Request No: {row.order_number}",
+            f"Warehouse: {warehouse_name or '-'}",
+            f"Site: {row.site_id or row.site_address or '-'}",
+            f"Return reason: {row.return_reason or row.receiver_comment or '-'}",
+            f"Status: Returned for edit",
+            "",
+            "Please sign in to the warehouse system, update the request, and submit it again.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "mr_returned_email",
+    )
 
 
 class LoginIn(BaseModel):
@@ -2589,6 +2728,7 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
     log_audit(db, "approve_material_requisition", "material_requisition", row.order_number, actor or "approver", data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_mr_approved(row, db)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
@@ -2610,6 +2750,7 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     log_audit(db, "reject_material_requisition", "material_requisition", row.order_number, actor or "approver", data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_mr_rejected(row, db)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
@@ -2627,6 +2768,7 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
     log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "warehouse", data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_mr_returned_for_edit(row, db)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
