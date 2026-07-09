@@ -2294,6 +2294,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     log_audit(db, "resubmit_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_mr_created(row, db)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
