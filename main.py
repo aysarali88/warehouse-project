@@ -2,11 +2,14 @@ import csv
 import io
 import json
 import hmac
+import logging
 import os
 import re
+import smtplib
 import time
 import urllib.parse
 import urllib.request
+import ssl
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -14,6 +17,7 @@ from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from email.message import EmailMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -51,6 +55,7 @@ ROLLOUT_DAILY_PROGRESS_SHEET_ID = "1ZT9e9acJ9Y60J4f_DIFZiYyHa8GvNZdlTvpucHju7Ec"
 ROLLOUT_DAILY_PROGRESS_GID = "440090582"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsheets/d/{ROLLOUT_DAILY_PROGRESS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ROLLOUT_DAILY_PROGRESS_GID}"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
@@ -110,6 +115,94 @@ def local_today() -> str:
 
 def app_user_key(username: str, role: str, password: str = "") -> tuple[str, str, str]:
     return (username.strip().lower(), role.strip().lower(), password)
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
+def env_list(name: str) -> list[str]:
+    raw = os.getenv(name, "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def send_email(to_emails: list[str], subject: str, body: str) -> bool:
+    host = os.getenv("SMTP_HOST", "").strip()
+    try:
+        port = int(os.getenv("SMTP_PORT", "587"))
+    except ValueError:
+        logger.warning("MR email skipped: SMTP_PORT is invalid")
+        return False
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").strip()
+    from_email = os.getenv("EMAIL_FROM", username).strip()
+    if not host or not port or not username or not password or not from_email or not to_emails:
+        logger.warning("MR email skipped: SMTP settings or recipients are missing")
+        return False
+
+    msg = EmailMessage()
+    msg["From"] = from_email
+    msg["To"] = ", ".join(to_emails)
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    use_ssl = env_bool("SMTP_USE_SSL", port == 465)
+    use_tls = env_bool("SMTP_USE_TLS", not use_ssl and port != 465)
+    context = ssl.create_default_context()
+
+    if use_ssl:
+        with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as smtp:
+            smtp.login(username, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            if use_tls:
+                smtp.starttls(context=context)
+            smtp.login(username, password)
+            smtp.send_message(msg)
+    return True
+
+
+def approval_notification_emails(db: Session) -> list[str]:
+    configured = env_list("APPROVAL_EMAIL_RECIPIENTS")
+    if configured:
+        return configured
+
+    rows = (
+        db.query(AppUser)
+        .filter(AppUser.status == "active", func.lower(AppUser.role) == "approval")
+        .all()
+    )
+    return [row.username.strip() for row in rows if "@" in row.username and row.username.strip()]
+
+
+def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
+    recipients = approval_notification_emails(db)
+    if not recipients:
+        logger.warning("MR email skipped: no Approval recipients configured")
+        return
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    lines = [
+        f"New Material Requisition is waiting for approval.",
+        f"MR No: {row.order_number}",
+        f"Requester: {row.requester_name}",
+        f"Warehouse: {warehouse_name}",
+        f"Site: {row.site_id or row.site_address}",
+        f"Status: {row.status}",
+        "",
+        "Open the warehouse app to review the request.",
+    ]
+    try:
+        send_email(
+            recipients,
+            f"MR {row.order_number} waiting for approval",
+            "\n".join(lines),
+        )
+    except Exception:
+        logger.exception("Failed to send MR creation email")
 
 
 class LoginIn(BaseModel):
@@ -2137,6 +2230,8 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     log_audit(db, "create_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
     db.commit()
     db.refresh(row)
+    if row.status == "pending_approval":
+        notify_mr_created(row, db)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
 
 
