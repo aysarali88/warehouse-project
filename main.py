@@ -215,7 +215,7 @@ def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session)
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
-def notify_mr_email(row: MaterialRequisition, recipients: list[str], subject: str, lines: list[str], audit_prefix: str) -> None:
+def notify_mr_email(row: MaterialRequisition, db: Session, recipients: list[str], subject: str, lines: list[str], audit_prefix: str) -> None:
     recipients = normalize_email_list(recipients)
     if not recipients:
         logger.warning("MR email skipped: no recipients configured for %s", audit_prefix)
@@ -280,6 +280,7 @@ def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
     ]
     notify_mr_email(
         row,
+        db,
         approval_notification_emails(db),
         f"Approval needed: Material Request {row.order_number}",
         lines,
@@ -292,6 +293,7 @@ def notify_mr_approved(row: MaterialRequisition, db: Session) -> None:
     approver_copy = approval_notification_emails(db)
     notify_mr_email(
         row,
+        db,
         warehouse_manager_notification_emails(row, db) + approver_copy,
         f"Warehouse action needed: Material Request {row.order_number}",
         [
@@ -314,6 +316,7 @@ def notify_mr_approved(row: MaterialRequisition, db: Session) -> None:
     )
     notify_mr_email(
         row,
+        db,
         requester_notification_emails(row, db) + approver_copy,
         f"Your material request {row.order_number} was approved",
         [
@@ -339,6 +342,7 @@ def notify_mr_rejected(row: MaterialRequisition, db: Session) -> None:
     warehouse_name = row.warehouse.name if row.warehouse else ""
     notify_mr_email(
         row,
+        db,
         requester_notification_emails(row, db) + approval_notification_emails(db),
         f"Your material request {row.order_number} was rejected",
         [
@@ -365,6 +369,7 @@ def notify_mr_returned_for_edit(row: MaterialRequisition, db: Session) -> None:
     warehouse_name = row.warehouse.name if row.warehouse else ""
     notify_mr_email(
         row,
+        db,
         requester_notification_emails(row, db) + approval_notification_emails(db),
         f"Material request {row.order_number} returned for edit",
         [
