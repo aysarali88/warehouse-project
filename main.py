@@ -391,6 +391,33 @@ def notify_mr_returned_for_edit(row: MaterialRequisition, db: Session) -> None:
     )
 
 
+def notify_mr_issued(row: MaterialRequisition, db: Session) -> None:
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    notify_mr_email(
+        row,
+        db,
+        requester_notification_emails(row, db) + approval_notification_emails(db),
+        f"Material request {row.order_number} was issued",
+        [
+            "Hello,",
+            "",
+            "A material request has been issued by the warehouse team.",
+            "",
+            f"Material Request No: {row.order_number}",
+            f"Warehouse: {warehouse_name or '-'}",
+            f"Site: {row.site_id or row.site_address or '-'}",
+            f"Requester: {row.requester_name or '-'}",
+            f"Approver: {row.receiver_name or '-'}",
+            f"Status: Issued",
+            "",
+            "Please sign in to the warehouse system for details.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "mr_issued_email",
+    )
+
+
 class LoginIn(BaseModel):
     username: str
     password: str
@@ -2785,6 +2812,7 @@ def issue_material_requisition(requisition_id: int, data: MaterialRequisitionAct
     issue_order = issue_material_requisition_row(db, row, data.actor)
     db.commit()
     db.refresh(row)
+    notify_mr_issued(row, db)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
 
 
