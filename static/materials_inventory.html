@@ -172,6 +172,7 @@ body{
 }
 .main{padding:26px 24px 30px}
 .top{
+  position:relative;
   align-items:center;
   margin-bottom:20px;
   padding:18px 20px;
@@ -188,15 +189,19 @@ body{
 }
 .top p{font-size:13px;color:#6d8093}
 .top-brand-mark{
+  position:absolute;
+  inset-inline-start:50%;
+  top:50%;
   display:flex;
   justify-content:center;
   align-items:center;
-  margin:-4px 0 18px;
+  margin:0;
+  transform:translate(-50%,-50%);
   pointer-events:none;
 }
 .top-brand-mark img{
-  width:min(240px,38vw);
-  max-height:42px;
+  width:min(220px,24vw);
+  max-height:38px;
   object-fit:contain;
   opacity:.96;
   filter:drop-shadow(0 8px 18px rgba(33,72,245,.12));
@@ -294,7 +299,7 @@ th{
 @media(max-width:760px){
   .logo{width:112px;height:44px}
   .top{padding:14px;border-radius:16px}
-  .top-brand-mark img{width:min(200px,56vw);max-height:34px}
+  .top-brand-mark img{width:min(136px,30vw);max-height:24px}
   .card,.dash-panel,.viz-panel,.ops-card,.modal-box,.login-card{border-radius:16px}
 }
 </style>
@@ -333,6 +338,7 @@ th{
       <h2 id="pageTitle">Dashboard</h2>
       <p id="pageSub"></p>
     </div>
+    <div class="top-brand-mark"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
     <div class="actions">
       <span class="user-chip" id="currentUserLabel">User</span>
       <span class="notify-badge" id="approvalBadge">0 approvals</span>
@@ -341,7 +347,6 @@ th{
       <a class="btn soft admin-only" href="/docs" target="_blank">API</a>
     </div>
   </div>
-  <div class="top-brand-mark"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
 
   <section class="view active" id="dashboard">
     <div class="command-dashboard">
