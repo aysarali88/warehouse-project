@@ -98,11 +98,211 @@
   .command-title h3,.hero-title h3{font-size:22px}
   table{min-width:680px}
 }
+:root{
+  --bg:#edf4fb;
+  --panel:#ffffff;
+  --panel-soft:#f7fbff;
+  --ink:#10263c;
+  --muted:#5f7387;
+  --line:#d8e6f1;
+  --brand:#2148f5;
+  --brand-deep:#0b3f7e;
+  --teal:#13a6a7;
+  --green:#18a05c;
+  --amber:#d89a14;
+  --red:#d14848;
+}
+body{
+  background:
+    radial-gradient(circle at 12% 10%,rgba(33,72,245,.08),transparent 22%),
+    radial-gradient(circle at 86% 16%,rgba(19,166,167,.09),transparent 18%),
+    linear-gradient(180deg,#f7fbff 0%,#edf4fb 46%,#f4f8fc 100%);
+  color:var(--ink);
+}
+.side{
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0)),
+    linear-gradient(180deg,#082d62 0%,#0b4d95 42%,#0a7ba2 100%);
+  border-inline-end:1px solid rgba(255,255,255,.08);
+  box-shadow:18px 0 42px rgba(7,31,73,.14);
+}
+.brand{
+  display:grid;
+  justify-items:center;
+  text-align:center;
+  gap:10px;
+  padding-bottom:20px;
+}
+.brand-copy{display:grid;gap:4px}
+.logo{
+  width:132px;
+  height:52px;
+  border-radius:0;
+  background:transparent;
+  color:transparent;
+  padding:0;
+  box-shadow:none;
+}
+.logo img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  display:block;
+  filter:drop-shadow(0 8px 16px rgba(0,0,0,.18));
+}
+.brand h1{font-size:18px;font-weight:900;letter-spacing:.2px}
+.brand small{color:rgba(255,255,255,.82);font-size:11px}
+.nav button{
+  border:1px solid transparent;
+  border-radius:12px;
+  background:rgba(255,255,255,.08);
+  color:rgba(255,255,255,.88);
+  backdrop-filter:blur(8px);
+  transition:.18s ease;
+}
+.nav button:hover{
+  background:rgba(255,255,255,.14);
+  border-color:rgba(255,255,255,.12);
+  transform:translateY(-1px);
+}
+.nav button.active{
+  background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(237,245,255,.94));
+  color:#083d75;
+  box-shadow:0 12px 24px rgba(6,31,70,.16);
+}
+.main{padding:26px 24px 30px}
+.top{
+  align-items:center;
+  margin-bottom:20px;
+  padding:18px 20px;
+  border:1px solid rgba(33,72,245,.08);
+  border-radius:18px;
+  background:rgba(255,255,255,.72);
+  backdrop-filter:blur(12px);
+  box-shadow:0 16px 38px rgba(23,53,92,.08);
+}
+.top h2{
+  font-size:30px;
+  color:#0a335d;
+  letter-spacing:.2px;
+}
+.top p{font-size:13px;color:#6d8093}
+.top-brand-mark{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  margin:-4px 0 18px;
+  pointer-events:none;
+}
+.top-brand-mark img{
+  width:min(240px,38vw);
+  max-height:42px;
+  object-fit:contain;
+  opacity:.96;
+  filter:drop-shadow(0 8px 18px rgba(33,72,245,.12));
+}
+.btn{
+  border-radius:12px;
+  transition:.18s ease;
+  box-shadow:0 8px 18px rgba(23,53,92,.06);
+}
+.btn:hover{transform:translateY(-1px)}
+.primary{
+  background:linear-gradient(135deg,#2148f5 0%,#0b81b8 100%);
+  box-shadow:0 14px 28px rgba(33,72,245,.2);
+}
+.soft{
+  background:linear-gradient(180deg,#fafdff 0%,#edf6ff 100%);
+  color:#0b4d95;
+  border-color:#d5e6fb;
+}
+.danger{
+  background:linear-gradient(180deg,#fff7f7 0%,#ffeceb 100%);
+}
+.card,.dash-panel,.viz-panel,.ops-card,.modal-box,.login-card{
+  border-radius:18px;
+  border:1px solid rgba(25,72,124,.08);
+  background:linear-gradient(180deg,rgba(255,255,255,.98) 0%,rgba(247,251,255,.96) 100%);
+  box-shadow:0 18px 40px rgba(17,40,70,.08);
+}
+.card h3,.dash-panel h3,.viz-panel h3{
+  color:#0b4d95;
+  letter-spacing:.15px;
+}
+input,select,textarea{
+  border-radius:12px;
+  border-color:#d9e7f3;
+  background:linear-gradient(180deg,#fff 0%,#fbfdff 100%);
+}
+input:hover,select:hover,textarea:hover{border-color:#bdd5ea}
+input:focus,select:focus,textarea:focus{
+  outline:3px solid rgba(33,72,245,.12);
+  border-color:#89b0ea;
+}
+.table-wrap{
+  border-radius:14px;
+  background:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8);
+}
+th{
+  background:linear-gradient(180deg,#f4f8fc 0%,#e8f0f7 100%);
+  color:#30506e;
+}
+.click-row:hover td{background:#f3f8ff}
+.view{gap:18px}
+.login-screen{
+  background:
+    radial-gradient(circle at 18% 16%,rgba(255,255,255,.16),transparent 20%),
+    linear-gradient(135deg,#082d62 0%,#2148f5 32%,#0a7ba2 66%,#13a06f 100%);
+}
+.login-card{
+  position:relative;
+  overflow:hidden;
+}
+.login-card:before{
+  content:"";
+  position:absolute;
+  inset:-18% auto auto -12%;
+  width:180px;
+  height:180px;
+  background:radial-gradient(circle,rgba(33,72,245,.09),transparent 70%);
+}
+.login-logo{
+  display:flex;
+  justify-content:center;
+  margin:0 0 14px;
+}
+.login-logo img{
+  width:min(250px,100%);
+  max-height:56px;
+  object-fit:contain;
+}
+.command-hero,.executive-hero{
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 18% 18%,rgba(255,255,255,.18),transparent 24%),
+    linear-gradient(125deg,#082d62 0%,#2148f5 34%,#0b81b8 62%,#13a06f 100%);
+  box-shadow:0 24px 54px rgba(13,46,95,.2);
+}
+.workflow-pill{
+  border-radius:16px;
+  box-shadow:0 14px 28px rgba(0,109,143,.14);
+}
+.status-tile,.hero-metric,.command-kpi,.risk-row,.movement-card,.heat-item{
+  border-radius:16px;
+}
+@media(max-width:760px){
+  .logo{width:112px;height:44px}
+  .top{padding:14px;border-radius:16px}
+  .top-brand-mark img{width:min(200px,56vw);max-height:34px}
+  .card,.dash-panel,.viz-panel,.ops-card,.modal-box,.login-card{border-radius:16px}
+}
 </style>
 </head>
 <body>
 <div class="login-screen" id="loginScreen">
   <div class="login-card">
+    <div class="login-logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
     <h2>Warehouse Login</h2>
     <p>ادخل بحسابك لعرض الصلاحيات الخاصة بك.</p>
     <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="admin / requester / approval / warehouse"></div>
@@ -113,8 +313,8 @@
 <div class="app hidden" id="appShell">
 <aside class="side">
   <div class="brand">
-    <div class="logo">WH</div>
-    <div><h1>إدارة مخزون المواد</h1><small>Materials Inventory Management</small></div>
+    <div class="logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
+    <div class="brand-copy"><h1>إدارة مخزون المواد</h1><small>Materials Inventory Management</small></div>
   </div>
   <nav class="nav">
     <button class="active" data-view="dashboard">Dashboard</button>
@@ -141,6 +341,7 @@
       <a class="btn soft admin-only" href="/docs" target="_blank">API</a>
     </div>
   </div>
+  <div class="top-brand-mark"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
 
   <section class="view active" id="dashboard">
     <div class="command-dashboard">
