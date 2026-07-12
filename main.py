@@ -1947,7 +1947,6 @@ def list_stock_usage(db: Session = Depends(db_session)):
     }
     rollout_rows, _ = rollout_daily_progress_records(db)
     rollout_consumed_by_material: dict[str, float] = {}
-    rollout_consumed_by_city_material: dict[tuple[str, str], float] = {}
     for record in rollout_rows:
         material = str(record.get("material type") or record.get("item") or "").strip()
         if not material:
@@ -1957,10 +1956,6 @@ def list_stock_usage(db: Session = Depends(db_session)):
             continue
         actual = safe_float(record.get("actual"))
         rollout_consumed_by_material[material_key] = rollout_consumed_by_material.get(material_key, 0) + actual
-        city_key = normalize_usage_key(record.get("city") or "")
-        if city_key:
-            key = (city_key, material_key)
-            rollout_consumed_by_city_material[key] = rollout_consumed_by_city_material.get(key, 0) + actual
 
     usage_rows = []
     for balance in balances:
@@ -1974,13 +1969,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         usage_percent = round((total_consumed / denominator) * 100, 2) if denominator else 0
         product_name = product_display_name(balance.product)
         material_key = canonical_material_key(product_name or (balance.product.sku if balance.product else ""))
-        warehouse_key = normalize_usage_key(balance.warehouse.name if balance.warehouse else "")
-        city_matches = [
-            qty
-            for (city_key, row_material_key), qty in rollout_consumed_by_city_material.items()
-            if row_material_key == material_key and city_key and warehouse_key and (city_key in warehouse_key or warehouse_key in city_key)
-        ]
-        rollout_consumed = sum(city_matches) if city_matches else rollout_consumed_by_material.get(material_key, 0)
+        rollout_consumed = rollout_consumed_by_material.get(material_key, 0)
         remaining_after_rollout = display_total - rollout_consumed
         rollout_usage_percent = round((rollout_consumed / display_total) * 100, 2) if display_total else 0
         usage_rows.append(
