@@ -433,7 +433,7 @@ th{
     <div class="card">
       <div class="top" style="margin-bottom:12px">
         <div>
-          <h3>Rollout Daily Progress</h3>
+          <h3>Rollout Progress Dashboard</h3>
         </div>
       </div>
       <div class="workflow-lane" id="rolloutDailyStats"></div>
@@ -809,7 +809,7 @@ let activeRole=session?.role||'';
 let lastApprovalCount=0;
 let appUsers=[];
 let currentEditingMrId=null;
-const titles={dashboard:['Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress','عرض النقاط والمواد المستهلكة القادمة من صفحة Daily Progress في Google Sheet.'],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
+const titles={dashboard:['Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','عرض يوزرات النظام والباسووردات حسب الصلاحية.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
@@ -1144,7 +1144,94 @@ function renderRolloutReport(){const select=document.getElementById('rolloutRepo
 function renderRolloutUsage(){renderRolloutReport();const rows=wh.rolloutUsage||[];if(!rows.length){document.getElementById('rolloutUsageTable').innerHTML=`<div class="empty">لا توجد بيانات MR للمقارنة. Rollout records loaded: ${fmt(wh.rolloutRecords)}</div>`;return}document.getElementById('rolloutUsageTable').innerHTML=rowsTable([['المنطقة','area'],['Site Address','site_address'],['المادة','material'],['SKU','sku'],['MR Issued','mr_issued_qty',(v)=>fmt(v)],['Rollout Used','rollout_used_qty',(v)=>fmt(v)],['Remaining','remaining_after_rollout',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['Match','usage_match',(v)=>rolloutMatchLabel(v)],['Receiver','technician'],['Last MR','last_mr']],rows)}
 async function downloadRolloutReportPdf(){const select=document.getElementById('rolloutReportArea');if(select)selectedRolloutReportArea=select.value;renderRolloutReport();if(!selectedRolloutReportArea){toast('اختر منطقة أولاً');return}const holder=document.createElement('div');holder.style.position='fixed';holder.style.left='-10000px';holder.style.top='0';holder.style.background='#fff';holder.innerHTML=rolloutReportHtml(selectedRolloutReportArea);document.body.appendChild(holder);const el=holder.querySelector('.rollout-report-sheet');try{await waitForImages(el);const name=`Rollout-Progress-${String(selectedRolloutReportArea||'Area').replace(/[^\w\u0600-\u06FF-]+/g,'_')}.pdf`;await downloadSinglePagePdf(el,name);toast('تم تنزيل تقرير Rollout PDF صفحة واحدة')}catch(e){console.error(e);toast('تعذر تنزيل PDF: '+(e.message||'استخدم الطباعة ثم Save as PDF'))}finally{holder.remove()}}
 async function refreshRolloutDailyProgress(showToast=true){if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');const stamp=Date.now();const d=await api(`/api/warehouse/rollout-daily-progress?limit=1000&refresh=${stamp}`);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usage=await api(`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
-function renderRolloutDailyProgress(){const rows=wh.rolloutDailyProgress||[];const stats=document.getElementById('rolloutDailyStats');const table=document.getElementById('rolloutDailyTable');if(!stats||!table)return;const actual=rows.reduce((s,r)=>s+Number(r.actual||0),0);const areas=new Set(rows.map(r=>String(r.Area||'').trim()).filter(Boolean));const materials=new Set(rows.map(r=>String(r['material type']||r.item||'').trim()).filter(Boolean));const latest=[...rows].map(r=>String(r.Date||'')).filter(Boolean).sort().pop()||'-';stats.innerHTML=[['Records',wh.rolloutRecords||rows.length],['Actual Used',actual],['Areas',areas.size],['Materials',materials.size],['Latest Date',latest,'text']].map(x=>`<div class="workflow-pill"><span>${esc(x[0])}</span><strong>${esc(x[2]?x[1]:fmt(x[1]))}</strong></div>`).join('');table.innerHTML=rows.length?rowsTable([['ID','ID'],['Date','Date',(v)=>esc(String(v||'').slice(0,10))],['Area','Area'],['City','city'],['Activity','Activity'],['Item','item'],['Material','material type'],['Actual','actual',(v)=>fmt(v)],['Status','staus'],['Team Leader','team leader']],rows):'<div class="empty">لا توجد بيانات بعد. تأكد أن رابط CSV منشور للقراءة.</div>'}
+function renderRolloutDailyProgress(){
+const rows=wh.rolloutDailyProgress||[];
+const stats=document.getElementById('rolloutDailyStats');
+const table=document.getElementById('rolloutDailyTable');
+if(!stats||!table)return;
+const actual=rows.reduce((s,r)=>s+Number(r.actual||0),0);
+const latest=[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'-';
+const areasMap=new Map(),materialsMap=new Map(),activityMap=new Map(),teamMap=new Map(),statusMap=new Map(),cityMap=new Map();
+rows.forEach(r=>{
+  const qty=Number(r.actual||0);
+  const area=String(r.Area||r.area||'').trim();
+  const material=String(r['material type']||r.item||r.Material||'').trim();
+  const activity=String(r.Activity||r.activity||'Unspecified').trim()||'Unspecified';
+  const team=String(r['team leader']||r.team_leader||r.TeamLeader||'Unassigned').trim()||'Unassigned';
+  const status=String(r.staus||r.status||'Unknown').trim()||'Unknown';
+  const city=String(r.city||r.City||'Unspecified').trim()||'Unspecified';
+  if(area){
+    const cur=areasMap.get(area)||{name:area,qty:0,records:0};
+    cur.qty+=qty;cur.records+=1;areasMap.set(area,cur);
+  }
+  if(material){
+    const cur=materialsMap.get(material)||{name:material,qty:0};
+    cur.qty+=qty;materialsMap.set(material,cur);
+  }
+  const act=activityMap.get(activity)||{name:activity,qty:0,records:0};
+  act.qty+=qty;act.records+=1;activityMap.set(activity,act);
+  const lead=teamMap.get(team)||{name:team,qty:0,records:0};
+  lead.qty+=qty;lead.records+=1;teamMap.set(team,lead);
+  const st=statusMap.get(status)||{name:status,count:0};
+  st.count+=1;statusMap.set(status,st);
+  const ct=cityMap.get(city)||{name:city,qty:0};
+  ct.qty+=qty;cityMap.set(city,ct);
+});
+const areas=[...areasMap.values()].sort((a,b)=>b.qty-a.qty);
+const materials=[...materialsMap.values()].sort((a,b)=>b.qty-a.qty);
+const activities=[...activityMap.values()].sort((a,b)=>b.qty-a.qty);
+const teams=[...teamMap.values()].sort((a,b)=>b.qty-a.qty);
+const statuses=[...statusMap.values()].sort((a,b)=>b.count-a.count);
+const cities=[...cityMap.values()].sort((a,b)=>b.qty-a.qty);
+const topArea=areas[0]?.name||'-';
+const topMaterial=materials[0]?.name||'-';
+const topTeam=teams[0]?.name||'-';
+const topCity=cities[0]?.name||'-';
+stats.innerHTML=[
+['Records Loaded',wh.rolloutRecords||rows.length],
+['Total Installed',actual],
+['Areas Covered',areas.length],
+['Materials Used',materials.length],
+['Latest Update',latest,'text']
+].map(x=>`<div class="workflow-pill"><span>${esc(x[0])}</span><strong>${esc(x[2]?x[1]:fmt(x[1]))}</strong></div>`).join('');
+if(!rows.length){
+  table.innerHTML='<div class="empty">No rollout progress data loaded yet.</div>';
+  return;
+}
+const maxArea=Math.max(...areas.map(r=>Number(r.qty||0)),1);
+const maxMaterial=Math.max(...materials.map(r=>Number(r.qty||0)),1);
+const maxActivity=Math.max(...activities.map(r=>Number(r.qty||0)),1);
+const maxTeam=Math.max(...teams.map(r=>Number(r.qty||0)),1);
+const topAreas=areas.slice(0,6);
+const topMaterials=materials.slice(0,6);
+const topActivities=activities.slice(0,6);
+const topTeams=teams.slice(0,6);
+table.innerHTML=`
+<div class="dashboard-note">Raw Daily Progress records are hidden in WH. Sync and inventory deduction continue running in the background.</div>
+<div class="status-strip" style="margin:14px 0 16px">
+  <div class="status-tile good"><span>Top Area</span><strong>${esc(topArea)}</strong></div>
+  <div class="status-tile good"><span>Top Material</span><strong>${esc(topMaterial)}</strong></div>
+  <div class="status-tile good"><span>Top Team Leader</span><strong>${esc(topTeam)}</strong></div>
+  <div class="status-tile good"><span>Top City</span><strong>${esc(topCity)}</strong></div>
+</div>
+<div class="dash-grid">
+  <div class="dash-panel"><h3>Area Usage Overview</h3>${topAreas.length?topAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxArea)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No area usage yet.</div>'}</div>
+  <div class="dash-panel"><h3>Top Materials Consumed</h3>${topMaterials.length?topMaterials.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.qty,maxMaterial)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No material consumption yet.</div>'}</div>
+</div>
+<div class="dash-grid">
+  <div class="dash-panel"><h3>Activity Breakdown</h3>${topActivities.length?topActivities.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxActivity)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No activity data yet.</div>'}</div>
+  <div class="dash-panel"><h3>Team Productivity</h3>${topTeams.length?topTeams.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxTeam)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No team productivity data yet.</div>'}</div>
+</div>
+<div class="dash-grid">
+  <div class="dash-panel"><h3>Status Snapshot</h3><div class="status-strip">${statuses.slice(0,4).map(r=>`<div class="status-tile"><span>${esc(r.name)}</span><strong>${fmt(r.count)}</strong></div>`).join('')||'<div class="empty-soft">No status data yet.</div>'}</div></div>
+  <div class="dash-panel"><h3>Operational Insight</h3><div class="mini-list">
+    <div class="mini-row"><div><b>Average Installed per Record</b><small>Total installed divided by loaded records</small></div><strong>${fmt(rows.length?(actual/rows.length):0)}</strong></div>
+    <div class="mini-row"><div><b>Average Installed per Area</b><small>Total installed divided by covered areas</small></div><strong>${fmt(areas.length?(actual/areas.length):0)}</strong></div>
+    <div class="mini-row"><div><b>Active Team Leaders</b><small>Distinct team leaders contributing to rollout execution</small></div><strong>${fmt(teams.length)}</strong></div>
+    <div class="mini-row"><div><b>Tracked Activities</b><small>Distinct activity types found in the synced rollout data</small></div><strong>${fmt(activities.length)}</strong></div>
+  </div></div>
+</div>`;
+}
 function visibleScanLogs(){if(roleKey()==='admin'||roleKey()==='management'||roleKey()==='warehousemanager'||canApprove())return wh.scanLogs||[];const visibleIds=new Set((wh.mrs||[]).filter(userOwnsMr).map(r=>String(r.id)));return (wh.scanLogs||[]).filter(r=>visibleIds.has(String(r.material_requisition_id))||normalizeText(r.scanned_by)===normalizeText(activeUser))}
 function renderScanLogs(){const box=document.getElementById('scanLogsTable');if(!box)return;box.innerHTML=rowsTable([['MR','mr_order'],['Status','mr_status',(v)=>statusChip(v)],['Site','site_id'],['Warehouse','warehouse'],['SKU','sku'],['Material','material'],['Serial / Code','serial_number',(v,r)=>esc(v||r.scan_code)],['Match','match_type'],['Scanned By','scanned_by'],['Time','created_at',(v)=>esc(String(v||'').replace('T',' ').slice(0,19))]],visibleScanLogs())}
 function setHistoryScanStatus(msg,type=''){const el=document.getElementById('historyScanStatus');if(!el)return;el.textContent=msg;el.className='scan-status '+type}
