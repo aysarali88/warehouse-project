@@ -1151,7 +1151,7 @@ const table=document.getElementById('rolloutDailyTable');
 if(!stats||!table)return;
 const actual=rows.reduce((s,r)=>s+Number(r.actual||0),0);
 const latest=[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'-';
-const areasMap=new Map(),materialsMap=new Map(),activityMap=new Map(),teamMap=new Map(),statusMap=new Map(),cityMap=new Map();
+const areasMap=new Map(),materialsMap=new Map(),activityMap=new Map(),teamMap=new Map(),statusMap=new Map(),cityMap=new Map(),areaMetrics=new Map();
 rows.forEach(r=>{
   const qty=Number(r.actual||0);
   const area=String(r.Area||r.area||'').trim();
@@ -1160,9 +1160,26 @@ rows.forEach(r=>{
   const team=String(r['team leader']||r.team_leader||r.TeamLeader||'Unassigned').trim()||'Unassigned';
   const status=String(r.staus||r.status||'Unknown').trim()||'Unknown';
   const city=String(r.city||r.City||'Unspecified').trim()||'Unspecified';
+  const normMaterial=normalizeText(material);
+  const cableLengthMatch=material.match(/(\d+)\s*m\b/i)||material.match(/_(\d+)m\b/i);
+  const cableLengthPerUnit=cableLengthMatch?Number(cableLengthMatch[1]||0):0;
+  const isCoreCable=normMaterial.includes('corecable')||normMaterial.includes('4corecable')||normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
+  const isDistributionCable=normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
+  const isSubOrEndBox=normMaterial.includes('subbox')||normMaterial.includes('subboxavec8userscapacit')||normMaterial.includes('endbox')||normMaterial.includes('endboxavec8userscapacit');
+  const isHubBox=normMaterial.includes('hubbox');
+  const isXbox=normMaterial.includes('xbox');
   if(area){
     const cur=areasMap.get(area)||{name:area,qty:0,records:0};
     cur.qty+=qty;cur.records+=1;areasMap.set(area,cur);
+    const metric=areaMetrics.get(area)||{name:area,cableMeters:0,distributionQty:0,subEndBox:0,hubBox:0,xbox:0,records:0,teams:new Set()};
+    metric.records+=1;
+    if(team)metric.teams.add(team);
+    if(isCoreCable&&cableLengthPerUnit>0)metric.cableMeters+=qty*cableLengthPerUnit;
+    if(isDistributionCable)metric.distributionQty+=qty;
+    if(isSubOrEndBox)metric.subEndBox+=qty;
+    if(isHubBox)metric.hubBox+=qty;
+    if(isXbox)metric.xbox+=qty;
+    areaMetrics.set(area,metric);
   }
   if(material){
     const cur=materialsMap.get(material)||{name:material,qty:0};
@@ -1183,10 +1200,24 @@ const activities=[...activityMap.values()].sort((a,b)=>b.qty-a.qty);
 const teams=[...teamMap.values()].sort((a,b)=>b.qty-a.qty);
 const statuses=[...statusMap.values()].sort((a,b)=>b.count-a.count);
 const cities=[...cityMap.values()].sort((a,b)=>b.qty-a.qty);
-const topArea=areas[0]?.name||'-';
-const topMaterial=materials[0]?.name||'-';
-const topTeam=teams[0]?.name||'-';
-const topCity=cities[0]?.name||'-';
+const areaRows=[...areaMetrics.values()].map(r=>{
+  const totalBoxes=Number(r.subEndBox||0)+Number(r.hubBox||0)+Number(r.xbox||0);
+  const actualUsers=Number(r.distributionQty||0)*8;
+  return {...r,totalBoxes,actualUsers,teamCount:r.teams.size};
+}).sort((a,b)=>b.cableMeters-a.cableMeters||b.totalBoxes-a.totalBoxes);
+const maxCableMeters=Math.max(...areaRows.map(r=>Number(r.cableMeters||0)),1);
+const maxBoxes=Math.max(...areaRows.map(r=>Number(r.totalBoxes||0)),1);
+const productivityRows=areaRows.map(r=>{
+  const cableScore=(Number(r.cableMeters||0)/maxCableMeters)*100;
+  const boxScore=(Number(r.totalBoxes||0)/maxBoxes)*100;
+  const productivity=(cableScore*0.8)+(boxScore*0.2);
+  return {...r,productivity};
+}).sort((a,b)=>b.productivity-a.productivity);
+const totalCableMeters=productivityRows.reduce((s,r)=>s+Number(r.cableMeters||0),0);
+const totalBoxes=productivityRows.reduce((s,r)=>s+Number(r.totalBoxes||0),0);
+const totalUsers=productivityRows.reduce((s,r)=>s+Number(r.actualUsers||0),0);
+const bestArea=productivityRows[0]?.name||'-';
+const bestScore=productivityRows[0]?.productivity||0;
 stats.innerHTML=[
 ['Records Loaded',wh.rolloutRecords||rows.length],
 ['Total Installed',actual],
@@ -1206,29 +1237,34 @@ const topAreas=areas.slice(0,6);
 const topMaterials=materials.slice(0,6);
 const topActivities=activities.slice(0,6);
 const topTeams=teams.slice(0,6);
+const topCableAreas=productivityRows.slice(0,6);
+const topUserAreas=productivityRows.slice(0,6);
+const topProductivityAreas=productivityRows.slice(0,6);
 table.innerHTML=`
 <div class="dashboard-note">Raw Daily Progress records are hidden in WH. Sync and inventory deduction continue running in the background.</div>
 <div class="status-strip" style="margin:14px 0 16px">
-  <div class="status-tile good"><span>Top Area</span><strong>${esc(topArea)}</strong></div>
-  <div class="status-tile good"><span>Top Material</span><strong>${esc(topMaterial)}</strong></div>
-  <div class="status-tile good"><span>Top Team Leader</span><strong>${esc(topTeam)}</strong></div>
-  <div class="status-tile good"><span>Top City</span><strong>${esc(topCity)}</strong></div>
+  <div class="status-tile good"><span>Total Cable Progress (m)</span><strong>${fmt(totalCableMeters)}</strong></div>
+  <div class="status-tile good"><span>Total Box Deployment</span><strong>${fmt(totalBoxes)}</strong></div>
+  <div class="status-tile good"><span>Estimated Actual Users</span><strong>${fmt(totalUsers)}</strong></div>
+  <div class="status-tile good"><span>Best Productivity Area</span><strong>${esc(bestArea)} · ${Number(bestScore||0).toFixed(1)}%</strong></div>
 </div>
 <div class="dash-grid">
-  <div class="dash-panel"><h3>Area Usage Overview</h3>${topAreas.length?topAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxArea)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No area usage yet.</div>'}</div>
-  <div class="dash-panel"><h3>Top Materials Consumed</h3>${topMaterials.length?topMaterials.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.qty,maxMaterial)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No material consumption yet.</div>'}</div>
+  <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topCableAreas.length?topCableAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.cableMeters,maxCableMeters)}%"></div></div><strong>${fmt(r.cableMeters)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
+  <div class="dash-panel"><h3>Box Deployment by Area</h3>${productivityRows.length?`<div class="mini-list">${productivityRows.slice(0,6).map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END BOX ${fmt(r.subEndBox)} · HUB BOX ${fmt(r.hubBox)} · XBOX ${fmt(r.xbox)}</small></div><strong>${fmt(r.totalBoxes)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">No box deployment yet.</div>'}</div>
 </div>
 <div class="dash-grid">
-  <div class="dash-panel"><h3>Activity Breakdown</h3>${topActivities.length?topActivities.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxActivity)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No activity data yet.</div>'}</div>
+  <div class="dash-panel"><h3>Actual Users by Area</h3>${topUserAreas.length?topUserAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.actualUsers,Math.max(...productivityRows.map(x=>Number(x.actualUsers||0)),1))}%"></div></div><strong>${fmt(r.actualUsers)}</strong></div>`).join(''):'<div class="empty-soft">No actual users yet.</div>'}</div>
+  <div class="dash-panel"><h3>Overall Productivity by Area</h3>${topProductivityAreas.length?topProductivityAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.productivity,100)}%"></div></div><strong>${Number(r.productivity||0).toFixed(1)}%</strong></div>`).join(''):'<div class="empty-soft">No productivity score yet.</div>'}</div>
+</div>
+<div class="dash-grid">
   <div class="dash-panel"><h3>Team Productivity</h3>${topTeams.length?topTeams.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxTeam)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No team productivity data yet.</div>'}</div>
-</div>
-<div class="dash-grid">
-  <div class="dash-panel"><h3>Status Snapshot</h3><div class="status-strip">${statuses.slice(0,4).map(r=>`<div class="status-tile"><span>${esc(r.name)}</span><strong>${fmt(r.count)}</strong></div>`).join('')||'<div class="empty-soft">No status data yet.</div>'}</div></div>
   <div class="dash-panel"><h3>Operational Insight</h3><div class="mini-list">
     <div class="mini-row"><div><b>Average Installed per Record</b><small>Total installed divided by loaded records</small></div><strong>${fmt(rows.length?(actual/rows.length):0)}</strong></div>
     <div class="mini-row"><div><b>Average Installed per Area</b><small>Total installed divided by covered areas</small></div><strong>${fmt(areas.length?(actual/areas.length):0)}</strong></div>
     <div class="mini-row"><div><b>Active Team Leaders</b><small>Distinct team leaders contributing to rollout execution</small></div><strong>${fmt(teams.length)}</strong></div>
     <div class="mini-row"><div><b>Tracked Activities</b><small>Distinct activity types found in the synced rollout data</small></div><strong>${fmt(activities.length)}</strong></div>
+    <div class="mini-row"><div><b>Average Cable Meters per Area</b><small>Total cable progress divided by covered areas</small></div><strong>${fmt(areas.length?(totalCableMeters/areas.length):0)}</strong></div>
+    <div class="mini-row"><div><b>Average Users per Area</b><small>Estimated actual users divided by covered areas</small></div><strong>${fmt(areas.length?(totalUsers/areas.length):0)}</strong></div>
   </div></div>
 </div>`;
 }
