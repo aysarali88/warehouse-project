@@ -1266,14 +1266,6 @@ table.innerHTML=`
 </div>
 <div class="dash-grid">
   <div class="dash-panel"><h3>Team Productivity</h3>${topTeams.length?topTeams.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.qty,maxTeam)}%"></div></div><strong>${fmt(r.qty)}</strong></div>`).join(''):'<div class="empty-soft">No team productivity data yet.</div>'}</div>
-  <div class="dash-panel"><h3>Deployment Health KPIs</h3><div class="mini-list">
-    <div class="mini-row"><div><b>Areas with Cable Progress</b><small>Areas that have measurable core or distribution cable progress in meters</small></div><strong>${fmt(activeCableAreas)}</strong></div>
-    <div class="mini-row"><div><b>Areas with Box Deployment</b><small>Areas that already have SUB / END BOX, HUB BOX, or XBOX installed</small></div><strong>${fmt(activeBoxAreas)}</strong></div>
-    <div class="mini-row"><div><b>Areas with Estimated Users</b><small>Areas where installed distribution + 4-core cable indicates serviceable users</small></div><strong>${fmt(activeUserAreas)}</strong></div>
-    <div class="mini-row"><div><b>Average Productivity Score</b><small>Average weighted rollout productivity across all covered areas</small></div><strong>${Number(averageProductivity||0).toFixed(1)}%</strong></div>
-    <div class="mini-row"><div><b>Users per Box</b><small>Estimated users divided by total deployed boxes across all covered areas</small></div><strong>${fmt(usersPerBox)}</strong></div>
-    <div class="mini-row"><div><b>Cable Meters per Box</b><small>Total cable progress divided by total deployed boxes</small></div><strong>${fmt(cableMetersPerBox)}</strong></div>
-  </div></div>
 </div>`;
 }
 function visibleScanLogs(){if(roleKey()==='admin'||roleKey()==='management'||roleKey()==='warehousemanager'||canApprove())return wh.scanLogs||[];const visibleIds=new Set((wh.mrs||[]).filter(userOwnsMr).map(r=>String(r.id)));return (wh.scanLogs||[]).filter(r=>visibleIds.has(String(r.material_requisition_id))||normalizeText(r.scanned_by)===normalizeText(activeUser))}
