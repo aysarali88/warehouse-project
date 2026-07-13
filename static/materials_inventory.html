@@ -413,10 +413,7 @@ th{
         <div class="command-kpis" id="summaryKpis"></div>
       </div>
       <div class="workflow-lane" id="opsSnapshot"></div>
-      <div class="viz-grid">
-        <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
-        <div class="viz-panel"><h3>Inventory consumption</h3><div id="mrStatusPanel"></div></div>
-      </div>
+      <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
       <div class="viz-grid">
         <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
         <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
@@ -918,9 +915,6 @@ document.getElementById('opsSnapshot').innerHTML=[
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
 document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.map(r=>`<div class="chart-row"><b title="${esc(r.product)}">${esc(r.product)}</b><div class="chart-track"><div class="chart-fill ${Number(r.usage_percent)>=60?'hot':''}" style="width:${pct(r.total_consumed,maxOut)}%"></div></div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد Stock Out بعد</div>';
-const mrStatusState=pendingMrs>0?'Attention required':issuedMrs>0||approvedMrs>0||returnedToday>0?'Active':'No pending';
-const mrStatusClass=pendingMrs>0?'warn':'';
-document.getElementById('mrStatusPanel').innerHTML=`<div class="status-summary"><div class="status-summary-head"><div><span>Current load</span><strong>${usage.toFixed(1)}%</strong></div><div class="status-summary-badge ${mrStatusClass}">${esc(mrStatusState)}</div></div><div class="status-summary-grid"><div class="status-summary-item"><label>Issued MR</label><strong>${fmt(issuedMrs)}</strong></div><div class="status-summary-item"><label>Pending / Draft</label><strong>${fmt(pendingMrs)}</strong></div><div class="status-summary-item"><label>Approved</label><strong>${fmt(approvedMrs)}</strong></div><div class="status-summary-item"><label>Returned Today</label><strong>${fmt(returnedToday)}</strong></div></div></div>`;
 const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,received:0,out:0,remaining:0};cur.received+=Number(r.total_received||0);cur.out+=Number(r.total_consumed||0);cur.remaining+=Number(r.remaining||0);byWh.set(r.warehouse,cur)});
 const whRows=[...byWh.values()].sort((a,b)=>b.remaining-a.remaining);
 const maxRemaining=Math.max(...whRows.map(r=>r.remaining),1);
