@@ -16,8 +16,9 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from openpyxl import Workbook
 from email.message import EmailMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, text
@@ -1236,6 +1237,113 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
     }
 
 
+def user_can_view_requisition(row: MaterialRequisition, viewer: str = "", role: str = "") -> bool:
+    role_key = normalize_usage_key(role)
+    viewer_key = normalize_usage_key(viewer)
+    if role_key in {"admin", "management"}:
+        return True
+    if role_key == "warehousemanager":
+        return normalize_usage_key(row.warehouse.name if row.warehouse else "") == viewer_key or normalize_usage_key(row.created_by) == viewer_key
+    if role_key in {"approval", "approver"}:
+        return row.status == "pending_approval" or normalize_usage_key(row.receiver_name) == viewer_key
+    if role_key == "requester":
+        return normalize_usage_key(row.requester_name) == viewer_key or normalize_usage_key(row.created_by) == viewer_key
+    return normalize_usage_key(row.created_by) == viewer_key
+
+
+def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
+    item_count = len(row.items or [])
+    total_quantity = sum(float(item.quantity or 0) for item in row.items)
+    materials = [item.description for item in row.items if str(item.description or "").strip()]
+    return {
+        "id": row.id,
+        "order_number": row.order_number,
+        "creation_date": row.creation_date,
+        "warehouse": row.warehouse.name if row.warehouse else "",
+        "warehouse_id": row.warehouse_id,
+        "site_id": row.site_id,
+        "site_address": row.site_address,
+        "requester_name": row.requester_name,
+        "team_leader": row.team_leader,
+        "receiver_name": row.receiver_name,
+        "status": row.status,
+        "entity": row.entity,
+        "project_name": row.project_name,
+        "product_domain": row.product_domain,
+        "created_by": row.created_by,
+        "item_count": item_count,
+        "total_quantity": total_quantity,
+        "materials": materials,
+        "materials_text": ", ".join(materials),
+    }
+
+
+def requisition_history_payload(
+    db: Session,
+    warehouse: str = "",
+    area: str = "",
+    technician: str = "",
+    requester: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    viewer: str = "",
+    role: str = "",
+) -> dict:
+    rows = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
+        .order_by(MaterialRequisition.id.desc())
+        .all()
+    )
+    visible_rows = [row for row in rows if user_can_view_requisition(row, viewer, role)]
+    options = {
+        "warehouses": sorted({str(row.warehouse.name if row.warehouse else "").strip() for row in visible_rows if str(row.warehouse.name if row.warehouse else "").strip()}),
+        "areas": sorted({str(row.site_id or "").strip() for row in visible_rows if str(row.site_id or "").strip()}),
+        "technicians": sorted({str(row.team_leader or "").strip() for row in visible_rows if str(row.team_leader or "").strip()}),
+        "requesters": sorted({str(row.requester_name or "").strip() for row in visible_rows if str(row.requester_name or "").strip()}),
+        "statuses": sorted({str(row.status or "").strip() for row in visible_rows if str(row.status or "").strip()}),
+    }
+
+    def match_filter(value: str, target: str) -> bool:
+        if not value:
+            return True
+        return normalize_usage_key(target) == normalize_usage_key(value)
+
+    filtered_rows = []
+    for row in visible_rows:
+        if not match_filter(warehouse, row.warehouse.name if row.warehouse else ""):
+            continue
+        if not match_filter(area, row.site_id):
+            continue
+        if not match_filter(technician, row.team_leader):
+            continue
+        if not match_filter(requester, row.requester_name):
+            continue
+        if not match_filter(status, row.status):
+            continue
+        creation_date = str(row.creation_date or "").strip()
+        if date_from and creation_date and creation_date < date_from:
+            continue
+        if date_to and creation_date and creation_date > date_to:
+            continue
+        if (date_from or date_to) and not creation_date:
+            continue
+        filtered_rows.append(row)
+
+    items_total = sum(len(row.items or []) for row in filtered_rows)
+    quantity_total = sum(sum(float(item.quantity or 0) for item in row.items) for row in filtered_rows)
+    return {
+        "rows": [requisition_history_row_to_dict(row) for row in filtered_rows],
+        "summary": {
+            "mr_count": len(filtered_rows),
+            "item_count": items_total,
+            "total_quantity": quantity_total,
+        },
+        "options": options,
+    }
+
+
 def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
     items = []
     if include_items:
@@ -2261,6 +2369,94 @@ def get_material_requisition(requisition_id: int, db: Session = Depends(db_sessi
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     return {"success": True, "requisition": requisition_to_dict(row)}
+
+
+@app.get("/api/warehouse/material-requisition-history")
+def list_material_requisition_history(
+    warehouse: str = "",
+    area: str = "",
+    technician: str = "",
+    requester: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    viewer: str = "",
+    role: str = "",
+    db: Session = Depends(db_session),
+):
+    payload = requisition_history_payload(
+        db,
+        warehouse=warehouse,
+        area=area,
+        technician=technician,
+        requester=requester,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        viewer=viewer,
+        role=role,
+    )
+    return {"success": True, **payload}
+
+
+@app.get("/api/warehouse/material-requisition-history/export")
+def export_material_requisition_history(
+    warehouse: str = "",
+    area: str = "",
+    technician: str = "",
+    requester: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    viewer: str = "",
+    role: str = "",
+    db: Session = Depends(db_session),
+):
+    payload = requisition_history_payload(
+        db,
+        warehouse=warehouse,
+        area=area,
+        technician=technician,
+        requester=requester,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        viewer=viewer,
+        role=role,
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "MR History"
+    sheet.append(["Order", "Date", "Warehouse", "Area", "Site Address", "Requester", "Technician", "Approver", "Status", "Items", "Total Qty", "Materials"])
+    for row in payload["rows"]:
+        sheet.append(
+            [
+                row["order_number"],
+                row["creation_date"],
+                row["warehouse"],
+                row["site_id"],
+                row["site_address"],
+                row["requester_name"],
+                row["team_leader"],
+                row["receiver_name"],
+                row["status"],
+                row["item_count"],
+                row["total_quantity"],
+                row["materials_text"],
+            ]
+        )
+    for col in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"):
+        sheet.column_dimensions[col].width = 18 if col != "L" else 56
+    stream = io.BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = f"mr-history-{datetime.now(TRIPOLI_TZ).strftime('%Y%m%d-%H%M%S')}.xlsx"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session)):
