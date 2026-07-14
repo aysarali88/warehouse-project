@@ -68,6 +68,7 @@ def ensure_optional_columns():
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
         ]
     else:
@@ -75,6 +76,7 @@ def ensure_optional_columns():
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
         ]
     with engine.begin() as conn:
@@ -101,9 +103,9 @@ APP_USERS = [
     {"username": "Nadeer", "name": "Nadeer", "role": "Requester", "password": "Nadeer@1"},
     {"username": "Ghassan", "name": "Ghassan", "role": "Requester", "password": "Ghassan@1"},
     {"username": "Mustafa", "name": "Mustafa", "role": "Approval", "password": "Mustafa@1"},
-    {"username": "Tripoli", "name": "Tripoli", "role": "Warehouse Manager", "password": "WH@123"},
-    {"username": "Misurata", "name": "Misurata", "role": "Warehouse Manager", "password": "WH@123"},
-    {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password": "Wh@123"},
+    {"username": "Tripoli", "name": "Tripoli", "role": "Warehouse Manager", "password": "WH@123", "warehouse_name": "Tripoli"},
+    {"username": "Misurata", "name": "Misurata", "role": "Warehouse Manager", "password": "WH@123", "warehouse_name": "Misurata"},
+    {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password": "Wh@123", "warehouse_name": "FreeZone"},
 ]
 
 
@@ -202,7 +204,13 @@ def active_user_emails(db: Session, role: str, identifiers: list[str] | None = N
     rows = query.all()
     if identifiers:
         keys = {normalize_usage_key(value) for value in identifiers if str(value or "").strip()}
-        rows = [row for row in rows if normalize_usage_key(row.username) in keys or normalize_usage_key(row.name) in keys]
+        rows = [
+            row
+            for row in rows
+            if normalize_usage_key(row.username) in keys
+            or normalize_usage_key(row.name) in keys
+            or normalize_usage_key(getattr(row, "warehouse_name", "")) in keys
+        ]
     return normalize_email_list([row.email for row in rows])
 
 
@@ -212,7 +220,7 @@ def requester_notification_emails(row: MaterialRequisition, db: Session) -> list
 
 
 def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
-    identifiers = [row.warehouse.name if row.warehouse else "", row.created_by]
+    identifiers = [row.warehouse.name if row.warehouse else ""]
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
@@ -430,6 +438,7 @@ class AppUserIn(BaseModel):
     role: Literal["Admin", "Management", "Requester", "Approval", "Warehouse Manager"]
     name: str = ""
     email: str = ""
+    warehouse_name: str = ""
 
 
 class AppUserDeleteIn(BaseModel):
@@ -1166,6 +1175,7 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
                     "username": user.username,
                     "name": user.name or user.username,
                     "role": user.role,
+                    "warehouse_name": user.warehouse_name or "",
                 },
             }
 
@@ -1201,6 +1211,7 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             "username": fallback_user["username"],
             "name": fallback_user["name"],
             "role": fallback_user["role"],
+            "warehouse_name": fallback_user.get("warehouse_name", ""),
         },
     }
 
@@ -1425,7 +1436,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 def list_app_users(db: Session = Depends(db_session)):
     try:
         db_users = [
-            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "email": row.email or "", "password": row.password_hash}
+            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "email": row.email or "", "warehouse_name": row.warehouse_name or "", "password": row.password_hash}
             for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
         ]
         seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
@@ -1439,7 +1450,7 @@ def list_app_users(db: Session = Depends(db_session)):
         seen = set()
         deleted = set()
     fallback_users = [
-        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "email": row.get("email", ""), "password": row["password"]}
+        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "email": row.get("email", ""), "warehouse_name": row.get("warehouse_name", ""), "password": row["password"]}
         for row in APP_USERS
         if app_user_key(row["username"], row["role"], row["password"]) not in seen
         and app_user_key(row["username"], row["role"], row["password"]) not in deleted
@@ -1470,6 +1481,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     if existing:
         existing.name = data.name.strip() or username
         existing.email = data.email.strip()
+        existing.warehouse_name = data.warehouse_name.strip()
         existing.password_hash = password
         user = existing
     else:
@@ -1478,6 +1490,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
             name=data.name.strip() or username,
             role=data.role,
             email=data.email.strip(),
+            warehouse_name=data.warehouse_name.strip(),
             password_hash=password,
             status="active",
         )
@@ -1486,7 +1499,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     db.refresh(user)
     return {
         "success": True,
-        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "email": user.email or "", "password": user.password_hash},
+        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "email": user.email or "", "warehouse_name": user.warehouse_name or "", "password": user.password_hash},
     }
 
 
@@ -2535,8 +2548,27 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     user_key = normalize_usage_key(user)
     approval_count = len(pending) if not user_key else sum(1 for row in pending if normalize_usage_key(row.receiver_name) == user_key)
     transfer_approval_count = len(pending_transfers) if not user_key else sum(1 for row in pending_transfers if normalize_usage_key(row.approver_name) in {"", user_key})
-    approved_count = db.query(MaterialRequisition).filter(MaterialRequisition.status == "approved").count()
-    approved_transfer_count = db.query(MaterialTransfer).filter(MaterialTransfer.status == "approved").count()
+    approved_rows = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse))
+        .filter(MaterialRequisition.status == "approved")
+        .all()
+    )
+    approved_transfer_rows = (
+        db.query(MaterialTransfer)
+        .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
+        .filter(MaterialTransfer.status == "approved")
+        .all()
+    )
+    approved_count = len(approved_rows) if not user_key else sum(
+        1 for row in approved_rows if normalize_usage_key(row.warehouse.name if row.warehouse else "") == user_key
+    )
+    approved_transfer_count = len(approved_transfer_rows) if not user_key else sum(
+        1
+        for row in approved_transfer_rows
+        if normalize_usage_key(row.from_warehouse.name if row.from_warehouse else "") == user_key
+        or normalize_usage_key(row.to_warehouse.name if row.to_warehouse else "") == user_key
+    )
     return {
         "success": True,
         "approval_count": approval_count + transfer_approval_count,
