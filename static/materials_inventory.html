@@ -802,6 +802,7 @@ th{
       <div class="modal-actions">
         <button class="btn primary hidden" id="mrStockCheckBtn" onclick="toggleMrStockCheck()">مشاهدة المخزون</button>
         <button class="btn primary hidden" id="scanMaterialBtn" onclick="openScanMaterial()">Scan Material</button>
+        <button class="btn primary hidden" id="mrTransferMisurataBtn" onclick="createTransferFromCurrentMr()">نقل إلى Misurata Lnet</button>
         <button class="btn soft" onclick="printModalMr()">طباعة</button>
         <button class="btn danger" onclick="closeMrModal()">إغلاق</button>
       </div>
@@ -868,6 +869,8 @@ async function deleteAppUser(username,role,password){if(!isAdmin()){toast('Admin
 function fillSelect(id,rows,label){document.getElementById(id).innerHTML='<option value="">اختر</option>'+rows.map(r=>`<option value="${r.id}">${esc(label(r))}</option>`).join('')}
 function fillTextSelect(id,values,selected=''){const el=document.getElementById(id);if(!el)return;el.innerHTML='<option value="">All</option>'+(values||[]).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');el.value=selected||''}
 function productById(id){return wh.products.find(p=>String(p.id)===String(id))}
+function warehouseById(id){return (wh.warehouses||[]).find(w=>String(w.id)===String(id))}
+function warehouseByName(name){return (wh.warehouses||[]).find(w=>normalizeText(w.name)===normalizeText(name))}
 function serialLines(id){return document.getElementById(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value})});session=data.user;localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
 function logoutApp(){localStorage.removeItem('warehouseSession');localStorage.removeItem('warehouseBootstrap');session=null;activeUser='';activeRole='';activeWarehouseAssignment='';document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
@@ -1333,7 +1336,41 @@ function mrRequestedStockRows(req){const groups=new Map();(req.items||[]).forEac
 function mrStockCheckHtml(req){const rows=mrRequestedStockRows(req);const enoughRows=rows.filter(r=>r.enough).length;const requested=rows.reduce((s,r)=>s+Number(r.requested||0),0);const remaining=rows.reduce((s,r)=>s+Number(r.remaining||0),0);return `<div class="mr-stock-check" id="mrStockCheck"><h4>مخزون مواد هذا الطلب فقط - ${esc(req.warehouse||'')}</h4><div class="mr-stock-summary"><div><span>عدد المواد</span><strong>${fmt(rows.length)}</strong></div><div><span>إجمالي المطلوب</span><strong>${fmt(requested)}</strong></div><div><span>إجمالي المتبقي</span><strong>${fmt(remaining)}</strong></div><div><span>حالة الطلب</span><strong class="${enoughRows===rows.length?'ok':'bad'}">${enoughRows===rows.length?'كافي':'يوجد نقص'}</strong></div></div>${rowsTable([['SKU','sku'],['المادة','product'],['المطلوب في MR','requested',(v)=>fmt(v)],['العدد الكلي','total_received',(v)=>fmt(v)],['Stock Out','total_consumed',(v)=>fmt(v)],['المتبقي','remaining',(v)=>fmt(v)],['الحالة','enough',(v,r)=>r.enough?'<span class="ok">كافي</span>':`<span class="bad">ناقص ${fmt(r.shortage)}</span>`]],rows)}</div>`}
 function showMrStockCheck(){const req=(wh.mrs||[]).find(r=>String(r.id)===String(currentModalMrId));if(!req){toast('MR not found');return}let box=document.getElementById('mrStockCheck');if(box){box.outerHTML=mrStockCheckHtml(req);return}document.getElementById('mrModalBody').insertAdjacentHTML('afterbegin',mrStockCheckHtml(req));document.getElementById('mrStockCheckBtn').textContent='إخفاء المخزون'}
 function toggleMrStockCheck(){const box=document.getElementById('mrStockCheck');if(box){box.remove();document.getElementById('mrStockCheckBtn').textContent='مشاهدة المخزون';return}showMrStockCheck()}
-function prepareMrModalActions(isMr=false,req=null){currentModalMrId=isMr&&req?req.id:null;const btn=document.getElementById('mrStockCheckBtn');const scanBtn=document.getElementById('scanMaterialBtn');const canViewStock=isMr&&req&&['approved','issued','signed'].includes(String(req.status||''))&&(canManageWarehouse()||roleKey()==='admin');if(btn){btn.textContent='مشاهدة المخزون';btn.classList.toggle('hidden',!canViewStock)}if(scanBtn){scanBtn.classList.toggle('hidden',!canViewStock)}}
+function prepareMrModalActions(isMr=false,req=null){currentModalMrId=isMr&&req?req.id:null;const btn=document.getElementById('mrStockCheckBtn');const scanBtn=document.getElementById('scanMaterialBtn');const transferBtn=document.getElementById('mrTransferMisurataBtn');const status=String(req?.status||'');const canViewStock=isMr&&req&&['approved','issued','signed'].includes(status)&&(canManageWarehouse()||roleKey()==='admin');const canCreateTransfer=isMr&&req&&['draft','pending_approval','approved','signed','returned_for_edit'].includes(status)&&(canCreateMr()||canManageWarehouse()||isAdmin())&&normalizeText(req?.warehouse)==='tripoli';if(btn){btn.textContent='مشاهدة المخزون';btn.classList.toggle('hidden',!canViewStock)}if(scanBtn){scanBtn.classList.toggle('hidden',!canViewStock)}if(transferBtn){transferBtn.classList.toggle('hidden',!canCreateTransfer)}}
+function transferItemsFromMr(req){return (req.items||[]).map(item=>({product_id:Number(item.product_id||0),quantity:Number(item.quantity||0),remark:item.remark||''})).filter(item=>item.product_id&&item.quantity>0)}
+async function createTransferFromCurrentMr(){const req=(wh.mrs||[]).find(r=>String(r.id)===String(currentModalMrId));if(!req){toast('MR not found');return}await createTransferFromMr(req)}
+async function createTransferFromMr(reqOrId){
+  try{
+    const req=typeof reqOrId==='object'&&reqOrId?reqOrId:(wh.mrs||[]).find(r=>String(r.id)===String(reqOrId));
+    if(!req){toast('MR not found');return}
+    const fromWarehouse=warehouseById(req.warehouse_id)||warehouseByName(req.warehouse)||warehouseByName('Tripoli');
+    const toWarehouse=warehouseByName('Misurata Lnet');
+    const items=transferItemsFromMr(req);
+    if(!fromWarehouse){toast('Tripoli warehouse not found');return}
+    if(!toWarehouse){toast('Misurata Lnet warehouse not found');return}
+    if(!items.length){toast('No MR items to transfer');return}
+    if(String(fromWarehouse.id)===String(toWarehouse.id)){toast('Source and destination warehouses are the same');return}
+    toast('جاري إنشاء تحويل إلى Misurata Lnet...');
+    const body={
+      transfer_date:req.creation_date||new Date().toISOString().slice(0,10),
+      from_warehouse_id:Number(fromWarehouse.id),
+      to_warehouse_id:Number(toWarehouse.id),
+      reference_no:`MR-${req.order_number||req.id}`,
+      reason:`Transfer for MR ${req.order_number||req.id} - ${req.site_id||req.site_address||''}`.trim(),
+      requester_name:activeUser||req.requester_name||'Requester',
+      requester_title:userRole(),
+      approver_name:req.receiver_name||'Mustafa',
+      approver_title:req.receiver_title||'Approval',
+      receiver_name:toWarehouse.name,
+      created_by:activeUser||req.requester_name||'Requester',
+      items
+    };
+    const r=await api('/api/warehouse/material-transfers',{method:'POST',body:JSON.stringify(body)});
+    upsertLocalTransfer(r.transfer);
+    syncWarehouseLater();
+    toast(`Transfer ${r.transfer.transfer_number} created for Misurata Lnet`);
+  }catch(e){toast(e.message)}
+}
 function scanReq(){return (wh.mrs||[]).find(r=>String(r.id)===String(scanSession.mrId))}
 function savedScanCounts(reqId){const counts={};(wh.scanLogs||[]).filter(r=>String(r.material_requisition_id)===String(reqId)&&r.status==='matched').forEach(r=>{const key=String(r.product_id);counts[key]=Number(counts[key]||0)+1});return counts}
 function scanRows(){const req=scanReq();if(!req)return[];return mrRequestedStockRows(req).map(r=>({...r,scanned:Number(scanSession.scanned[String(r.product_id)]||0),done:Number(scanSession.scanned[String(r.product_id)]||0)>=Number(r.requested||0)}))}
@@ -1422,7 +1459,7 @@ async function saveMr(){
     upsertLocalMr(req);
     syncWarehouseLater();
   }catch(e){toast(e.message)}
-}function mrTableAction(r){const editBtn=(r.status==='returned_for_edit'&&canCreateMr()&&normalizeText(r.requester_name)===normalizeText(activeUser))?`<button class="btn primary" onclick="editMr(${r.id})">Edit</button>`:'';const scanBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="openScanMaterial(${r.id})">Scan</button>`:'';const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${editBtn}${scanBtn}${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
+}function mrTableAction(r){const editBtn=(r.status==='returned_for_edit'&&canCreateMr()&&normalizeText(r.requester_name)===normalizeText(activeUser))?`<button class="btn primary" onclick="editMr(${r.id})">Edit</button>`:'';const transferBtn=(['draft','pending_approval','approved','signed','returned_for_edit'].includes(String(r.status||''))&&(canCreateMr()||canManageWarehouse()||isAdmin())&&normalizeText(r.warehouse)==='tripoli')?`<button class="btn primary" onclick="createTransferFromMr(${r.id})">To Misurata</button>`:'';const scanBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="openScanMaterial(${r.id})">Scan</button>`:'';const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${editBtn}${transferBtn}${scanBtn}${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
 function visibleMrRows(){return (wh.mrs||[]).filter(userOwnsMr)}
 function renderMrTable(){mrTable.innerHTML=rowsTable([['Order','order_number'],['Warehouse','warehouse'],['Site','site_id'],['Requester','requester_name'],['Approver','receiver_name'],['Status','status',(v)=>statusChip(v)],['Date','creation_date'],['Action','id',(v,r)=>mrTableAction(r)]],visibleMrRows())}
 function printMr(){ensureFitForPrint();document.getElementById('mr').classList.add('printing');window.print();setTimeout(()=>document.getElementById('mr').classList.remove('printing'),500)}
