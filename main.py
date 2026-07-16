@@ -230,7 +230,7 @@ def warehouse_manager_handles_mr(viewer: str, row: MaterialRequisition) -> bool:
 
 
 def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
-    identifiers = [TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE or (row.warehouse.name if row.warehouse else "")]
+    identifiers = [row.site_address or TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE or (row.warehouse.name if row.warehouse else "")]
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
