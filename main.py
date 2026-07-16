@@ -10,6 +10,7 @@ import time
 import urllib.parse
 import urllib.request
 import ssl
+import bcrypt
 from datetime import datetime, timezone, timedelta
 from email.utils import formataddr
 from typing import Literal
@@ -94,18 +95,18 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 APP_USERS = [
-    {"username": "Aysar", "name": "Aysar", "role": "Admin", "password": "Aysar@1"},
-    {"username": "Hamza", "name": "Hamza", "role": "Admin", "password": "Hamza@2"},
-    {"username": "Aysar", "name": "Aysar", "role": "Requester", "password": "Aysar@2"},
-    {"username": "Hamza", "name": "Hamza", "role": "Requester", "password": "Hamza@3"},
-    {"username": "Ryadh", "name": "Ryadh", "role": "Requester", "password": "Ryadh@1"},
-    {"username": "Adel", "name": "Adel", "role": "Requester", "password": "Adel@1"},
-    {"username": "Nadeer", "name": "Nadeer", "role": "Requester", "password": "Nadeer@1"},
-    {"username": "Ghassan", "name": "Ghassan", "role": "Requester", "password": "Ghassan@1"},
-    {"username": "Mustafa", "name": "Mustafa", "role": "Approval", "password": "Mustafa@1"},
-    {"username": "Tripoli", "name": "Tripoli", "role": "Warehouse Manager", "password": "WH@123", "warehouse_name": "Tripoli"},
-    {"username": "Misurata", "name": "Misurata", "role": "Warehouse Manager", "password": "WH@123", "warehouse_name": "Misurata"},
-    {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password": "Wh@123", "warehouse_name": "FreeZone"},
+    {"username": "Aysar", "name": "Aysar", "role": "Admin", "password_hash": "$2b$12$3c72OtpvCsB4.CNyImCvcuQN//O7KqonCK3QuZWJs3jO/oUH6DMMO"},
+    {"username": "Hamza", "name": "Hamza", "role": "Admin", "password_hash": "$2b$12$xAUkLrhxFwUXzQtTrrs86OQnEUl1a16kQhQtMlBtrfIN3HvHSZTVK"},
+    {"username": "Aysar", "name": "Aysar", "role": "Requester", "password_hash": "$2b$12$xA.6M2y7h5OiplZjVzMi8.qsIoHbsjzt8.1zVBKQidm6u3UYiHYum"},
+    {"username": "Hamza", "name": "Hamza", "role": "Requester", "password_hash": "$2b$12$LKYijkxCRZVxKPeY0AIA/O2I4actBdhNWVefJ7CN9c/1ituhQzt7q"},
+    {"username": "Ryadh", "name": "Ryadh", "role": "Requester", "password_hash": "$2b$12$WiquFYrheGfO2LtKtswLo.J85oZ3IzlnI0md6tsQQTY4VqXR6hX12"},
+    {"username": "Adel", "name": "Adel", "role": "Requester", "password_hash": "$2b$12$IaMjT3MNkht3xqCaj7jP4e2LmNwN7BpPzjs8YyS69pIHzX/6xZSPm"},
+    {"username": "Nadeer", "name": "Nadeer", "role": "Requester", "password_hash": "$2b$12$DHRZmTb0yv1Qn7KtgV0L3Ongy6HznxkkLO1SN15v/3rsKSptFyOcq"},
+    {"username": "Ghassan", "name": "Ghassan", "role": "Requester", "password_hash": "$2b$12$zEzqVlt6sJZgj7kQCsWY3.BElMy5nICAHRKq4dUcRvKrQba5B0Ef6"},
+    {"username": "Mustafa", "name": "Mustafa", "role": "Approval", "password_hash": "$2b$12$7P79odcv0uV9bKpbOY6NWe0omDZ3ZYgCsFWp3me8i7cveBjcTU6YO"},
+    {"username": "Tripoli", "name": "Tripoli", "role": "Warehouse Manager", "password_hash": "$2b$12$BqOEHrljHOmLipn6j4g1j.nKJpWWrp2SXu9fWw2.cUoZ434jKQCfy", "warehouse_name": "Tripoli"},
+    {"username": "Misurata", "name": "Misurata", "role": "Warehouse Manager", "password_hash": "$2b$12$BqOEHrljHOmLipn6j4g1j.nKJpWWrp2SXu9fWw2.cUoZ434jKQCfy", "warehouse_name": "Misurata"},
+    {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password_hash": "$2b$12$dLg/7wO3.EBdDBzislnwlujcdQoMlPwrGi6H61X3OwMIiq3PgoIQS", "warehouse_name": "FreeZone"},
 ]
 
 TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE = "Misurata"
@@ -121,8 +122,66 @@ def local_today() -> str:
     return datetime.now(TRIPOLI_TZ).date().isoformat()
 
 
-def app_user_key(username: str, role: str, password: str = "") -> tuple[str, str, str]:
-    return (username.strip().lower(), role.strip().lower(), password)
+def app_user_key(username: str, role: str) -> tuple[str, str]:
+    return (username.strip().lower(), role.strip().lower())
+
+
+def is_bcrypt_hash(value: str = "") -> bool:
+    text = str(value or "")
+    return text.startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def is_legacy_password_hash(value: str = "") -> bool:
+    return str(value or "").startswith("pbkdf2_sha256$")
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def verify_password(password: str, stored: str = "") -> bool:
+    if not password or not stored:
+        return False
+    if is_bcrypt_hash(stored):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
+        except ValueError:
+            return False
+    if is_legacy_password_hash(stored):
+        return False
+    return hmac.compare_digest(password, stored)
+
+
+def serialize_app_user(row, fallback: bool = False) -> dict:
+    return {
+        "id": getattr(row, "id", "") or "",
+        "username": row["username"] if fallback else row.username,
+        "name": (row.get("name") if fallback else row.name) or (row["username"] if fallback else row.username),
+        "role": row["role"] if fallback else row.role,
+        "email": (row.get("email") if fallback else row.email) or "",
+        "warehouse_name": (row.get("warehouse_name") if fallback else row.warehouse_name) or "",
+        "is_fallback": fallback,
+    }
+
+
+def fallback_user_template(username: str, role: str) -> dict | None:
+    key = app_user_key(username, role)
+    return next((row for row in APP_USERS if app_user_key(row["username"], row["role"]) == key), None)
+
+
+def migrate_app_user_password_hashes() -> None:
+    with SessionLocal() as db:
+        rows = db.query(AppUser).all()
+        changed = False
+        for row in rows:
+            if row.password_hash and not is_bcrypt_hash(row.password_hash) and not is_legacy_password_hash(row.password_hash) and len(str(row.password_hash)) <= 72:
+                row.password_hash = hash_password(row.password_hash)
+                changed = True
+        if changed:
+            db.commit()
+
+
+migrate_app_user_password_hashes()
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -515,7 +574,7 @@ class LoginIn(BaseModel):
 
 class AppUserIn(BaseModel):
     username: str
-    password: str
+    password: str = ""
     role: Literal["Admin", "Management", "Requester", "Approval", "Warehouse Manager"]
     name: str = ""
     email: str = ""
@@ -525,7 +584,6 @@ class AppUserIn(BaseModel):
 class AppUserDeleteIn(BaseModel):
     username: str
     role: str
-    password: str = ""
 
 
 class WarehouseIn(BaseModel):
@@ -1248,8 +1306,11 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             .filter(func.lower(AppUser.username) == key, AppUser.status == "active")
             .all()
         )
-        user = next((row for row in db_user if hmac.compare_digest(data.password, row.password_hash)), None)
+        user = next((row for row in db_user if verify_password(data.password, row.password_hash)), None)
         if user:
+            if user.password_hash and not is_bcrypt_hash(user.password_hash):
+                user.password_hash = hash_password(data.password)
+                db.commit()
             return {
                 "success": True,
                 "user": {
@@ -1262,14 +1323,10 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
 
         deleted_fallback = (
             db.query(AppUser)
-            .filter(
-                func.lower(AppUser.username) == key,
-                AppUser.password_hash == data.password,
-                AppUser.status == "inactive",
-            )
-            .first()
+            .filter(func.lower(AppUser.username) == key, AppUser.status == "inactive")
+            .all()
         )
-        if deleted_fallback:
+        if any(verify_password(data.password, row.password_hash) for row in deleted_fallback):
             raise HTTPException(status_code=401, detail="Invalid username or password")
     except HTTPException:
         raise
@@ -1280,7 +1337,7 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
         (
             row
             for row in APP_USERS
-            if row["username"].lower() == key and hmac.compare_digest(data.password, row["password"])
+            if row["username"].lower() == key and verify_password(data.password, row["password_hash"])
         ),
         None,
     )
@@ -1516,13 +1573,11 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 @app.get("/api/auth/users")
 def list_app_users(db: Session = Depends(db_session)):
     try:
-        db_users = [
-            {"id": row.id, "username": row.username, "name": row.name or row.username, "role": row.role, "email": row.email or "", "warehouse_name": row.warehouse_name or "", "password": row.password_hash}
-            for row in db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
-        ]
-        seen = {app_user_key(row["username"], row["role"], row["password"]) for row in db_users}
+        db_rows = db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
+        db_users = [serialize_app_user(row) for row in db_rows]
+        seen = {app_user_key(row.username, row.role) for row in db_rows}
         deleted = {
-            app_user_key(row.username, row.role, row.password_hash)
+            app_user_key(row.username, row.role)
             for row in db.query(AppUser).filter(AppUser.status == "inactive").all()
         }
     except Exception:
@@ -1531,10 +1586,10 @@ def list_app_users(db: Session = Depends(db_session)):
         seen = set()
         deleted = set()
     fallback_users = [
-        {"id": "", "username": row["username"], "name": row["name"], "role": row["role"], "email": row.get("email", ""), "warehouse_name": row.get("warehouse_name", ""), "password": row["password"]}
+        serialize_app_user(row, fallback=True)
         for row in APP_USERS
-        if app_user_key(row["username"], row["role"], row["password"]) not in seen
-        and app_user_key(row["username"], row["role"], row["password"]) not in deleted
+        if app_user_key(row["username"], row["role"]) not in seen
+        and app_user_key(row["username"], row["role"]) not in deleted
     ]
     return {
         "success": True,
@@ -1546,15 +1601,14 @@ def list_app_users(db: Session = Depends(db_session)):
 def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     username = data.username.strip()
     password = data.password.strip()
+    role = data.role.strip()
     if not username:
         raise HTTPException(status_code=400, detail="User is required")
-    if not password:
-        raise HTTPException(status_code=400, detail="Password is required")
     existing = (
         db.query(AppUser)
         .filter(
             func.lower(AppUser.username) == username.lower(),
-            AppUser.role == data.role,
+            AppUser.role == role,
             AppUser.status == "active",
         )
         .first()
@@ -1563,16 +1617,21 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
         existing.name = data.name.strip() or username
         existing.email = data.email.strip()
         existing.warehouse_name = data.warehouse_name.strip()
-        existing.password_hash = password
+        if password:
+            existing.password_hash = hash_password(password)
         user = existing
     else:
+        fallback = fallback_user_template(username, role)
+        password_hash = hash_password(password) if password else (fallback["password_hash"] if fallback else "")
+        if not password_hash:
+            raise HTTPException(status_code=400, detail="Password is required")
         user = AppUser(
             username=username,
             name=data.name.strip() or username,
-            role=data.role,
+            role=role,
             email=data.email.strip(),
             warehouse_name=data.warehouse_name.strip(),
-            password_hash=password,
+            password_hash=password_hash,
             status="active",
         )
         db.add(user)
@@ -1580,7 +1639,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     db.refresh(user)
     return {
         "success": True,
-        "user": {"username": user.username, "name": user.name or user.username, "role": user.role, "email": user.email or "", "warehouse_name": user.warehouse_name or "", "password": user.password_hash},
+        "user": serialize_app_user(user),
     }
 
 
@@ -1588,7 +1647,6 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
 def delete_app_user(data: AppUserDeleteIn, db: Session = Depends(db_session)):
     username = data.username.strip()
     role = data.role.strip()
-    password = data.password
     if not username or not role:
         raise HTTPException(status_code=400, detail="User and role are required")
     user = (
@@ -1596,20 +1654,24 @@ def delete_app_user(data: AppUserDeleteIn, db: Session = Depends(db_session)):
         .filter(
             func.lower(AppUser.username) == username.lower(),
             AppUser.role == role,
-            AppUser.password_hash == password,
+            AppUser.status == "active",
         )
         .first()
     )
     if user:
         user.status = "inactive"
     else:
+        fallback = fallback_user_template(username, role)
+        if not fallback:
+            raise HTTPException(status_code=404, detail="User not found")
         db.add(
             AppUser(
                 username=username,
-                name=username,
+                name=fallback.get("name") or username,
                 role=role,
-                email="",
-                password_hash=password,
+                email=fallback.get("email", ""),
+                warehouse_name=fallback.get("warehouse_name", ""),
+                password_hash=fallback["password_hash"],
                 status="inactive",
             )
         )
