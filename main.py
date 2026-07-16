@@ -108,6 +108,8 @@ APP_USERS = [
     {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password": "Wh@123", "warehouse_name": "FreeZone"},
 ]
 
+TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE = "Misurata"
+
 
 try:
     TRIPOLI_TZ = ZoneInfo("Africa/Tripoli")
@@ -219,8 +221,16 @@ def requester_notification_emails(row: MaterialRequisition, db: Session) -> list
     return active_user_emails(db, "requester", identifiers)
 
 
+def warehouse_manager_handles_mr(viewer: str, row: MaterialRequisition) -> bool:
+    viewer_key = normalize_usage_key(viewer)
+    override_key = normalize_usage_key(TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE)
+    if override_key:
+        return viewer_key == override_key
+    return normalize_usage_key(row.warehouse.name if row.warehouse else "") == viewer_key
+
+
 def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
-    identifiers = [row.warehouse.name if row.warehouse else ""]
+    identifiers = [TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE or (row.warehouse.name if row.warehouse else "")]
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
@@ -1254,7 +1264,7 @@ def user_can_view_requisition(row: MaterialRequisition, viewer: str = "", role: 
     if role_key in {"admin", "management"}:
         return True
     if role_key == "warehousemanager":
-        return normalize_usage_key(row.warehouse.name if row.warehouse else "") == viewer_key or normalize_usage_key(row.created_by) == viewer_key
+        return warehouse_manager_handles_mr(viewer, row) or normalize_usage_key(row.created_by) == viewer_key
     if role_key in {"approval", "approver"}:
         return row.status == "pending_approval" or normalize_usage_key(row.receiver_name) == viewer_key
     if role_key == "requester":
@@ -2561,7 +2571,7 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
         .all()
     )
     approved_count = len(approved_rows) if not user_key else sum(
-        1 for row in approved_rows if normalize_usage_key(row.warehouse.name if row.warehouse else "") == user_key
+        1 for row in approved_rows if warehouse_manager_handles_mr(user, row)
     )
     approved_transfer_count = len(approved_transfer_rows) if not user_key else sum(
         1
