@@ -67,6 +67,7 @@ def ensure_optional_columns():
     if engine.dialect.name == "postgresql":
         statements = [
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS part_number VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
@@ -75,6 +76,7 @@ def ensure_optional_columns():
     else:
         statements = [
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN part_number VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
@@ -182,6 +184,20 @@ def migrate_app_user_password_hashes() -> None:
 
 
 migrate_app_user_password_hashes()
+
+
+def sync_product_part_numbers() -> None:
+    with SessionLocal() as db:
+        rows = db.query(Product).all()
+        changed = False
+        for row in rows:
+            desired = product_part_number(row.sku, row.part_number)
+            if desired != (row.part_number or ""):
+                row.part_number = desired
+                changed = True
+        if changed:
+            db.commit()
+
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -598,6 +614,7 @@ class TechnicianIn(BaseModel):
 
 class ProductIn(BaseModel):
     sku: str
+    part_number: str = ""
     category: str = ""
     name: str
     item_detail: str = ""
@@ -633,6 +650,7 @@ class InventoryReceiveIn(BaseModel):
     supplier: str = ""
     warehouse_id: int
     sku: str
+    part_number: str = ""
     name: str
     quantity: float = Field(gt=0)
     unit: str = "PCS"
@@ -1031,6 +1049,45 @@ FOUR_CORE_CABLE_NAMES = {
     "EOSDC309N": "4-coreCable_500m",
 }
 
+PART_NUMBER_BY_SKU = {
+    "ITC3103-A1": "52590161",
+    "E0SDC309J": "14130BQC-010",
+    "E0SDC309K": "#N/A",
+    "E0SDC309L": "14130BQC-012",
+    "E0SDC309M": "14130BQC",
+    "E0SDC309N": "14130BQC-001",
+    "E0SDC309I": "14130BQC-009",
+    "E00ATB101": "14260372",
+    "FAT2810-SE-8-A": "14261299",
+    "SSC2814-TM-2": "14261384",
+    "SSC2812": "#N/A",
+    "FAT2811-SH-4-B": "14261785",
+    "ITC3301-P1_03": "52590919",
+    "E0SDC309F": "#N/A",
+    "ITC2102-P2": "14261388",
+    "ITC3301-P1": "52590160",
+    "E00DKBA04": "21150804",
+    "L05-24VDD": "#N/A",
+    "E0SDC030": "14137938-002",
+    "E0SDC032": "14137938-004",
+    "E0SDC034": "14137938-006",
+    "E0SDC035": "14137938-007",
+    "E0SDC024": "14137938",
+    "E0SDC038": "14137938-011",
+    "E0SDC029": "14137938-001",
+    "E0SDC2155": "14130ALQ-003",
+    "E0SDC2157": "14130ALQ-005",
+    "E0SDC2171": "14130ALQ-007",
+    "E0SDC2172": "14130ALQ-008",
+    "E0SDC2173": "14130ALQ-009",
+    "E0SDC2147": "14130ALQ",
+    "E0SDC2153": "14130ALQ-001",
+    "E0SDC2154": "14130ALQ-002",
+    "FAT2810-SS-8-A": "14261298",
+    "SSC2814-TM-2U": "14261383",
+    "SSC2802-TX-8-B": "14261816",
+}
+
 
 def material_display_name(name: str = "", sku: str = "") -> str:
     sku_key = (sku or "").strip().upper()
@@ -1043,6 +1100,16 @@ def material_display_name(name: str = "", sku: str = "") -> str:
     return text
 
 
+def product_part_number(sku: str = "", explicit: str = "") -> str:
+    explicit_value = str(explicit or "").strip()
+    if explicit_value:
+        return explicit_value
+    return PART_NUMBER_BY_SKU.get(str(sku or "").strip().upper(), "")
+
+
+sync_product_part_numbers()
+
+
 def product_display_name(product: Product | None) -> str:
     return material_display_name(product.name, product.sku) if product else ""
 
@@ -1051,6 +1118,7 @@ def product_to_dict(row: Product) -> dict:
     return {
         "id": row.id,
         "sku": row.sku,
+        "part_number": product_part_number(row.sku, row.part_number),
         "category": row.category,
         "name": material_display_name(row.name, row.sku),
         "item_detail": row.item_detail,
@@ -1068,6 +1136,7 @@ def balance_to_dict(row: StockBalance) -> dict:
         "warehouse": row.warehouse.name if row.warehouse else "",
         "product_id": row.product_id,
         "sku": row.product.sku if row.product else "",
+        "part_number": product_part_number(row.product.sku if row.product else "", row.product.part_number if row.product else ""),
         "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
         "quantity": row.quantity,
@@ -1080,6 +1149,7 @@ def technician_balance_to_dict(row: TechnicianBalance) -> dict:
         "technician": row.technician.name if row.technician else "",
         "product_id": row.product_id,
         "sku": row.product.sku if row.product else "",
+        "part_number": product_part_number(row.product.sku if row.product else "", row.product.part_number if row.product else ""),
         "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
         "quantity": row.quantity,
@@ -2096,6 +2166,7 @@ def create_product(data: ProductIn, db: Session = Depends(db_session)):
     name = material_display_name(data.name.strip(), sku)
     row = Product(
         sku=sku,
+        part_number=product_part_number(sku, data.part_number),
         category=data.category.strip(),
         name=name,
         item_detail=data.item_detail.strip(),
@@ -2242,6 +2313,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
                 "warehouse": balance.warehouse.name if balance.warehouse else "",
                 "product_id": balance.product_id,
                 "sku": balance.product.sku if balance.product else "",
+                "part_number": product_part_number(balance.product.sku if balance.product else "", balance.product.part_number if balance.product else ""),
                 "product": product_name,
                 "unit": balance.product.unit if balance.product else "",
                 "total_received": display_total,
@@ -2298,7 +2370,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
                     "site_id": requisition.site_id,
                     "site_address": requisition.site_address,
                     "material": material_display_name(item.description or product_display_name(product), product.sku if product else ""),
-                    "sku": item.part_nbr or (product.sku if product else ""),
+                    "sku": item.model or (product.sku if product else ""),
                     "mr_issued_qty": 0,
                     "current_app_balance": 0,
                     "last_mr": "",
@@ -2794,8 +2866,8 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or (product.sku if product else ""),
-                model=item.model,
+                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
@@ -2863,8 +2935,8 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or (product.sku if product else ""),
-                model=item.model,
+                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
@@ -2919,7 +2991,7 @@ def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_
                 transfer_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=product.sku,
+                part_nbr=product_part_number(product.sku, product.part_number),
                 description=product_display_name(product),
                 uom=product.unit,
                 quantity=item.quantity,
@@ -3061,7 +3133,7 @@ def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_sess
                 return_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=product.sku,
+                part_nbr=product_part_number(product.sku, product.part_number),
                 description=product_display_name(product),
                 uom=product.unit,
                 quantity=item.quantity,
@@ -3259,6 +3331,7 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
     if product is None:
         product = Product(
             sku=sku,
+            part_number=product_part_number(sku, data.part_number),
             category=data.category.strip(),
             name=name,
             item_detail=name,
@@ -3270,6 +3343,7 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
         db.add(product)
         db.flush()
     else:
+        product.part_number = product_part_number(sku, data.part_number or product.part_number)
         product.name = material_display_name(name, sku) or product.name
         product.item_detail = product.item_detail or name
         product.unit = data.unit.strip() or product.unit or "PCS"

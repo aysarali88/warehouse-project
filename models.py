@@ -72,6 +72,7 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     sku = Column(String, unique=True, nullable=False, index=True)
+    part_number = Column(String, default="")
     category = Column(String, default="")
     name = Column(String, nullable=False, index=True)
     item_detail = Column(String, default="")
