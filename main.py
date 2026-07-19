@@ -2773,7 +2773,7 @@ def find_import_header(row: list[str]) -> dict[str, int]:
             mapping["part"] = index
         elif key in {"model", "sku", "itemname"}:
             mapping["model"] = index
-        elif key in {"description", "itemdescription", "itemdetail", "material", "materials"}:
+        elif key in {"description", "descrition", "itemdescription", "itemdescrition", "itemdetail", "material", "materials"}:
             mapping["description"] = index
         elif key in {"uom", "unit"}:
             mapping["uom"] = index
@@ -2861,7 +2861,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
         entity=find_sheet_value(grid, "Entity") or "Rollout",
         project_name=find_sheet_value(grid, "Project Name") or "FTTH",
         site_id=find_sheet_value(grid, "Site ID", "Area Name") or sheet.title,
-        site_address=find_sheet_value(grid, "Site Address") or "",
+        site_address=find_sheet_value(grid, "Site Address", "Site Adress") or "",
         wo_no=find_sheet_value(grid, "WO No") or "",
         product_domain=find_sheet_value(grid, "Product Domain") or "Passive",
         team_leader=find_sheet_value(grid, "Team Leader", "Receiver/TEL") or "",
