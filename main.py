@@ -16,10 +16,10 @@ from email.utils import formataddr
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from email.message import EmailMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, text
@@ -2685,6 +2685,258 @@ def export_material_requisition_history(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers,
     )
+
+
+def excel_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(int(value)) if float(value).is_integer() else str(value)
+    return str(value).strip()
+
+
+def excel_key(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "", excel_text(value).lower())
+
+
+def excel_qty(value) -> float:
+    text = excel_text(value).replace(",", "")
+    if not text:
+        return 0
+    try:
+        return float(text)
+    except ValueError:
+        return 0
+
+
+def sheet_grid(sheet) -> list[list[str]]:
+    return [[excel_text(cell.value) for cell in row] for row in sheet.iter_rows()]
+
+
+def nearby_sheet_value(grid: list[list[str]], row: int, col: int) -> str:
+    label = excel_key(grid[row][col])
+    offsets = [1, -1, 2, -2, 3, -3, 4, -4, 0]
+    for offset in offsets:
+        r = row + (1 if offset == 0 else 0)
+        c = col if offset == 0 else col + offset
+        if 0 <= r < len(grid) and 0 <= c < len(grid[r]):
+            value = grid[r][c].strip()
+            key = excel_key(value)
+            if value and key != label and not key.endswith("name") and key not in {"date", "siteid", "warehouse", "warehousename"}:
+                return value
+    return ""
+
+
+def find_sheet_value(grid: list[list[str]], *labels: str) -> str:
+    wanted = {excel_key(label) for label in labels}
+    for r, row in enumerate(grid):
+        for c, value in enumerate(row):
+            key = excel_key(value)
+            if key in wanted:
+                return nearby_sheet_value(grid, r, c)
+    return ""
+
+
+def product_lookup_maps(db: Session) -> tuple[dict[str, Product], dict[str, Product]]:
+    exact: dict[str, Product] = {}
+    material_keys: dict[str, Product] = {}
+    for product in db.query(Product).filter(Product.status == "active").all():
+        for value in (product.sku, product.part_number, product_display_name(product), product.name):
+            key = excel_key(value)
+            if key:
+                exact[key] = product
+        material_key = canonical_material_key(product_display_name(product))
+        if material_key:
+            material_keys[material_key] = product
+    return exact, material_keys
+
+
+def find_product_for_import(exact: dict[str, Product], material_keys: dict[str, Product], *values: str) -> Product | None:
+    for value in values:
+        key = excel_key(value)
+        if key in exact:
+            return exact[key]
+    for value in values:
+        key = canonical_material_key(value)
+        if key in material_keys:
+            return material_keys[key]
+    return None
+
+
+def find_import_header(row: list[str]) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for index, value in enumerate(row):
+        key = excel_key(value)
+        if key in {"partnbr", "partnumber", "partno", "part"}:
+            mapping["part"] = index
+        elif key in {"model", "sku", "itemname"}:
+            mapping["model"] = index
+        elif key in {"description", "itemdescription", "itemdetail", "material", "materials"}:
+            mapping["description"] = index
+        elif key in {"uom", "unit"}:
+            mapping["uom"] = index
+        elif key in {"qty", "quantity"}:
+            mapping["quantity"] = index
+        elif key in {"remark", "remarks", "comment", "comments"}:
+            mapping["remark"] = index
+    return mapping
+
+
+def parse_import_items(db: Session, grid: list[list[str]]) -> list[MaterialRequisitionItemIn]:
+    header_row = -1
+    header: dict[str, int] = {}
+    for index, row in enumerate(grid):
+        candidate = find_import_header(row)
+        if "description" in candidate and "quantity" in candidate and ("part" in candidate or "model" in candidate):
+            header_row = index
+            header = candidate
+            break
+    if header_row < 0:
+        raise ValueError("Items table was not found")
+
+    exact, material_keys = product_lookup_maps(db)
+    items: list[MaterialRequisitionItemIn] = []
+    empty_count = 0
+    for row in grid[header_row + 1 :]:
+        part = row[header["part"]].strip() if "part" in header and header["part"] < len(row) else ""
+        model = row[header["model"]].strip() if "model" in header and header["model"] < len(row) else ""
+        description = row[header["description"]].strip() if header["description"] < len(row) else ""
+        qty = excel_qty(row[header["quantity"]] if header["quantity"] < len(row) else "")
+        uom = row[header["uom"]].strip() if "uom" in header and header["uom"] < len(row) else "PCS"
+        remark = row[header["remark"]].strip() if "remark" in header and header["remark"] < len(row) else ""
+        if not part and not model and not description and qty <= 0:
+            empty_count += 1
+            if empty_count >= 5:
+                break
+            continue
+        empty_count = 0
+        if qty <= 0:
+            continue
+        product = find_product_for_import(exact, material_keys, model, part, description)
+        if product is None:
+            raise ValueError(f"Material not found: {model or part or description}")
+        items.append(
+            MaterialRequisitionItemIn(
+                product_id=product.id,
+                part_nbr=product_part_number(product.sku, product.part_number),
+                model=product.sku,
+                description=product_display_name(product),
+                uom=uom or product.unit or "PCS",
+                quantity=qty,
+                remark=remark,
+            )
+        )
+    if not items:
+        raise ValueError("No valid item rows found")
+    return items
+
+
+def find_warehouse_for_import(db: Session, grid: list[list[str]], default_warehouse_id: int = 0) -> Warehouse:
+    name = find_sheet_value(grid, "Warehouse name", "Warehouse")
+    row = None
+    if name:
+        row = db.query(Warehouse).filter(func.lower(Warehouse.name) == name.lower()).first()
+        if row is None:
+            key = normalize_usage_key(name)
+            row = next((w for w in db.query(Warehouse).all() if normalize_usage_key(w.name) == key), None)
+    if row is None and default_warehouse_id:
+        row = db.get(Warehouse, default_warehouse_id)
+    if row is None:
+        raise ValueError("Warehouse was not found in the sheet")
+    return row
+
+
+def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str) -> MaterialRequisition:
+    grid = sheet_grid(sheet)
+    warehouse = find_warehouse_for_import(db, grid, default_warehouse_id)
+    items = parse_import_items(db, grid)
+    today = local_today()
+    order_number = str(db.query(MaterialRequisition).count() + 1)
+    row = MaterialRequisition(
+        order_number=order_number,
+        creation_date=find_sheet_value(grid, "Creation Date", "Date") or today,
+        warehouse_id=warehouse.id,
+        entity=find_sheet_value(grid, "Entity") or "Rollout",
+        project_name=find_sheet_value(grid, "Project Name") or "FTTH",
+        site_id=find_sheet_value(grid, "Site ID", "Area Name") or sheet.title,
+        site_address=find_sheet_value(grid, "Site Address") or "",
+        wo_no=find_sheet_value(grid, "WO No") or "",
+        product_domain=find_sheet_value(grid, "Product Domain") or "Passive",
+        team_leader=find_sheet_value(grid, "Team Leader", "Receiver/TEL") or "",
+        receiver_tel=find_sheet_value(grid, "Receiver/TEL") or "",
+        request_shipment_time=find_sheet_value(grid, "Request Shipment Time") or today,
+        request_arrived_site_time=find_sheet_value(grid, "Request arrived site time") or today,
+        requester_name=find_sheet_value(grid, "Requester Name", "Requester") or actor or "Import",
+        requester_title=find_sheet_value(grid, "Requester Title") or "Requester",
+        requester_date=today,
+        requester_comment=f"Imported from {filename} / {sheet.title}",
+        receiver_name=find_sheet_value(grid, "Approver Name", "Receiver Name", "Receiver") or "Imported Approval",
+        receiver_title=find_sheet_value(grid, "Approver Title", "Receiver Title") or "Approval",
+        receiver_date=today,
+        status="approved",
+        created_by=actor or "Import",
+    )
+    db.add(row)
+    db.flush()
+    for index, item in enumerate(items, start=1):
+        db.add(
+            MaterialRequisitionItem(
+                requisition_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=item.part_nbr,
+                model=item.model,
+                description=item.description,
+                uom=item.uom,
+                quantity=item.quantity,
+                remark=item.remark,
+            )
+        )
+    db.flush()
+    issue_material_requisition_row(db, row, actor or "Import")
+    log_audit(db, "import_material_requisition_excel", "material_requisition", row.order_number, actor or "Import", {"file": filename, "sheet": sheet.title})
+    return row
+
+
+@app.post("/api/warehouse/material-requisitions/import-excel")
+async def import_material_requisition_excels(
+    files: list[UploadFile] = File(...),
+    default_warehouse_id: int = Form(0),
+    actor: str = Form("Import"),
+    db: Session = Depends(db_session),
+):
+    results = []
+    imported_rows: list[MaterialRequisition] = []
+    for upload in files:
+        try:
+            content = await upload.read()
+            workbook = load_workbook(io.BytesIO(content), data_only=True)
+        except Exception as exc:
+            results.append({"file": upload.filename, "sheet": "", "success": False, "message": "Could not read Excel file"})
+            continue
+        for sheet in workbook.worksheets:
+            if sheet.sheet_state != "visible":
+                continue
+            try:
+                row = import_mr_sheet(db, sheet, upload.filename or "MR.xlsx", default_warehouse_id, actor)
+                db.commit()
+                db.refresh(row)
+                imported_rows.append(row)
+                results.append({"file": upload.filename, "sheet": sheet.title, "success": True, "order": row.order_number})
+            except Exception as exc:
+                db.rollback()
+                detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                results.append({"file": upload.filename, "sheet": sheet.title, "success": False, "message": detail})
+    clear_warehouse_cache()
+    return {
+        "success": True,
+        "imported": len(imported_rows),
+        "failed": len([r for r in results if not r["success"]]),
+        "results": results,
+        "requisitions": [requisition_to_dict(r) for r in imported_rows],
+    }
 
 
 def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session)):
