@@ -13,31 +13,53 @@ This system is designed to manage warehouse operations, including:
 - Reports and Dashboards
 
 ## Repository
-(To be completed)
+warehouse-project
+
+## Repository URL
+https://github.com/aysarali88/warehouse-project.git
 
 ## Production Branch
 main
 
 ## Render Service
-(To be completed)
+warehouse-project web service
 
 ## Application URL
-(To be completed)
+https://warehouse-project-259v.onrender.com
 
 ## Supabase Project
-(To be completed)
+Warehouse Project
 
 ## Storage Buckets
-(To be completed)
+Not used.
 
 ## Email Service
-(To be completed)
+**Provider:** Gmail SMTP
+
+**Purpose:**
+- Send Material Request (MR) notifications.
+- Send approval notifications.
+- Send warehouse processing notifications.
+**Configuration:**
+Configured using Environment Variables. No credentials are stored in GitHub.
 
 ## Domain
-(To be completed)
+https://warehouse-project-259v.onrender.com
 
 ## System Owner
-(To be completed)
+**Owner:** Aysar Ali Obeidat
+
+**Role:** Web service Manager & FTTH Activation Team
+
+**Responsibilities:**
+- System maintenance
+- Feature planning
+- User management
+- Technical coordination
+
+## Support & Maintenance
+All system updates, configuration changes, backups, and deployments must follow the documented procedures.
+Sensitive information (passwords, API keys, tokens, and database credentials) must never be stored in the GitHub repository.
 
 ## Security Notice
 
