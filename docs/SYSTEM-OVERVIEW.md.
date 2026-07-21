@@ -1,0 +1,45 @@
+# System Overview
+
+## System Name
+Warehouse Management System
+
+## Purpose
+This system is designed to manage warehouse operations, including:
+- Material Requests (MR)
+- Stock Management
+- Material Receiving
+- Material Issuing
+- Material Transfers
+- Reports and Dashboards
+
+## Repository
+(To be completed)
+
+## Production Branch
+main
+
+## Render Service
+(To be completed)
+
+## Application URL
+(To be completed)
+
+## Supabase Project
+(To be completed)
+
+## Storage Buckets
+(To be completed)
+
+## Email Service
+(To be completed)
+
+## Domain
+(To be completed)
+
+## System Owner
+(To be completed)
+
+## Security Notice
+
+Passwords, API Keys, Tokens, Database URLs, and Secret Keys must NEVER be stored inside this GitHub repository.
+They must always be stored securely using Environment Variables.
