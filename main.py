@@ -2281,7 +2281,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         )
     }
     rollout_rows, _ = rollout_daily_progress_records(db)
-    rollout_consumed_by_material: dict[str, float] = {}
+    rollout_consumed_by_warehouse_material: dict[tuple[str, str], float] = {}
     for record in rollout_rows:
         material = str(record.get("material type") or record.get("item") or "").strip()
         if not material:
@@ -2290,7 +2290,10 @@ def list_stock_usage(db: Session = Depends(db_session)):
         if not material_key:
             continue
         actual = safe_float(record.get("actual"))
-        rollout_consumed_by_material[material_key] = rollout_consumed_by_material.get(material_key, 0) + actual
+        warehouse_key = rollout_warehouse_key(record)
+        if warehouse_key:
+            key = (warehouse_key, material_key)
+            rollout_consumed_by_warehouse_material[key] = rollout_consumed_by_warehouse_material.get(key, 0) + actual
 
     usage_rows = []
     for balance in balances:
@@ -2304,7 +2307,8 @@ def list_stock_usage(db: Session = Depends(db_session)):
         usage_percent = round((total_consumed / denominator) * 100, 2) if denominator else 0
         product_name = product_display_name(balance.product)
         material_key = canonical_material_key(product_name or (balance.product.sku if balance.product else ""))
-        rollout_consumed = rollout_consumed_by_material.get(material_key, 0)
+        warehouse_key = normalize_usage_key(balance.warehouse.name if balance.warehouse else "")
+        rollout_consumed = rollout_consumed_by_warehouse_material.get((warehouse_key, material_key), 0)
         remaining_after_rollout = display_total - rollout_consumed
         rollout_usage_percent = round((rollout_consumed / display_total) * 100, 2) if display_total else 0
         usage_rows.append(
@@ -2417,6 +2421,17 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
 
 def normalize_usage_key(value: str) -> str:
     return "".join(ch.lower() for ch in (value or "") if ch.isalnum())
+
+
+def rollout_warehouse_key(record: dict) -> str:
+    text = normalize_usage_key(f"{record.get('city') or ''} {record.get('Area') or ''}")
+    if "freezone" in text:
+        return normalize_usage_key("Misurata Free Zone")
+    if any(token in text for token in ("misurata", "misrata", "misrat")):
+        return normalize_usage_key("Misurata Lnet")
+    if "tripoli" in text:
+        return normalize_usage_key("Tripoli")
+    return ""
 
 
 def canonical_material_key(value: str) -> str:
