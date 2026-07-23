@@ -1828,7 +1828,7 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_session)):
     rows, source = rollout_daily_progress_records(db, force=True)
     clear_warehouse_cache()
-    limited = list(reversed(rows))[: min(max(limit, 1), 1000)]
+    limited = list(reversed(rows))[: min(max(limit, 1), 10000)]
     return {
         "success": True,
         "name": "Rollout Daily Progress",
@@ -1918,7 +1918,7 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     if not light:
         tech = list_technician_balances(db)
         rollout = list_rollout_material_usage(db)
-        daily_progress = list_rollout_daily_progress(500, db)
+        daily_progress = list_rollout_daily_progress(5000, db)
         audit = list_audit_logs(40, db)
         payload.update(
             {
