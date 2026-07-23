@@ -1390,6 +1390,10 @@ table.innerHTML=`
       <div class="timeline-foot">${timelineGood?'Actual output is aligned with planned pace.':`Behind by ${Math.abs(diff).toFixed(0)}%. Required productivity is ${plannedPct.toFixed(0)}% by ${esc(rolloutDashDateLabel(selectedDate))}; actual productivity is ${actualPct.toFixed(0)}%.`} Actual output ${fmt(metric.actualUsers)} users.</div>
     </div>
   </div>
+  <div class="rollout-mini-panels">
+    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${Math.min(100,Number(r.cablePct||0))}%"></div></div><strong>${fmt(r.cableMeters)} / ${fmt(r.target?.cableMeters||0)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
+    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} / ${fmt(r.target?.subEndBox||0)} · HUB ${fmt(r.hubBox)} / ${fmt(r.target?.hubBox||0)} · XBOX ${fmt(r.xbox)} / ${fmt(r.target?.xbox||0)}</small></div><strong>${fmt(r.totalBoxes)} / ${fmt(r.target?.totalBoxes||0)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
+  </div>
   <div class="rollout-support">
     <div class="rollout-support-head"><h3>Site Survey progress</h3><span class="tag">Live from Survey sheet</span></div>
     <div class="survey-grid">
@@ -1409,10 +1413,6 @@ table.innerHTML=`
       <tr><td><b>Part of Drop Cables</b></td><td>27-May-26</td><td>27-Jun-26</td><td>23-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>17-Jul-26</td></tr>
       <tr><td><b>Remaining material for 200K user after...</b></td><td>Not shipped yet</td><td></td><td></td><td><span class="ship-chip pending">Pending</span></td><td><span class="ship-chip pending">Pending</span></td><td></td></tr>
     </tbody></table>
-  </div>
-  <div class="rollout-mini-panels">
-    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${Math.min(100,Number(r.cablePct||0))}%"></div></div><strong>${fmt(r.cableMeters)} / ${fmt(r.target?.cableMeters||0)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
-    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} / ${fmt(r.target?.subEndBox||0)} · HUB ${fmt(r.hubBox)} / ${fmt(r.target?.hubBox||0)} · XBOX ${fmt(r.xbox)} / ${fmt(r.target?.xbox||0)}</small></div><strong>${fmt(r.totalBoxes)} / ${fmt(r.target?.totalBoxes||0)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
   </div>
 </div>`;
 const dashboardSelects=table.querySelectorAll('.mgmt-toolbar select');
