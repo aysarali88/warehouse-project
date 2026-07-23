@@ -354,6 +354,8 @@ th{
   .command-kpi strong,.hero-metric strong,.workflow-pill strong,.status-tile strong{font-size:24px}
   .card,.dash-panel,.viz-panel,.ops-card,.modal-box,.login-card{border-radius:16px}
 }
+.rollout-management{display:grid;gap:14px;direction:ltr;text-align:left}.rollout-management .mgmt-toolbar{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;align-items:end}.rollout-management .mgmt-toolbar .field{min-width:160px}.mgmt-key-label{color:#7b5b46;font-size:11px;font-weight:900;letter-spacing:2px;text-transform:uppercase}.mgmt-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.mgmt-card{min-height:150px;border:1px solid #eadfce;border-radius:8px;background:linear-gradient(180deg,#fffdf8,#fffaf0);padding:14px;box-shadow:0 12px 26px rgba(70,45,20,.06);position:relative;overflow:hidden}.mgmt-card.blue{border-color:#cfe0fb}.mgmt-card.red{border-color:#f0cece;background:linear-gradient(180deg,#fffafa,#fff5f2)}.mgmt-card h3{margin:0 0 5px;color:#2c2c2c;font-size:14px}.mgmt-card small{display:block;color:#6e645a;font-weight:900;font-size:11px;line-height:1.5}.mgmt-card .big{font-size:33px;font-weight:900;color:#2b2b2b;margin-top:14px;display:flex;align-items:flex-end;gap:10px}.mgmt-card .accent{color:#2e7ad8}.mgmt-card .teal{color:#178c92}.mgmt-card .ratio{font-size:15px;color:#2b2b2b}.mgmt-progress{height:7px;background:#dedbd2;border-radius:99px;overflow:hidden;margin-top:14px}.mgmt-progress i{display:block;height:100%;border-radius:99px;background:#2e7ad8}.mgmt-progress i.teal{background:#178c92}.mgmt-progress i.red{background:#df3b35}.mgmt-box-lines{display:grid;gap:6px;margin-top:10px}.mgmt-box-lines div{display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:900;color:#403b35}.mgmt-note{font-size:12px;font-weight:900;line-height:1.8;color:#6a5146}.mgmt-timeline{border:1px solid #eadfce;border-radius:8px;background:linear-gradient(180deg,#fffdf8,#fffaf0);padding:16px;box-shadow:0 12px 26px rgba(70,45,20,.05)}.mgmt-timeline-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.mgmt-timeline h3{margin:0 0 6px;color:#2b2b2b}.mgmt-timeline p{margin:0;color:#6e645a;font-weight:800;font-size:12px}.timeline-status{border-radius:999px;padding:8px 13px;background:#ffe5e5;color:#c93535;font-weight:900;font-size:12px}.timeline-status.good{background:#e6f6ed;color:#168a4a}.timeline-box{margin-top:14px;border:1px solid #eadfce;border-radius:8px;padding:16px;background:rgba(255,255,255,.6)}.timeline-dates{display:flex;justify-content:space-between;font-weight:900;font-size:12px;color:#111;margin-bottom:26px}.timeline-track{position:relative;height:12px;border-radius:99px;background:#d8d4c9}.timeline-track .planned-line{position:absolute;inset-block:0;left:0;border-radius:99px;background:#6ca7dd}.timeline-marker{position:absolute;top:-12px;transform:translateX(-50%);display:grid;justify-items:center;gap:4px;font-weight:900;color:#1f6fc6}.timeline-marker.actual{color:#df3b35}.timeline-marker:before{content:"";width:7px;height:36px;border-radius:99px;background:currentColor}.timeline-marker span{border:1px solid currentColor;border-radius:7px;padding:4px 7px;background:#fff;font-size:11px;white-space:nowrap}.timeline-ticks{display:grid;grid-template-columns:repeat(3,1fr);margin-top:58px;text-align:center;color:#2c6aa4;font-weight:900;font-size:11px}.timeline-ticks span{display:block;color:#617182;margin-top:3px}.timeline-foot{margin-top:12px;color:#0b4d95;font-weight:900;font-size:12px}.rollout-mini-panels{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rollout-mini-panels .dash-panel{box-shadow:none}.rollout-management .chart-row{grid-template-columns:135px 1fr 84px}
+@media(max-width:960px){.mgmt-kpis,.rollout-mini-panels{grid-template-columns:1fr}.rollout-management .mgmt-toolbar{justify-content:stretch}.rollout-management .mgmt-toolbar .field{min-width:0}.timeline-ticks{margin-top:70px}.rollout-management .chart-row{grid-template-columns:1fr!important}}
 </style>
 </head>
 <body>
@@ -862,6 +864,13 @@ let activeWarehouseAssignment=session?.warehouse_name||'';
 let lastApprovalCount=0;
 let appUsers=[];
 let currentEditingMrId=null;
+let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
+const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2'],Misurata:['Maqawba']};
+const ROLLOUT_DASHBOARD_PLAN=[
+  {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
+  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetUsers:2368,note:'Execution risk update'},
+  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetUsers:3284,note:'Execution risk update'}
+];
 const titles={dashboard:['Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
@@ -1226,96 +1235,56 @@ function rolloutVarianceLabel(row){const diff=Number(row.remaining_after_rollout
 function renderRolloutWarehouseVsField(){const box=document.getElementById('rolloutDailyCompare');if(!box)return;const rows=(wh.rolloutUsage||[]).filter(r=>Number(r.mr_issued_qty||0)>0||Number(r.rollout_used_qty||0)>0);if(!rows.length){box.innerHTML='<div class="empty">No warehouse vs field comparison data yet.</div>';return}const totalIssued=rows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const totalInstalled=rows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const totalOpen=rows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);const matchRate=totalIssued?((totalInstalled/totalIssued)*100):0;const viewRows=[...rows].sort((a,b)=>Math.abs(Number(b.remaining_after_rollout||0))-Math.abs(Number(a.remaining_after_rollout||0))||String(a.area).localeCompare(String(b.area)));box.innerHTML=`<div class="workflow-lane" style="margin-bottom:14px"><div class="workflow-pill"><span>Total Issued</span><strong>${fmt(totalIssued)}</strong></div><div class="workflow-pill good"><span>Installed in Field</span><strong>${fmt(totalInstalled)}</strong></div><div class="workflow-pill warn"><span>Open Difference</span><strong>${fmt(totalOpen)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile good"><span>Match Rate</span><strong>${matchRate.toFixed(1)}%</strong></div><div class="status-tile"><span>Compared Lines</span><strong>${fmt(viewRows.length)}</strong></div><div class="status-tile"><span>Areas Covered</span><strong>${fmt(new Set(viewRows.map(r=>r.area)).size)}</strong></div></div>${rowsTable([['Area','area'],['Material','material'],['SKU','sku'],['Issued','mr_issued_qty',(v)=>fmt(v)],['Installed','rollout_used_qty',(v)=>fmt(v)],['Difference','remaining_after_rollout',(v)=>fmt(v)],['Status','usage_match',(v,r)=>rolloutVarianceLabel(r)]],viewRows)}`}
 function renderRolloutAreaReportPanel(productivityRows=[]){const box=document.getElementById('rolloutDailyReport');if(!box)return;const area=selectedRolloutReportArea||'All Areas';if(!area){box.innerHTML='<div class="empty">No area available for report.</div>';return}const isAll=normalizeText(area)==='allareas';const rows=rolloutReportRows(area);const usageRows=(wh.rolloutUsage||[]).filter(r=>isAll||normalizeText(r.area)===normalizeText(area));const areaMetric=isAll?productivityRows.reduce((acc,r)=>({cableMeters:Number(acc.cableMeters||0)+Number(r.cableMeters||0),totalBoxes:Number(acc.totalBoxes||0)+Number(r.totalBoxes||0),actualUsers:Number(acc.actualUsers||0)+Number(r.actualUsers||0),subEndBox:Number(acc.subEndBox||0)+Number(r.subEndBox||0),hubBox:Number(acc.hubBox||0)+Number(r.hubBox||0),xbox:Number(acc.xbox||0)+Number(r.xbox||0)}),{cableMeters:0,totalBoxes:0,actualUsers:0,subEndBox:0,hubBox:0,xbox:0}):(productivityRows.find(r=>normalizeText(r.name)===normalizeText(area))||{cableMeters:0,totalBoxes:0,actualUsers:0,productivity:0,subEndBox:0,hubBox:0,xbox:0});const issued=usageRows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const installed=usageRows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const difference=usageRows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);box.innerHTML=`<div class="report-tools"><div class="field"><label>Select Area</label><select id="rolloutDailyReportArea" onchange="setRolloutReportArea(this.value)"></select></div><button class="btn primary" onclick="downloadRolloutReportPdf('rolloutDailyReportArea')">تنزيل PDF</button></div><div class="workflow-lane" style="margin:14px 0"><div class="workflow-pill"><span>Cable Progress (m)</span><strong>${fmt(areaMetric.cableMeters||0)}</strong></div><div class="workflow-pill good"><span>Box Deployment</span><strong>${fmt(areaMetric.totalBoxes||0)}</strong></div><div class="workflow-pill"><span>Actual Users</span><strong>${fmt(areaMetric.actualUsers||0)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile"><span>Issued to Area</span><strong>${fmt(issued)}</strong></div><div class="status-tile good"><span>Installed</span><strong>${fmt(installed)}</strong></div><div class="status-tile warn"><span>Open Difference</span><strong>${fmt(difference)}</strong></div></div>${rows.length?rowsTable([['Material','description'],['Installed Qty','quantity',(v)=>fmt(v)],['Unit','description',()=>`Pcs.`],['Comments','comments',(v)=>esc(v?[...v].join(', '):'')]],rows):'<div class="empty-soft">No installed materials for this area.</div>'}`;renderRolloutReport()}
 async function refreshRolloutDailyProgress(showToast=true){if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');const stamp=Date.now();const d=await api(`/api/warehouse/rollout-daily-progress?limit=1000&refresh=${stamp}`);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usage=await api(`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
-function renderRolloutDailyProgress(){
-const rows=wh.rolloutDailyProgress||[];
-const stats=document.getElementById('rolloutDailyStats');
-const table=document.getElementById('rolloutDailyKpi');
-if(!stats||!table)return;
-const actual=rows.reduce((s,r)=>s+Number(r.actual||0),0);
-const latest=[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'-';
-const areasMap=new Map(),materialsMap=new Map(),activityMap=new Map(),teamMap=new Map(),statusMap=new Map(),cityMap=new Map(),areaMetrics=new Map();
-rows.forEach(r=>{
-  const qty=Number(r.actual||0);
-  const area=String(r.Area||r.area||'').trim();
-  const material=String(r['material type']||r.item||r.Material||'').trim();
-  const activity=String(r.Activity||r.activity||'Unspecified').trim()||'Unspecified';
-  const team=String(r['team leader']||r.team_leader||r.TeamLeader||'Unassigned').trim()||'Unassigned';
-  const status=String(r.staus||r.status||'Unknown').trim()||'Unknown';
-  const city=String(r.city||r.City||'Unspecified').trim()||'Unspecified';
-  const normMaterial=normalizeText(material);
-  const cableLengthMatch=material.match(/(\d+)\s*m\b/i)||material.match(/_(\d+)m\b/i);
-  const cableLengthPerUnit=cableLengthMatch?Number(cableLengthMatch[1]||0):0;
-  const isFourCoreCable=normMaterial.includes('corecable')||normMaterial.includes('4corecable');
-  const isCoreCable=isFourCoreCable||normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
-  const isDistributionCable=normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
-  const isSubOrEndBox=normMaterial.includes('subbox')||normMaterial.includes('subboxavec8userscapacit')||normMaterial.includes('endbox')||normMaterial.includes('endboxavec8userscapacit');
-  const isHubBox=normMaterial.includes('hubbox');
-  const isXbox=normMaterial.includes('xbox');
-  if(area){
-    const cur=areasMap.get(area)||{name:area,qty:0,records:0};
-    cur.qty+=qty;cur.records+=1;areasMap.set(area,cur);
-    const metric=areaMetrics.get(area)||{name:area,cableMeters:0,distributionQty:0,fourCoreQty:0,subEndBox:0,hubBox:0,xbox:0,records:0,teams:new Set()};
+function rolloutDashDateLabel(value){if(!value)return 'Latest data';const d=new Date(`${value}T00:00:00`);return isNaN(d)?value:d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
+function rolloutDaysInclusive(start,end){const a=new Date(`${start}T00:00:00`),b=new Date(`${end}T00:00:00`);if(isNaN(a)||isNaN(b))return 0;return Math.max(1,Math.round((b-a)/86400000)+1)}
+function rolloutMetricFromRows(rows){
+  const metric={cableMeters:0,distributionQty:0,fourCoreQty:0,subEndBox:0,hubBox:0,xbox:0,records:0,teams:new Set(),latestDate:''};
+  rows.forEach(r=>{
+    const qty=Number(r.actual||0);
+    const material=String(r['material type']||r.item||r.Material||'').trim();
+    const normMaterial=normalizeText(material);
+    const cableLengthMatch=material.match(/(\d+)\s*m\b/i)||material.match(/_(\d+)m\b/i);
+    const cableLengthPerUnit=cableLengthMatch?Number(cableLengthMatch[1]||0):0;
+    const isFourCoreCable=normMaterial.includes('corecable')||normMaterial.includes('4corecable');
+    const isCoreCable=isFourCoreCable||normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
+    const isDistributionCable=normMaterial.includes('singlecoredistributioncable')||normMaterial.includes('distributioncable');
+    const isSubOrEndBox=normMaterial.includes('subbox')||normMaterial.includes('subboxavec8userscapacit')||normMaterial.includes('endbox')||normMaterial.includes('endboxavec8userscapacit');
+    const isHubBox=normMaterial.includes('hubbox');
+    const isXbox=normMaterial.includes('xbox');
+    const team=String(r['team leader']||r.team_leader||r.TeamLeader||'').trim();
+    const date=String(r.Date||'').slice(0,10);
     metric.records+=1;
     if(team)metric.teams.add(team);
+    if(date&&date>metric.latestDate)metric.latestDate=date;
     if(isCoreCable&&cableLengthPerUnit>0)metric.cableMeters+=qty*cableLengthPerUnit;
     if(isDistributionCable)metric.distributionQty+=qty;
     if(isFourCoreCable)metric.fourCoreQty+=qty;
     if(isSubOrEndBox)metric.subEndBox+=qty;
     if(isHubBox)metric.hubBox+=qty;
     if(isXbox)metric.xbox+=qty;
-    areaMetrics.set(area,metric);
+  });
+  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
+  metric.actualUsers=(metric.distributionQty+metric.fourCoreQty)*8;
+  return metric;
+}
+function rolloutPlanFor(city,area){
+  if(normalizeText(area)==='allareas')return null;
+  return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&normalizeText(p.area)===normalizeText(area))||ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.area)===normalizeText(area))||null;
+}
+function setRolloutDashboardFilter(key,value){
+  rolloutDashboardFilters[key]=value||'';
+  if(key==='city'){
+    const options=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
+    rolloutDashboardFilters.area=options.includes(rolloutDashboardFilters.area)?rolloutDashboardFilters.area:(options[0]||'All Areas');
   }
-  if(material){
-    const cur=materialsMap.get(material)||{name:material,qty:0};
-    cur.qty+=qty;materialsMap.set(material,cur);
-  }
-  const act=activityMap.get(activity)||{name:activity,qty:0,records:0};
-  act.qty+=qty;act.records+=1;activityMap.set(activity,act);
-  const lead=teamMap.get(team)||{name:team,qty:0,records:0};
-  lead.qty+=qty;lead.records+=1;teamMap.set(team,lead);
-  const st=statusMap.get(status)||{name:status,count:0};
-  st.count+=1;statusMap.set(status,st);
-  const ct=cityMap.get(city)||{name:city,qty:0};
-  ct.qty+=qty;cityMap.set(city,ct);
-});
-const areas=[...areasMap.values()].sort((a,b)=>b.qty-a.qty);
-const materials=[...materialsMap.values()].sort((a,b)=>b.qty-a.qty);
-const activities=[...activityMap.values()].sort((a,b)=>b.qty-a.qty);
-const teams=[...teamMap.values()].sort((a,b)=>b.qty-a.qty);
-const statuses=[...statusMap.values()].sort((a,b)=>b.count-a.count);
-const cities=[...cityMap.values()].sort((a,b)=>b.qty-a.qty);
-const areaRows=[...areaMetrics.values()].map(r=>{
-  const totalBoxes=Number(r.subEndBox||0)+Number(r.hubBox||0)+Number(r.xbox||0);
-  const actualUsers=(Number(r.distributionQty||0)+Number(r.fourCoreQty||0))*8;
-  return {...r,totalBoxes,actualUsers,teamCount:r.teams.size};
-}).sort((a,b)=>b.cableMeters-a.cableMeters||b.totalBoxes-a.totalBoxes);
-const maxCableMeters=Math.max(...areaRows.map(r=>Number(r.cableMeters||0)),1);
-const maxBoxes=Math.max(...areaRows.map(r=>Number(r.totalBoxes||0)),1);
-const productivityRows=areaRows.map(r=>{
-  const cableScore=(Number(r.cableMeters||0)/maxCableMeters)*100;
-  const boxScore=(Number(r.totalBoxes||0)/maxBoxes)*100;
-  const productivity=(cableScore*0.8)+(boxScore*0.2);
-  return {...r,productivity};
-}).sort((a,b)=>b.productivity-a.productivity);
-const totalCableMeters=productivityRows.reduce((s,r)=>s+Number(r.cableMeters||0),0);
-const totalBoxes=productivityRows.reduce((s,r)=>s+Number(r.totalBoxes||0),0);
-const totalUsers=productivityRows.reduce((s,r)=>s+Number(r.actualUsers||0),0);
-const bestArea=productivityRows[0]?.name||'-';
-const bestScore=productivityRows[0]?.productivity||0;
-const bestCableArea=[...productivityRows].sort((a,b)=>b.cableMeters-a.cableMeters)[0]?.name||'-';
-const bestBoxArea=[...productivityRows].sort((a,b)=>b.totalBoxes-a.totalBoxes)[0]?.name||'-';
-const bestUserArea=[...productivityRows].sort((a,b)=>b.actualUsers-a.actualUsers)[0]?.name||'-';
-const activeBoxAreas=productivityRows.filter(r=>Number(r.totalBoxes||0)>0).length;
-const activeCableAreas=productivityRows.filter(r=>Number(r.cableMeters||0)>0).length;
-const activeUserAreas=productivityRows.filter(r=>Number(r.actualUsers||0)>0).length;
-const usersPerBox=totalBoxes?totalUsers/totalBoxes:0;
-const cableMetersPerBox=totalBoxes?totalCableMeters/totalBoxes:0;
-stats.innerHTML=[
-['Cable Progress (m)',totalCableMeters],
-['Box Deployment',totalBoxes],
-['Actual Users',totalUsers],
-['Latest Update',latest,'text']
-].map(x=>`<div class="workflow-pill"><span>${esc(x[0])}</span><strong>${esc(x[2]?x[1]:fmt(x[1]))}</strong></div>`).join('');
+  renderRolloutDailyProgress();
+}
+function renderRolloutDailyProgress(){
+const rows=wh.rolloutDailyProgress||[];
+const stats=document.getElementById('rolloutDailyStats');
+const table=document.getElementById('rolloutDailyKpi');
+if(!stats||!table)return;
+stats.innerHTML='';
 if(!rows.length){
   table.innerHTML='<div class="empty">No rollout progress data loaded yet.</div>';
   renderRolloutWarehouseVsField();
@@ -1323,34 +1292,82 @@ if(!rows.length){
   switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
   return;
 }
-const maxArea=Math.max(...areas.map(r=>Number(r.qty||0)),1);
-const maxMaterial=Math.max(...materials.map(r=>Number(r.qty||0)),1);
-const maxActivity=Math.max(...activities.map(r=>Number(r.qty||0)),1);
-const maxTeam=Math.max(...teams.map(r=>Number(r.qty||0)),1);
-const topTeams=teams.slice(0,6);
-const topCableAreas=productivityRows.slice(0,6);
-const topUserAreas=productivityRows.slice(0,6);
-const topProductivityAreas=productivityRows.slice(0,6);
-const averageProductivity=productivityRows.length?productivityRows.reduce((s,r)=>s+Number(r.productivity||0),0)/productivityRows.length:0;
+const dateOptions=[...new Set(rows.map(r=>String(r.Date||'').slice(0,10)).filter(Boolean))].sort();
+const cityOptions=[...new Set([...Object.keys(ROLLOUT_DASHBOARD_AREAS),...rows.map(r=>String(r.city||r.City||'').trim()).filter(Boolean)])];
+if(!cityOptions.includes(rolloutDashboardFilters.city))rolloutDashboardFilters.city=cityOptions[0]||'Tripoli';
+const mappedAreas=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
+const dataAreas=[...new Set(rows.filter(r=>!rolloutDashboardFilters.city||normalizeText(r.city||r.City)===normalizeText(rolloutDashboardFilters.city)).map(r=>String(r.Area||r.area||'').trim()).filter(Boolean))];
+const areaOptions=[...new Set([...mappedAreas,...dataAreas])];
+if(!areaOptions.includes(rolloutDashboardFilters.area)&&normalizeText(rolloutDashboardFilters.area)!=='allareas')rolloutDashboardFilters.area=areaOptions[0]||'All Areas';
+const scopedRows=rows.filter(r=>{
+  const rowDate=String(r.Date||'').slice(0,10);
+  const rowCity=String(r.city||r.City||'').trim();
+  const rowArea=String(r.Area||r.area||'').trim();
+  const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
+  return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
+});
+const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)))})).filter(r=>r.records>0);
+const metric=rolloutMetricFromRows(scopedRows);
+const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
+const maxCableMeters=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.cableMeters||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.cableMeters||0)),1);
+const maxBoxes=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.totalBoxes||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.totalBoxes||0)),1);
+const cableScore=(metric.cableMeters/maxCableMeters)*100;
+const boxScore=(metric.totalBoxes/maxBoxes)*100;
+const productivity=(cableScore*.8)+(boxScore*.2);
+const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const targetUsers=plan?.targetUsers||Math.max(metric.actualUsers,1);
+const usersPct=Math.min(100,(metric.actualUsers/Math.max(targetUsers,1))*100);
+const latest=metric.latestDate||[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'';
+const timelineStart=plan?.start||ROLLOUT_DASHBOARD_PLAN.map(p=>p.start).sort()[0]||latest;
+const timelineEnd=plan?.end||ROLLOUT_DASHBOARD_PLAN.map(p=>p.end).sort().pop()||latest;
+const totalDays=rolloutDaysInclusive(timelineStart,timelineEnd);
+const selectedDate=rolloutDashboardFilters.date||latest||new Date().toISOString().slice(0,10);
+const elapsedDays=Math.min(totalDays,Math.max(1,rolloutDaysInclusive(timelineStart,selectedDate)));
+const plannedPct=Math.max(0,Math.min(100,totalDays?(elapsedDays/totalDays)*100:0));
+const actualPct=Math.max(0,Math.min(100,productivity));
+const diff=actualPct-plannedPct;
+const timelineGood=diff>=-5;
+const displayedArea=normalizeText(rolloutDashboardFilters.area)==='allareas'?'All Areas':rolloutDashboardFilters.area;
+const areaName=displayedArea||'All Areas';
+const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
+const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
+const topRows=allMetricRows.map(r=>{const totalBoxes=r.totalBoxes||0;const prod=((r.cableMeters/maxCableMeters)*80)+((totalBoxes/maxBoxes)*20);return {...r,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
 table.innerHTML=`
-<div class="status-strip" style="margin:14px 0 16px">
-  <div class="status-tile good"><span>Top Productivity Area</span><strong>${esc(bestArea)} · ${Number(bestScore||0).toFixed(1)}%</strong></div>
-  <div class="status-tile"><span>Active Cable Areas</span><strong>${fmt(activeCableAreas)}</strong></div>
-  <div class="status-tile"><span>Active Box Areas</span><strong>${fmt(activeBoxAreas)}</strong></div>
-</div>
-<div class="dash-grid">
-  <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topCableAreas.length?topCableAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.cableMeters,maxCableMeters)}%"></div></div><strong>${fmt(r.cableMeters)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
-  <div class="dash-panel"><h3>Box Deployment by Area</h3>${productivityRows.length?`<div class="mini-list">${productivityRows.slice(0,6).map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END BOX ${fmt(r.subEndBox)} · HUB BOX ${fmt(r.hubBox)} · XBOX ${fmt(r.xbox)}</small></div><strong>${fmt(r.totalBoxes)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">No box deployment yet.</div>'}</div>
-</div>
-<div class="dash-grid">
-  <div class="dash-panel"><h3>Estimated Users by Area</h3>${topUserAreas.length?topUserAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.actualUsers,Math.max(...productivityRows.map(x=>Number(x.actualUsers||0)),1))}%"></div></div><strong>${fmt(r.actualUsers)}</strong></div>`).join(''):'<div class="empty-soft">No estimated users yet.</div>'}</div>
-  <div class="dash-panel"><h3>Overall Productivity by Area</h3>${topProductivityAreas.length?topProductivityAreas.map(r=>`<div class="chart-row"><b title="${esc(r.name)}">${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.productivity,100)}%"></div></div><strong>${Number(r.productivity||0).toFixed(1)}%</strong></div>`).join(''):'<div class="empty-soft">No productivity score yet.</div>'}</div>
-</div>
-<div class="dash-grid">
-  <div class="dash-panel"><h3>Execution Snapshot</h3><div class="mini-list"><div class="mini-row"><div><b>Top Cable Area</b><small>Strongest cable deployment</small></div><strong>${esc(bestCableArea)}</strong></div><div class="mini-row"><div><b>Top Box Area</b><small>Highest box deployment</small></div><strong>${esc(bestBoxArea)}</strong></div><div class="mini-row"><div><b>Top Users Area</b><small>Highest estimated actual users</small></div><strong>${esc(bestUserArea)}</strong></div><div class="mini-row"><div><b>Active Team Leaders</b><small>Leaders contributing in rollout</small></div><strong>${fmt(teams.length)}</strong></div></div></div>
+<div class="rollout-management">
+  <div class="mgmt-toolbar">
+    <div class="field"><label>Date</label><select onchange="setRolloutDashboardFilter('date',this.value)">${dateOptionsHtml}</select></div>
+    <div class="field"><label>City</label><select onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
+    <div class="field"><label>Area</label><select onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
+  </div>
+  <div class="mgmt-key-label">Key Metrics · ${esc(areaName)}</div>
+  <div class="mgmt-kpis">
+    <div class="mgmt-card"><h3>Overall productivity</h3><small>20% box + 80% cable progress</small><div class="big">${actualPct.toFixed(0)}% <span class="ratio">weighted</span></div><div class="mgmt-progress"><i style="width:${actualPct}%"></i></div></div>
+    <div class="mgmt-card"><h3>Cable progress</h3><small>Core + distribution cable length</small><div class="big"><span class="accent">${fmt(metric.cableMeters)}</span><span class="ratio">m</span></div><div class="mgmt-progress"><i style="width:${Math.min(100,cableScore)}%"></i></div></div>
+    <div class="mgmt-card"><h3>Box deployment</h3><small>SUB / END, HUB, and XBOX</small><div class="big"><span class="teal">${fmt(metric.totalBoxes)}</span><span class="ratio">BOX</span></div><div class="mgmt-box-lines"><div><span>XBOX</span><b>${fmt(metric.xbox)}</b></div><div><span>HUB BOX</span><b>${fmt(metric.hubBox)}</b></div><div><span>SUB / END BOX</span><b>${fmt(metric.subEndBox)}</b></div></div><div class="mgmt-progress"><i class="teal" style="width:${Math.min(100,boxScore)}%"></i></div></div>
+    <div class="mgmt-card blue"><h3>Actual users</h3><small>Installed distribution and 4-core cables × 8</small><div class="big"><span class="accent">${fmt(metric.actualUsers)}</span><span class="ratio">/ ${fmt(targetUsers)} users</span></div><small>${fmt(metric.distributionQty+metric.fourCoreQty)} / ${fmt(Math.ceil(targetUsers/8))} user cable units</small><div class="mgmt-progress"><i style="width:${usersPct}%"></i></div></div>
+    <div class="mgmt-card red"><h3>Project note</h3><div class="mgmt-note">${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</div><small style="margin-top:12px">Records: ${fmt(scopedRows.length)} · Latest: ${esc(rolloutDashDateLabel(latest))}</small></div>
+  </div>
+  <div class="mgmt-timeline">
+    <div class="mgmt-timeline-head"><div><h3>Project timeline</h3><p>One line comparing planned pace and actual output.</p></div><span class="timeline-status ${timelineGood?'good':''}">${timelineGood?'On track':'Behind schedule'}</span></div>
+    <div class="timeline-box">
+      <div class="timeline-dates"><span>${esc(rolloutDashDateLabel(timelineStart))}</span><span>Project duration: ${fmt(totalDays)} days</span><span>${esc(rolloutDashDateLabel(timelineEnd))}</span></div>
+      <div class="timeline-track"><div class="planned-line" style="width:${plannedPct}%"></div><div class="timeline-marker actual" style="left:${actualPct}%"><span>Actual ${actualPct.toFixed(0)}%</span></div><div class="timeline-marker" style="left:${plannedPct}%"><span>Planned ${plannedPct.toFixed(0)}%</span></div></div>
+      <div class="timeline-ticks"><div>25%<span>${Math.ceil(totalDays*.25)} days</span></div><div>50%<span>${Math.ceil(totalDays*.5)} days</span></div><div>75%<span>${Math.ceil(totalDays*.75)} days</span></div></div>
+      <div class="timeline-foot">${timelineGood?'Actual output is aligned with planned pace.':`Behind by ${Math.abs(diff).toFixed(0)}%. Required productivity is ${plannedPct.toFixed(0)}% by ${esc(rolloutDashDateLabel(selectedDate))}; actual productivity is ${actualPct.toFixed(0)}%.`} Actual output ${fmt(metric.actualUsers)} users.</div>
+    </div>
+  </div>
+  <div class="rollout-mini-panels">
+    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.cableMeters,maxCableMeters)}%"></div></div><strong>${fmt(r.cableMeters)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
+    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} · HUB ${fmt(r.hubBox)} · XBOX ${fmt(r.xbox)}</small></div><strong>${fmt(r.totalBoxes)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
+  </div>
 </div>`;
+const dashboardSelects=table.querySelectorAll('.mgmt-toolbar select');
+if(dashboardSelects[0])dashboardSelects[0].value=rolloutDashboardFilters.date;
+if(dashboardSelects[1])dashboardSelects[1].value=rolloutDashboardFilters.city;
+if(dashboardSelects[2])dashboardSelects[2].value=rolloutDashboardFilters.area;
 renderRolloutWarehouseVsField();
-renderRolloutAreaReportPanel(productivityRows);
+renderRolloutAreaReportPanel(topRows);
 switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
 }
 function visibleScanLogs(){if(roleKey()==='admin'||roleKey()==='management'||roleKey()==='warehousemanager'||canApprove())return wh.scanLogs||[];const visibleIds=new Set((wh.mrs||[]).filter(userOwnsMr).map(r=>String(r.id)));return (wh.scanLogs||[]).filter(r=>visibleIds.has(String(r.material_requisition_id))||normalizeText(r.scanned_by)===normalizeText(activeUser))}
