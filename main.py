@@ -900,6 +900,7 @@ def normalize_rollout_row(data: dict) -> dict:
         "Area": str(first_value(data, "Area", "area", default="") or ""),
         "city": str(first_value(data, "city", "City", default="") or ""),
         "Activity": str(first_value(data, "Activity", "activity", default="") or ""),
+        "Related to XBOX": str(first_value(data, "Related to XBOX", "related to xbox", "related_to_xbox", default="") or ""),
         "item": str(first_value(data, "item", "Item", default="") or ""),
         "material type": str(first_value(data, "material type", "Material Type", "material_type", default="") or ""),
         "mount type": str(first_value(data, "mount type", "Mount Type", "mount_type", default="") or ""),
@@ -912,6 +913,12 @@ def normalize_rollout_row(data: dict) -> dict:
         "acceptance": str(first_value(data, "acceptance", "Acceptance", default="") or ""),
         "scan": str(first_value(data, "scan", "Scan", default="") or ""),
         "labeling": str(first_value(data, "labeling", "Labeling", default="") or ""),
+        "entry time": str(first_value(data, "entry time", "Entry Time", "entry_time", default="") or ""),
+        "cable code": str(first_value(data, "cable code", "Cable Code", "cable_code", default="") or ""),
+        "box code": str(first_value(data, "box code", "Box Code", "box_code", default="") or ""),
+        "OLT": str(first_value(data, "OLT", "olt", default="") or ""),
+        "Cable route": str(first_value(data, "Cable route", "Cable Route", "cable_route", default="") or ""),
+        "Notes": str(first_value(data, "Notes", "notes", default="") or ""),
     }
 
 
