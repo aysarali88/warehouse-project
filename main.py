@@ -403,12 +403,12 @@ def notify_transfer_created(row: MaterialTransfer, db: Session) -> None:
     notify_transfer_email(
         row,
         db,
-        transfer_source_warehouse_manager_emails(row, db),
-        f"Warehouse approval needed: Material Transfer {row.transfer_number}",
+        approval_notification_emails(db),
+        f"Approval needed: Material Transfer {row.transfer_number}",
         [
             "Hello,",
             "",
-            "A material transfer has been created and is waiting for source warehouse approval.",
+            "A material transfer has been created and is waiting for approval in the warehouse system.",
             "",
             f"Transfer No: {row.transfer_number}",
             f"Requester: {row.requester_name or '-'}",
@@ -417,7 +417,7 @@ def notify_transfer_created(row: MaterialTransfer, db: Session) -> None:
             f"Status: Pending approval",
             f"Date: {row.transfer_date or local_today()}",
             "",
-            "Please sign in to the warehouse system and review this transfer.",
+            "Please sign in to the warehouse system and review this transfer when convenient.",
             "",
             "This is an automated notification from Global Technology Company.",
         ],
@@ -3042,7 +3042,7 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     user_key = normalize_usage_key(user)
     approval_count = len(pending) if not user_key else sum(1 for row in pending if normalize_usage_key(row.receiver_name) == user_key)
     transfer_approval_count = len(pending_transfers) if not user_key else sum(
-        1 for row in pending_transfers if normalize_usage_key(row.from_warehouse.name if row.from_warehouse else "") == user_key
+        1 for row in pending_transfers if normalize_usage_key(row.approver_name) == user_key
     )
     approved_rows = (
         db.query(MaterialRequisition)
