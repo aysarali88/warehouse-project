@@ -1265,7 +1265,7 @@ function rolloutMetricFromRows(rows){
     if(isXbox)metric.xbox+=qty;
   });
   metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
-  metric.actualUsers=(metric.distributionQty+metric.fourCoreQty)*8;
+  metric.actualUsers=metric.distributionQty*8;
   return metric;
 }
 function rolloutPlanFor(city,area){
@@ -1372,7 +1372,7 @@ table.innerHTML=`
     </div>
   </div>
   <div class="status-strip" style="margin:4px 0 2px">
-    <div class="status-tile good"><span>Installed</span><strong>${fmt(metric.distributionQty+metric.fourCoreQty)}</strong></div>
+    <div class="status-tile good"><span>Installed Cable</span><strong>${fmt(metric.distributionQty+metric.fourCoreQty)}</strong><small>Distribution ${fmt(metric.distributionQty)} · 4-core ${fmt(metric.fourCoreQty)}</small></div>
     <div class="status-tile warn"><span>Planned Pace</span><strong>${plannedPct.toFixed(0)}%</strong></div>
     <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
   </div>
