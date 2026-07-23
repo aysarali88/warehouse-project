@@ -868,9 +868,9 @@ let currentEditingMrId=null;
 let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
 const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2'],Misurata:['Maqawba']};
 const ROLLOUT_DASHBOARD_PLAN=[
-  {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
-  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetUsers:2368,note:'Execution risk update'},
-  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetUsers:3284,note:'Execution risk update'}
+  {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
+  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetSubEndBox:292,targetHubBox:23,targetXbox:2,targetCableMeters:32630,targetUsers:2368,note:'Execution risk update'},
+  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:432,targetHubBox:30,targetXbox:3,targetCableMeters:43190,targetUsers:3284,note:'Execution risk update'}
 ];
 const titles={dashboard:['Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -1272,6 +1272,17 @@ function rolloutPlanFor(city,area){
   if(normalizeText(area)==='allareas')return null;
   return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&normalizeText(p.area)===normalizeText(area))||ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.area)===normalizeText(area))||null;
 }
+function rolloutTargetFor(city,area){
+  const plan=rolloutPlanFor(city,area)||{};
+  return {
+    cableMeters:Number(plan.targetCableMeters||0),
+    subEndBox:Number(plan.targetSubEndBox||0),
+    hubBox:Number(plan.targetHubBox||0),
+    xbox:Number(plan.targetXbox||0),
+    totalBoxes:Number(plan.targetSubEndBox||0)+Number(plan.targetHubBox||0)+Number(plan.targetXbox||0),
+    users:Number(plan.targetUsers||0)
+  };
+}
 function setRolloutDashboardFilter(key,value){
   rolloutDashboardFilters[key]=value||'';
   if(key==='city'){
@@ -1307,23 +1318,26 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)))})).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area))),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
 const metric=rolloutMetricFromRows(scopedRows);
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
-const maxCableMeters=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.cableMeters||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.cableMeters||0)),1);
-const maxBoxes=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.totalBoxes||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.totalBoxes||0)),1);
-const cableScore=(metric.cableMeters/maxCableMeters)*100;
-const boxScore=(metric.totalBoxes/maxBoxes)*100;
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0)}),{cableMeters:0,totalBoxes:0,users:0}):rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
+const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
+const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
+const boxScore=Math.min(100,(metric.totalBoxes/targetBoxes)*100);
 const productivity=(cableScore*.8)+(boxScore*.2);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const targetUsers=plan?.targetUsers||Math.max(metric.actualUsers,1);
+const targetUsers=Number(dashboardTarget.users||plan?.targetUsers||metric.actualUsers||1);
 const usersPct=Math.min(100,(metric.actualUsers/Math.max(targetUsers,1))*100);
 const latest=metric.latestDate||[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'';
 const timelineStart=plan?.start||ROLLOUT_DASHBOARD_PLAN.map(p=>p.start).sort()[0]||latest;
 const timelineEnd=plan?.end||ROLLOUT_DASHBOARD_PLAN.map(p=>p.end).sort().pop()||latest;
 const totalDays=rolloutDaysInclusive(timelineStart,timelineEnd);
 const selectedDate=rolloutDashboardFilters.date||latest||new Date().toISOString().slice(0,10);
-const elapsedDays=Math.min(totalDays,Math.max(1,rolloutDaysInclusive(timelineStart,selectedDate)));
+const timelineStartMs=new Date(`${timelineStart}T00:00:00`).getTime();
+const selectedDateMs=new Date(`${selectedDate}T00:00:00`).getTime();
+const elapsedDays=Number.isFinite(timelineStartMs)&&Number.isFinite(selectedDateMs)?Math.min(totalDays,Math.max(0,Math.floor((selectedDateMs-timelineStartMs)/86400000)+1)):0;
 const plannedPct=Math.max(0,Math.min(100,totalDays?(elapsedDays/totalDays)*100:0));
 const actualPct=Math.max(0,Math.min(100,productivity));
 const diff=actualPct-plannedPct;
@@ -1333,7 +1347,7 @@ const areaName=displayedArea||'All Areas';
 const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
-const topRows=allMetricRows.map(r=>{const totalBoxes=r.totalBoxes||0;const prod=((r.cableMeters/maxCableMeters)*80)+((totalBoxes/maxBoxes)*20);return {...r,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
+const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
 table.innerHTML=`
 <div class="rollout-management">
   <div class="mgmt-toolbar">
@@ -1352,8 +1366,8 @@ table.innerHTML=`
     </div>
     <div class="command-kpis">
       <div class="command-kpi"><span>Overall Productivity</span><strong>${actualPct.toFixed(0)}%</strong><small>20% box + 80% cable</small></div>
-      <div class="command-kpi"><span>Cable Progress</span><strong>${fmt(metric.cableMeters)}</strong><small>meters</small></div>
-      <div class="command-kpi"><span>Box Deployment</span><strong>${fmt(metric.totalBoxes)}</strong><small>SUB / END + HUB + XBOX</small></div>
+      <div class="command-kpi"><span>Cable Progress</span><strong>${fmt(metric.cableMeters)}</strong><small>of ${fmt(targetCableMeters)} m</small></div>
+      <div class="command-kpi"><span>Box Deployment</span><strong>${fmt(metric.totalBoxes)}</strong><small>of ${fmt(targetBoxes)} boxes</small></div>
       <div class="command-kpi"><span>Actual Users</span><strong>${fmt(metric.actualUsers)}</strong><small>of ${fmt(targetUsers)} users</small></div>
     </div>
   </div>
@@ -1376,8 +1390,8 @@ table.innerHTML=`
     </div>
   </div>
   <div class="rollout-mini-panels">
-    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.cableMeters,maxCableMeters)}%"></div></div><strong>${fmt(r.cableMeters)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
-    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} · HUB ${fmt(r.hubBox)} · XBOX ${fmt(r.xbox)}</small></div><strong>${fmt(r.totalBoxes)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
+    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${Math.min(100,Number(r.cablePct||0))}%"></div></div><strong>${fmt(r.cableMeters)} / ${fmt(r.target?.cableMeters||0)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
+    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} / ${fmt(r.target?.subEndBox||0)} · HUB ${fmt(r.hubBox)} / ${fmt(r.target?.hubBox||0)} · XBOX ${fmt(r.xbox)} / ${fmt(r.target?.xbox||0)}</small></div><strong>${fmt(r.totalBoxes)} / ${fmt(r.target?.totalBoxes||0)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
   </div>
 </div>`;
 const dashboardSelects=table.querySelectorAll('.mgmt-toolbar select');
