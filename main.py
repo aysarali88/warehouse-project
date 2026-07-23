@@ -1352,6 +1352,61 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
     return issue.order_number
 
 
+def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
+    restored = 0.0
+    movements = (
+        db.query(StockMovement)
+        .filter(StockMovement.reference == row.order_number, StockMovement.movement_type == "issue_to_technician")
+        .all()
+    )
+    for movement in movements:
+        qty = abs(movement.quantity or 0)
+        if movement.warehouse_id and movement.product_id:
+            stock_balance(db, movement.warehouse_id, movement.product_id).quantity += qty
+            restored += qty
+        if movement.technician_id and movement.product_id:
+            tech_balance = technician_balance(db, movement.technician_id, movement.product_id)
+            tech_balance.quantity = max(0, (tech_balance.quantity or 0) - qty)
+        db.delete(movement)
+
+    issue_numbers: set[str] = set()
+    audits = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.action == "issue_material_requisition",
+            AuditLog.entity_type == "material_requisition",
+            AuditLog.entity_id == row.order_number,
+        )
+        .all()
+    )
+    for audit in audits:
+        try:
+            details = json.loads(audit.details or "{}")
+        except Exception:
+            details = {}
+        issue_order = str(details.get("issue_order") or "").strip()
+        if issue_order:
+            issue_numbers.add(issue_order)
+    if issue_numbers:
+        for issue in db.query(IssueOrder).filter(IssueOrder.order_number.in_(issue_numbers)).all():
+            db.delete(issue)
+
+    db.query(MaterialScanLog).filter(MaterialScanLog.material_requisition_id == row.id).delete(synchronize_session=False)
+    order_number = row.order_number
+    status = row.status
+    db.delete(row)
+    log_audit(
+        db,
+        "delete_material_requisition",
+        "material_requisition",
+        order_number,
+        actor or "admin",
+        {"status": status, "restored_quantity": restored, "deleted_issue_orders": sorted(issue_numbers)},
+    )
+    clear_warehouse_cache()
+    return {"order_number": order_number, "restored_quantity": restored, "deleted_issue_orders": sorted(issue_numbers)}
+
+
 @app.get("/")
 def home():
     return FileResponse("static/materials_inventory.html")
@@ -3532,6 +3587,27 @@ def issue_material_requisition(requisition_id: int, data: MaterialRequisitionAct
     db.refresh(row)
     notify_mr_issued(row, db)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-requisitions/{requisition_id}/delete")
+def delete_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
+    if normalize_usage_key(data.title) != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    row = (
+        db.query(MaterialRequisition)
+        .options(selectinload(MaterialRequisition.items), joinedload(MaterialRequisition.warehouse))
+        .filter(MaterialRequisition.id == requisition_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
+    try:
+        result = delete_material_requisition_row(db, row, data.actor)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"success": True, **result}
 
 
 @app.post("/api/warehouse/receive")
