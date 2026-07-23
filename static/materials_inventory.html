@@ -1341,13 +1341,30 @@ table.innerHTML=`
     <div class="field"><label>City</label><select onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
     <div class="field"><label>Area</label><select onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
   </div>
-  <div class="mgmt-key-label">Key Metrics · ${esc(areaName)}</div>
-  <div class="mgmt-kpis">
-    <div class="mgmt-card"><h3>Overall productivity</h3><small>20% box + 80% cable progress</small><div class="big">${actualPct.toFixed(0)}% <span class="ratio">weighted</span></div><div class="mgmt-progress"><i style="width:${actualPct}%"></i></div></div>
-    <div class="mgmt-card"><h3>Cable progress</h3><small>Core + distribution cable length</small><div class="big"><span class="accent">${fmt(metric.cableMeters)}</span><span class="ratio">m</span></div><div class="mgmt-progress"><i style="width:${Math.min(100,cableScore)}%"></i></div></div>
-    <div class="mgmt-card"><h3>Box deployment</h3><small>SUB / END, HUB, and XBOX</small><div class="big"><span class="teal">${fmt(metric.totalBoxes)}</span><span class="ratio">BOX</span></div><div class="mgmt-box-lines"><div><span>XBOX</span><b>${fmt(metric.xbox)}</b></div><div><span>HUB BOX</span><b>${fmt(metric.hubBox)}</b></div><div><span>SUB / END BOX</span><b>${fmt(metric.subEndBox)}</b></div></div><div class="mgmt-progress"><i class="teal" style="width:${Math.min(100,boxScore)}%"></i></div></div>
-    <div class="mgmt-card blue"><h3>Actual users</h3><small>Installed distribution and 4-core cables × 8</small><div class="big"><span class="accent">${fmt(metric.actualUsers)}</span><span class="ratio">/ ${fmt(targetUsers)} users</span></div><small>${fmt(metric.distributionQty+metric.fourCoreQty)} / ${fmt(Math.ceil(targetUsers/8))} user cable units</small><div class="mgmt-progress"><i style="width:${usersPct}%"></i></div></div>
-    <div class="mgmt-card red"><h3>Project note</h3><div class="mgmt-note">${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</div><small style="margin-top:12px">Records: ${fmt(scopedRows.length)} · Latest: ${esc(rolloutDashDateLabel(latest))}</small></div>
+  <div class="command-hero">
+    <div class="command-head">
+      <div class="command-health">System healthy</div>
+      <div class="command-title">
+        <small>Live Rollout Command Center <span class="pulse-dot"></span></small>
+        <h3>Rollout Progress Dashboard</h3>
+        <p>${esc(areaName)} · ${esc(rolloutDashboardFilters.city||'All Cities')} · ${esc(rolloutDashDateLabel(latest))}</p>
+      </div>
+    </div>
+    <div class="command-kpis">
+      <div class="command-kpi"><span>Overall Productivity</span><strong>${actualPct.toFixed(0)}%</strong><small>20% box + 80% cable</small></div>
+      <div class="command-kpi"><span>Cable Progress</span><strong>${fmt(metric.cableMeters)}</strong><small>meters</small></div>
+      <div class="command-kpi"><span>Box Deployment</span><strong>${fmt(metric.totalBoxes)}</strong><small>SUB / END + HUB + XBOX</small></div>
+      <div class="command-kpi"><span>Actual Users</span><strong>${fmt(metric.actualUsers)}</strong><small>of ${fmt(targetUsers)} users</small></div>
+    </div>
+  </div>
+  <div class="status-strip" style="margin:4px 0 2px">
+    <div class="status-tile good"><span>Installed</span><strong>${fmt(metric.distributionQty+metric.fourCoreQty)}</strong></div>
+    <div class="status-tile warn"><span>Planned Pace</span><strong>${plannedPct.toFixed(0)}%</strong></div>
+    <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div><strong>${fmt(scopedRows.length)}</strong></div><div class="mini-row"><div><b>Latest Update</b><small>Latest record date in the selected scope</small></div><strong>${esc(rolloutDashDateLabel(latest))}</strong></div></div></div>
+    <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
   </div>
   <div class="mgmt-timeline">
     <div class="mgmt-timeline-head"><div><h3>Project timeline</h3><p>One line comparing planned pace and actual output.</p></div><span class="timeline-status ${timelineGood?'good':''}">${timelineGood?'On track':'Behind schedule'}</span></div>
