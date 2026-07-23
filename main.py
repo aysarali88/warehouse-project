@@ -2262,14 +2262,20 @@ def list_stock_usage(db: Session = Depends(db_session)):
             .all()
         )
     }
+    reset_at = (
+        db.query(func.max(AuditLog.created_at))
+        .filter(AuditLog.action.in_(["replace_inventory_from_final_wh", "recorrect_inventory_to_final_wh_only"]))
+        .scalar()
+    )
+    consumed_query = (
+        db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
+        .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]))
+    )
+    if reset_at:
+        consumed_query = consumed_query.filter(StockMovement.created_at > reset_at)
     consumed_totals = {
         (warehouse_id, product_id): total or 0
-        for warehouse_id, product_id, total in (
-            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]))
-            .group_by(StockMovement.warehouse_id, StockMovement.product_id)
-            .all()
-        )
+        for warehouse_id, product_id, total in consumed_query.group_by(StockMovement.warehouse_id, StockMovement.product_id).all()
     }
     adjustment_totals = {
         (warehouse_id, product_id): total or 0
@@ -2302,7 +2308,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         total_consumed = consumed_totals.get(key, 0)
         total_adjustment = adjustment_totals.get(key, 0)
         remaining = balance.quantity or 0
-        display_total = remaining
+        display_total = remaining + total_consumed
         denominator = display_total if display_total > 0 else total_received
         usage_percent = round((total_consumed / denominator) * 100, 2) if denominator else 0
         product_name = product_display_name(balance.product)
@@ -2325,6 +2331,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
                 "total_consumed": total_consumed,
                 "total_adjustment": total_adjustment,
                 "remaining": remaining,
+                "wh_remaining": remaining,
                 "usage_percent": usage_percent,
                 "rollout_consumed_qty": rollout_consumed,
                 "remaining_after_rollout": remaining_after_rollout,
