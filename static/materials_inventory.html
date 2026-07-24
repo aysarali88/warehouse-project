@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
@@ -50,7 +50,7 @@
   .view{gap:12px}
   .card,.dash-panel,.viz-panel,.ops-card{border-radius:12px;padding:13px;box-shadow:0 8px 22px rgba(23,34,52,.05)}
   .card h3,.dash-panel h3,.viz-panel h3{font-size:16px;margin-bottom:10px}
-  .form,.two,.three,.kpis,.workflow-grid,.split-panel,.ops-grid,.command-kpis,.viz-grid,.workflow-lane,.mr-stock-summary,.scan-progress,.report-tools{grid-template-columns:1fr!important}
+  .form,.two,.three,.kpis,.workflow-grid,.split-panel,.ops-grid,.command-kpis,.viz-grid,.workflow-lane,.mr-stock-summary,.scan-progress,.report-tools,.map-summary{grid-template-columns:1fr!important}
   .field{gap:6px}
   .field label{font-size:12px}
   input,select,textarea{border-radius:10px;font-size:16px;padding-inline:12px}
@@ -355,7 +355,16 @@ th{
   .card,.dash-panel,.viz-panel,.ops-card,.modal-box,.login-card{border-radius:16px}
 }
 .rollout-management{display:grid;gap:14px;direction:ltr;text-align:left}.rollout-management .mgmt-toolbar{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;align-items:end}.rollout-management .mgmt-toolbar .field{min-width:160px}.mgmt-key-label{color:#7b5b46;font-size:11px;font-weight:900;letter-spacing:2px;text-transform:uppercase}.mgmt-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.mgmt-card{min-height:150px;border:1px solid #eadfce;border-radius:8px;background:linear-gradient(180deg,#fffdf8,#fffaf0);padding:14px;box-shadow:0 12px 26px rgba(70,45,20,.06);position:relative;overflow:hidden}.mgmt-card.blue{border-color:#cfe0fb}.mgmt-card.red{border-color:#f0cece;background:linear-gradient(180deg,#fffafa,#fff5f2)}.mgmt-card h3{margin:0 0 5px;color:#2c2c2c;font-size:14px}.mgmt-card small{display:block;color:#6e645a;font-weight:900;font-size:11px;line-height:1.5}.mgmt-card .big{font-size:33px;font-weight:900;color:#2b2b2b;margin-top:14px;display:flex;align-items:flex-end;gap:10px}.mgmt-card .accent{color:#2e7ad8}.mgmt-card .teal{color:#178c92}.mgmt-card .ratio{font-size:15px;color:#2b2b2b}.mgmt-progress{height:7px;background:#dedbd2;border-radius:99px;overflow:hidden;margin-top:14px}.mgmt-progress i{display:block;height:100%;border-radius:99px;background:#2e7ad8}.mgmt-progress i.teal{background:#178c92}.mgmt-progress i.red{background:#df3b35}.mgmt-box-lines{display:grid;gap:6px;margin-top:10px}.mgmt-box-lines div{display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:900;color:#403b35}.mgmt-note{font-size:12px;font-weight:900;line-height:1.8;color:#6a5146}.mgmt-timeline{border:1px solid #eadfce;border-radius:8px;background:linear-gradient(180deg,#fffdf8,#fffaf0);padding:16px;box-shadow:0 12px 26px rgba(70,45,20,.05)}.mgmt-timeline-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.mgmt-timeline h3{margin:0 0 6px;color:#2b2b2b}.mgmt-timeline p{margin:0;color:#6e645a;font-weight:800;font-size:12px}.timeline-status{border-radius:999px;padding:8px 13px;background:#ffe5e5;color:#c93535;font-weight:900;font-size:12px}.timeline-status.good{background:#e6f6ed;color:#168a4a}.timeline-box{margin-top:14px;border:1px solid #eadfce;border-radius:8px;padding:16px;background:rgba(255,255,255,.6)}.timeline-dates{display:flex;justify-content:space-between;font-weight:900;font-size:12px;color:#111;margin-bottom:26px}.timeline-track{position:relative;height:12px;border-radius:99px;background:#d8d4c9}.timeline-track .planned-line{position:absolute;inset-block:0;left:0;border-radius:99px;background:#6ca7dd}.timeline-marker{position:absolute;top:-12px;transform:translateX(-50%);display:grid;justify-items:center;gap:4px;font-weight:900;color:#1f6fc6}.timeline-marker.actual{color:#df3b35}.timeline-marker:before{content:"";width:7px;height:36px;border-radius:99px;background:currentColor}.timeline-marker span{border:1px solid currentColor;border-radius:7px;padding:4px 7px;background:#fff;font-size:11px;white-space:nowrap}.timeline-ticks{display:grid;grid-template-columns:repeat(3,1fr);margin-top:58px;text-align:center;color:#2c6aa4;font-weight:900;font-size:11px}.timeline-ticks span{display:block;color:#617182;margin-top:3px}.timeline-foot{margin-top:12px;color:#0b4d95;font-weight:900;font-size:12px}.rollout-mini-panels{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rollout-mini-panels .dash-panel{box-shadow:none}.rollout-management .chart-row{grid-template-columns:135px 1fr 84px}
-@media(max-width:960px){.mgmt-kpis,.rollout-mini-panels{grid-template-columns:1fr}.rollout-management .mgmt-toolbar{justify-content:stretch}.rollout-management .mgmt-toolbar .field{min-width:0}.timeline-ticks{margin-top:70px}.rollout-management .chart-row{grid-template-columns:1fr!important}}
+.rollout-management .mgmt-key-label{color:#0b4d95}.rollout-management .mgmt-card{border:1px solid rgba(25,72,124,.08);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.98) 0%,rgba(247,251,255,.96) 100%);box-shadow:0 18px 40px rgba(17,40,70,.08)}.rollout-management .mgmt-card:before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:linear-gradient(#2148f5,#13a6a7)}.rollout-management .mgmt-card.blue,.rollout-management .mgmt-card.red{border-color:rgba(25,72,124,.08);background:linear-gradient(180deg,rgba(255,255,255,.98) 0%,rgba(247,251,255,.96) 100%)}.rollout-management .mgmt-card.red:before{background:linear-gradient(#0b4d95,#18a05c)}.rollout-management .mgmt-card h3{color:#0b4d95}.rollout-management .mgmt-card small,.rollout-management .mgmt-note{color:#5f7387}.rollout-management .mgmt-card .big{color:#0a335d}.rollout-management .mgmt-card .ratio{color:#38556f}.rollout-management .mgmt-card .accent{color:#2148f5}.rollout-management .mgmt-card .teal{color:#13a6a7}.rollout-management .mgmt-progress{background:#e8f0f7}.rollout-management .mgmt-progress i{background:linear-gradient(90deg,#2148f5,#0b81b8)}.rollout-management .mgmt-progress i.teal{background:linear-gradient(90deg,#0b81b8,#13a06f)}.rollout-management .mgmt-box-lines div{color:#38556f}.rollout-management .mgmt-timeline{border:1px solid rgba(25,72,124,.08);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.98) 0%,rgba(247,251,255,.96) 100%);box-shadow:0 18px 40px rgba(17,40,70,.08)}.rollout-management .mgmt-timeline h3{color:#0b4d95}.rollout-management .mgmt-timeline p{color:#5f7387}.rollout-management .timeline-box{border-color:#d8e6f1;border-radius:16px;background:#fff}.rollout-management .timeline-track{background:#e8f0f7}.rollout-management .timeline-track .planned-line{background:linear-gradient(90deg,#2148f5,#0b81b8)}.rollout-management .timeline-marker{color:#2148f5}.rollout-management .timeline-marker.actual{color:#13a6a7}.rollout-management .timeline-foot{color:#0b4d95}
+.rollout-support{border:1px solid rgba(25,72,124,.08);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(247,251,255,.96));box-shadow:0 18px 40px rgba(17,40,70,.08);padding:16px;position:relative;overflow:hidden}.rollout-support:before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:linear-gradient(#2148f5,#13a6a7)}.rollout-support-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}.rollout-support h3{margin:0;color:#0b4d95;font-size:16px}.rollout-support .tag{border-radius:999px;background:#e8f3ff;color:#2148f5;border:1px solid #cde1ff;padding:7px 11px;font-size:11px;font-weight:900}.survey-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.survey-tile{border:1px solid #d8e6f1;border-radius:14px;background:#fff;padding:13px}.survey-tile span{display:block;color:#5f7387;font-size:12px;font-weight:900}.survey-tile strong{display:block;color:#0a335d;font-size:25px;margin-top:6px}.survey-tile small{display:block;color:#d33333;font-weight:900;font-style:italic;margin-top:6px}.shipment-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border:1px solid #d8e6f1;border-radius:14px;background:#fff}.shipment-table th,.shipment-table td{padding:11px 12px;border-bottom:1px solid #d8e6f1;text-align:left;font-size:12px}.shipment-table th{background:#eef6fb;color:#0a335d;text-transform:uppercase;letter-spacing:.8px;font-weight:900}.shipment-table tr:last-child td{border-bottom:0}.shipment-table b{color:#0a335d}.ship-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 10px;font-weight:900;font-size:11px}.ship-chip.done{background:#e7f6ed;color:#168a4a}.ship-chip.pending{background:#fff8e9;color:#a46400}
+.rollout-map-board{display:grid;gap:14px;direction:ltr;text-align:left}.rollout-map-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border:1px solid rgba(25,72,124,.08);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(247,251,255,.96));box-shadow:0 18px 40px rgba(17,40,70,.08);padding:16px}.rollout-map-head h3{margin:0;color:#0b4d95;font-size:18px}.rollout-map-head p{margin:5px 0 0;color:#5f7387;font-size:12px;font-weight:800}.rollout-map-layout{display:grid;gap:14px}.map-stage{position:relative;overflow:auto;border:1px solid #d8e6f1;border-radius:18px;background:#fff;box-shadow:0 18px 40px rgba(17,40,70,.08);padding:10px}.map-stage img{display:block;width:1440px;max-width:none;height:auto}.map-source-node,.map-link,.map-trunk{display:none}.map-source-node{position:absolute;left:92px;top:22px;z-index:4;width:150px;color:#f10;font-weight:900;text-align:center}.map-source-node b{display:block;font-size:28px;margin-bottom:8px}.map-source-box{border:2px solid #0a2f47;background:#fff;padding:8px 6px}.map-source-row{display:flex;align-items:center;gap:3px;height:5px;margin:3px 0}.map-source-row span{height:3px;flex:1;border-radius:999px}.map-source-row i{width:7px;height:7px;background:#f10;border-radius:999px}.map-link{position:absolute;left:170px;width:26px;height:3px;background:#f10;z-index:3}.map-trunk{position:absolute;left:166px;top:90px;width:3px;height:5170px;background:#f10;z-index:3}.map-chip{position:absolute;transform:translate(-50%,-50%);color:#d53333;font-size:11px;font-weight:900;white-space:nowrap;z-index:2;pointer-events:auto}.map-chip.ok{color:#18a05c}.map-chip.diff{color:#0b81d8}.map-chip.box{width:18px;height:18px;border:3px solid currentColor;background:rgba(255,255,255,.08);border-radius:999px;display:grid;place-items:center;font-size:0;text-shadow:none;box-shadow:0 0 0 3px rgba(255,255,255,.92),0 3px 10px rgba(17,40,70,.18)}.map-chip.hub{width:76px;height:54px;border-radius:10px;font-size:16px;background:rgba(255,255,255,.84);box-shadow:0 0 0 3px rgba(255,255,255,.92),0 5px 14px rgba(17,40,70,.18)}.map-chip.cable{width:66px;height:8px;border-radius:999px;background:currentColor;box-shadow:0 0 0 3px rgba(255,255,255,.92),0 3px 12px rgba(17,40,70,.16);opacity:.92}.map-chip.core{width:96px;height:10px}.map-chip.cable:after{content:none}.map-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.map-summary .status-tile{background:#fff;box-shadow:0 10px 28px rgba(17,40,70,.06)}.map-note{border:1px dashed #cde1ff;border-radius:14px;background:#f8fbff;color:#38556f;padding:12px;font-size:12px;line-height:1.7;font-weight:800}.map-list{grid-column:1/-1;border:1px solid #d8e6f1;border-radius:14px;background:#fff;overflow:hidden}.map-list-row{display:grid;grid-template-columns:90px 1fr auto;gap:8px;align-items:center;padding:9px 10px;border-bottom:1px solid #eef3f7;font-size:12px}.map-list-row:last-child{border-bottom:0}.map-list-row b{color:#0a335d}.map-status{border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.map-status.ok{background:#e7f6ed;color:#168a4a}.map-status.diff{background:#e8f3ff;color:#0b81d8}.map-status.miss{background:#fdecec;color:#c93535}
+.fiber-map-svg{display:block;width:2400px;max-width:none;height:auto;min-width:1500px}.fiber-map-svg .conn-title{fill:#f00;font-size:54px;font-weight:500}.fiber-map-svg .conn-small-label{fill:#111827;font-size:21px;font-weight:800}.fiber-map-svg .conn-xbox-panel{fill:#effaf3;stroke:#16a34a;stroke-width:3}.fiber-map-svg .conn-hub{fill:#fff;stroke:#16a34a;stroke-width:4}.fiber-map-svg .conn-hub.missing{stroke:#f00;fill:#fff3f3}.fiber-map-svg .conn-hub-text{fill:#f00;font-size:54px;font-weight:500}.fiber-map-svg .conn-route-line{fill:none;stroke:#f00;stroke-width:3}.fiber-map-svg .conn-route-line.installed{stroke:#16a34a}.fiber-map-svg .conn-route-line.mismatch{stroke:#1778ff}.fiber-map-svg .conn-fiber-line{fill:none;stroke:#111827;stroke-width:4;stroke-linecap:round}.fiber-map-svg .conn-drop-segment{stroke:#f00;stroke-width:3;stroke-linecap:round}.fiber-map-svg .conn-drop-segment.installed{stroke:#16a34a}.fiber-map-svg .conn-drop-segment.mismatch{stroke:#1778ff}.fiber-map-svg .conn-route-dot{fill:#f00}.fiber-map-svg .conn-route-dot.installed{fill:#16a34a}.fiber-map-svg .conn-route-dot.mismatch{fill:#1778ff}.fiber-map-svg .conn-route-label,.fiber-map-svg .conn-segment-label{fill:#f00;font-size:20px;font-weight:800}.fiber-map-svg .conn-route-label.installed,.fiber-map-svg .conn-segment-label.installed{fill:#168a4a}.fiber-map-svg .conn-route-label.mismatch,.fiber-map-svg .conn-segment-label.mismatch{fill:#1778ff}.fiber-map-svg .conn-segment-label{font-size:15px;font-weight:900}.fiber-map-svg .conn-node circle{fill:#fff;stroke:#f00;stroke-width:3}.fiber-map-svg .conn-node.installed circle{fill:#eefbf3;stroke:#16a34a}.fiber-map-svg .conn-node.mismatch circle{fill:#eaf3ff;stroke:#1778ff}.fiber-map-svg .conn-node-code,.fiber-map-svg .conn-node-type,.fiber-map-svg .conn-node-db,.fiber-map-svg .conn-node-meta{fill:#f00;font-weight:900}.fiber-map-svg .conn-node.installed .conn-node-code,.fiber-map-svg .conn-node.installed .conn-node-type,.fiber-map-svg .conn-node.installed .conn-node-db,.fiber-map-svg .conn-node.installed .conn-node-meta{fill:#007a2d}.fiber-map-svg .conn-node.mismatch .conn-node-code,.fiber-map-svg .conn-node.mismatch .conn-node-type,.fiber-map-svg .conn-node.mismatch .conn-node-db,.fiber-map-svg .conn-node.mismatch .conn-node-meta{fill:#1778ff}.fiber-map-svg .conn-node-code{font-size:15px}.fiber-map-svg .conn-node-type{font-size:15px}.fiber-map-svg .conn-node-db,.fiber-map-svg .conn-node-meta{font-size:13px}.fiber-map-svg .conn-port{fill:#111827;stroke:#111827}.fiber-map-svg .conn-port-number{fill:#f00;font-size:15px;font-weight:900}
+@media(max-width:960px){.mgmt-kpis,.rollout-mini-panels,.rollout-map-layout{grid-template-columns:1fr}.rollout-management .mgmt-toolbar{justify-content:stretch}.rollout-management .mgmt-toolbar .field{min-width:0}.timeline-ticks{margin-top:70px}.rollout-management .chart-row{grid-template-columns:1fr!important}.rollout-map-head{display:grid}.map-legend{justify-content:flex-start}.map-stage img{min-width:760px}}
+/* Dynamic map overlay: preserve the original schematic and only add live status colors. */
+.map-chip{z-index:5}.map-chip.box{width:24px;height:24px}.map-chip.hub{width:92px;height:62px;font-size:18px}.map-chip.cable{width:84px;height:9px}.map-chip.core{width:118px;height:11px}.map-chip.cable:after{content:attr(data-label);position:absolute;left:50%;top:-19px;transform:translateX(-50%);color:currentColor;background:rgba(255,255,255,.92);padding:1px 4px;border-radius:4px;font-size:10px;font-weight:900}
+/* Keep the structured fiber map inside the available page width. */
+.fiber-map-svg{width:100%;max-width:100%;min-width:0;height:auto}
+.map-stage{overflow-x:hidden}
 </style>
 </head>
 <body>
@@ -446,10 +455,12 @@ th{
       <div class="tabs" style="margin:14px 0">
         <button class="tab active" data-rollout-daily-tab="kpi" onclick="switchRolloutDailyTab('kpi')">Summary</button>
         <button class="tab" data-rollout-daily-tab="compare" onclick="switchRolloutDailyTab('compare')">Warehouse vs Field</button>
+        <button class="tab" data-rollout-daily-tab="map" onclick="switchRolloutDailyTab('map')">Map</button>
         <button class="tab" data-rollout-daily-tab="report" onclick="switchRolloutDailyTab('report')">Area PDF</button>
       </div>
       <div id="rolloutDailyKpi" class="rollout-daily-panel"></div>
       <div id="rolloutDailyCompare" class="rollout-daily-panel" style="display:none"></div>
+      <div id="rolloutDailyMap" class="rollout-daily-panel" style="display:none"></div>
       <div id="rolloutDailyReport" class="rollout-daily-panel" style="display:none"></div>
       <div id="rolloutDailyTable" style="display:none"></div>
     </div>
@@ -867,9 +878,9 @@ let currentEditingMrId=null;
 let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
 const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2'],Misurata:['Maqawba']};
 const ROLLOUT_DASHBOARD_PLAN=[
-  {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
-  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetUsers:2368,note:'Execution risk update'},
-  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetUsers:3284,note:'Execution risk update'}
+  {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
+  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetSubEndBox:292,targetHubBox:23,targetXbox:2,targetCableMeters:32630,targetUsers:2368,note:'Execution risk update'},
+  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:432,targetHubBox:30,targetXbox:3,targetCableMeters:43190,targetUsers:3284,note:'Execution risk update'}
 ];
 const titles={dashboard:['Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -1230,11 +1241,45 @@ function renderRolloutReport(){const selects=['rolloutReportArea','rolloutDailyR
 function setRolloutReportArea(value){selectedRolloutReportArea=value||'All Areas';if(document.querySelector('.view.active')?.id==='rolloutDaily')renderRolloutDailyProgress();else renderRolloutReport()}
 function renderRolloutUsage(){renderRolloutReport();const rows=wh.rolloutUsage||[];if(!rows.length){document.getElementById('rolloutUsageTable').innerHTML=`<div class="empty">لا توجد بيانات MR للمقارنة. Rollout records loaded: ${fmt(wh.rolloutRecords)}</div>`;return}document.getElementById('rolloutUsageTable').innerHTML=rowsTable([['المنطقة','area'],['Site Address','site_address'],['المادة','material'],['SKU','sku'],['MR Issued','mr_issued_qty',(v)=>fmt(v)],['Rollout Used','rollout_used_qty',(v)=>fmt(v)],['Remaining','remaining_after_rollout',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['Match','usage_match',(v)=>rolloutMatchLabel(v)],['Receiver','technician'],['Last MR','last_mr']],rows)}
 async function downloadRolloutReportPdf(selectId='rolloutDailyReportArea'){const select=document.getElementById(selectId)||document.getElementById('rolloutReportArea');if(select)selectedRolloutReportArea=select.value;renderRolloutReport();if(!selectedRolloutReportArea){toast('اختر منطقة أولاً');return}const holder=document.createElement('div');holder.style.position='fixed';holder.style.left='-10000px';holder.style.top='0';holder.style.background='#fff';holder.innerHTML=rolloutReportHtml(selectedRolloutReportArea);document.body.appendChild(holder);const el=holder.querySelector('.rollout-report-sheet');try{await waitForImages(el);const name=`Rollout-Progress-${String(selectedRolloutReportArea||'Area').replace(/[^\w\u0600-\u06FF-]+/g,'_')}.pdf`;await downloadSinglePagePdf(el,name);toast('تم تنزيل تقرير Rollout PDF صفحة واحدة')}catch(e){console.error(e);toast('تعذر تنزيل PDF: '+(e.message||'استخدم الطباعة ثم Save as PDF'))}finally{holder.remove()}}
-function switchRolloutDailyTab(tab='kpi'){document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));const panels={kpi:'rolloutDailyKpi',compare:'rolloutDailyCompare',report:'rolloutDailyReport'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'})}
-function rolloutVarianceLabel(row){const diff=Number(row.remaining_after_rollout||0);if(diff===0)return '<span class="ok">Matched</span>';if(diff>0)return `<span class="bad">Open ${fmt(diff)}</span>`;return `<span class="bad">Over ${fmt(Math.abs(diff))}</span>`}
+function switchRolloutDailyTab(tab='kpi'){document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));const panels={kpi:'rolloutDailyKpi',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'})}
+function x4BranchElements(){
+const branchLengths={
+1:[[100,150,80],[50,100,50,100],[80,80,80,50]],2:[[250,50,150,100],[250,50,50,50],[5,80,80,80],[200,80,80,50]],
+3:[[50,150],[150,50,50,100],[80,150,80,50],[50,100,50,80]],4:[[100,100,50,80],[80,150,80,100],[5,50,80,80]],
+5:[[50,50,50],[50,80,80],[80,80,150],[50,80,50,50]],6:[[50,80,50,150],[50,50,50,50],[100,150,80,100],[100,50,100,50]],
+7:[[50,50,150,150],[80],[80,150,200,50],[80,80,80,50]],8:[[150,80,150,200],[80,80,150,80],[80,100,50,50],[50,50,100,80]],
+9:[[80,150],[50,80,100,50],[100],[50]],10:[[50,80],[50,80],[50,150],[5,80,150,80]],
+11:[[50,80,50],[50,80,80,200],[50,50,80,80]],12:[[50,80,100,80],[80,80,80],[50,80,50,50],[50,50,80,100]],
+13:[[150,50,50,100],[80,50,150],[50,80,80,50],[100,80,150,80]],14:[[50,50,100],[50,80],[50,200,50,50]]
+};
+const xs={odd:[56.9,62.7,68.4,74.2],even:[75.5,81.2,86.8,92.5]};
+const elements=[];
+Object.entries(branchLengths).forEach(([hub,lanes])=>{
+  const h=Number(hub), pair=Math.floor((h-1)/2), baseY=7.0+(pair*13.2), col=h%2?'odd':'even';
+  lanes.forEach((lengths,laneIdx)=>{const y=baseY+(laneIdx*3.0);lengths.forEach((len,i)=>{
+    const code=`H${h}-L${laneIdx+1}-S${i+1}`, x=xs[col][i];
+    elements.push({type:'box',code,label:`S${i+1}`,left:x,top:y});
+    elements.push({type:'drop',code,label:`${len}m`,expectedLength:len,left:x-2.0,top:y+0.35});
+  })});
+});
+return elements;
+}
+const ROLLOUT_MAP_PAGES=[{id:'hay-andalus-xbox4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',city:'Tripoli',xbox:'X4',image:'/static/assets/hay-andalus-x4-map.png',source:false,elements:[
+  {type:'hub',code:'X4-H1',label:'H1',left:53.9,top:15.9},{type:'hub',code:'X4-H2',label:'H2',left:71.5,top:15.9},{type:'hub',code:'X4-H3',label:'H3',left:53.9,top:29.2},{type:'hub',code:'X4-H4',label:'H4',left:71.5,top:29.2},
+  {type:'hub',code:'X4-H5',label:'H5',left:53.9,top:42.6},{type:'hub',code:'X4-H6',label:'H6',left:71.5,top:42.6},{type:'hub',code:'X4-H7',label:'H7',left:53.9,top:55.8},{type:'hub',code:'X4-H8',label:'H8',left:71.5,top:55.8},
+  {type:'hub',code:'X4-H9',label:'H9',left:53.9,top:69.0},{type:'hub',code:'X4-H10',label:'H10',left:71.5,top:69.0},{type:'hub',code:'X4-H11',label:'H11',left:53.9,top:82.4},{type:'hub',code:'X4-H12',label:'H12',left:71.5,top:82.4},
+  {type:'hub',code:'X4-H13',label:'H13',left:53.9,top:95.0},{type:'hub',code:'X4-H14',label:'H14',left:71.5,top:95.0},
+  {type:'4-core',code:'H1-H2',label:'500m',expectedLength:500,left:68.4,top:15.9},{type:'4-core',code:'H3-H4',label:'200m',expectedLength:200,left:68.4,top:29.2},{type:'4-core',code:'H5-H6',label:'200m',expectedLength:200,left:68.4,top:42.6},{type:'4-core',code:'H7-H8',label:'200m',expectedLength:200,left:68.4,top:55.8},{type:'4-core',code:'H9-H10',label:'150m',expectedLength:150,left:68.4,top:69.0},{type:'4-core',code:'H11-H12',label:'100m',expectedLength:100,left:68.4,top:82.4},{type:'4-core',code:'H13-H14',label:'300m',expectedLength:300,left:68.4,top:95.0},
+  ...x4BranchElements()
+]}];
+function normalizeMapCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9]/g,'').replace(/([HLS])0+(\d)/g,'$1$2')}
+function rolloutMapRowText(row){return Object.values(row||{}).map(v=>String(v||'')).join(' ')}
+function rolloutMapRowHasCode(row,code){const target=normalizeMapCode(code);const rowText=normalizeMapCode([row.ID,row['cable code'],row['box code'],row['Cable route'],row['Related to XBOX'],row.Notes].join(' '));if(rowText.includes(target))return true;const xHub=String(code||'').toUpperCase().match(/^(X\d+)-H0?(\d+)$/);if(xHub){return normalizeMapCode(row['Related to XBOX'])===normalizeMapCode(xHub[1])&&normalizeMapCode(row['box code'])===normalizeMapCode(`H${xHub[2]}`)}return false}
+function rolloutMapStatus(el,rows){const matches=rows.filter(row=>rolloutMapRowHasCode(row,el.code));if(!matches.length)return{key:'miss',label:'missing',note:'Code not found in rollout rows'};if(el.expectedLength){const exact=matches.some(row=>new RegExp(`(^|[^0-9])${el.expectedLength}\\s*m([^0-9]|$)`,'i').test(rolloutMapRowText(row)));return exact?{key:'ok',label:'correct',note:'Code and planned length found'}:{key:'diff',label:'different',note:'Code found, length not confirmed'}}return{key:'ok',label:'installed',note:'Code found in rollout rows'}}
+function renderRolloutMapPanel(){const box=document.getElementById('rolloutDailyMap');if(!box)return;const page=ROLLOUT_MAP_PAGES[0];box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox)}</p></div></div><div class="map-stage"><img src="${esc(page.image)}" alt="${esc(page.title)}"></div></div>`}function rolloutVarianceLabel(row){const diff=Number(row.remaining_after_rollout||0);if(diff===0)return '<span class="ok">Matched</span>';if(diff>0)return `<span class="bad">Open ${fmt(diff)}</span>`;return `<span class="bad">Over ${fmt(Math.abs(diff))}</span>`}
 function renderRolloutWarehouseVsField(){const box=document.getElementById('rolloutDailyCompare');if(!box)return;const rows=(wh.rolloutUsage||[]).filter(r=>Number(r.mr_issued_qty||0)>0||Number(r.rollout_used_qty||0)>0);if(!rows.length){box.innerHTML='<div class="empty">No warehouse vs field comparison data yet.</div>';return}const totalIssued=rows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const totalInstalled=rows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const totalOpen=rows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);const matchRate=totalIssued?((totalInstalled/totalIssued)*100):0;const viewRows=[...rows].sort((a,b)=>Math.abs(Number(b.remaining_after_rollout||0))-Math.abs(Number(a.remaining_after_rollout||0))||String(a.area).localeCompare(String(b.area)));box.innerHTML=`<div class="workflow-lane" style="margin-bottom:14px"><div class="workflow-pill"><span>Total Issued</span><strong>${fmt(totalIssued)}</strong></div><div class="workflow-pill good"><span>Installed in Field</span><strong>${fmt(totalInstalled)}</strong></div><div class="workflow-pill warn"><span>Open Difference</span><strong>${fmt(totalOpen)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile good"><span>Match Rate</span><strong>${matchRate.toFixed(1)}%</strong></div><div class="status-tile"><span>Compared Lines</span><strong>${fmt(viewRows.length)}</strong></div><div class="status-tile"><span>Areas Covered</span><strong>${fmt(new Set(viewRows.map(r=>r.area)).size)}</strong></div></div>${rowsTable([['Area','area'],['Material','material'],['SKU','sku'],['Issued','mr_issued_qty',(v)=>fmt(v)],['Installed','rollout_used_qty',(v)=>fmt(v)],['Difference','remaining_after_rollout',(v)=>fmt(v)],['Status','usage_match',(v,r)=>rolloutVarianceLabel(r)]],viewRows)}`}
 function renderRolloutAreaReportPanel(productivityRows=[]){const box=document.getElementById('rolloutDailyReport');if(!box)return;const area=selectedRolloutReportArea||'All Areas';if(!area){box.innerHTML='<div class="empty">No area available for report.</div>';return}const isAll=normalizeText(area)==='allareas';const rows=rolloutReportRows(area);const usageRows=(wh.rolloutUsage||[]).filter(r=>isAll||normalizeText(r.area)===normalizeText(area));const areaMetric=isAll?productivityRows.reduce((acc,r)=>({cableMeters:Number(acc.cableMeters||0)+Number(r.cableMeters||0),totalBoxes:Number(acc.totalBoxes||0)+Number(r.totalBoxes||0),actualUsers:Number(acc.actualUsers||0)+Number(r.actualUsers||0),subEndBox:Number(acc.subEndBox||0)+Number(r.subEndBox||0),hubBox:Number(acc.hubBox||0)+Number(r.hubBox||0),xbox:Number(acc.xbox||0)+Number(r.xbox||0)}),{cableMeters:0,totalBoxes:0,actualUsers:0,subEndBox:0,hubBox:0,xbox:0}):(productivityRows.find(r=>normalizeText(r.name)===normalizeText(area))||{cableMeters:0,totalBoxes:0,actualUsers:0,productivity:0,subEndBox:0,hubBox:0,xbox:0});const issued=usageRows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const installed=usageRows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const difference=usageRows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);box.innerHTML=`<div class="report-tools"><div class="field"><label>Select Area</label><select id="rolloutDailyReportArea" onchange="setRolloutReportArea(this.value)"></select></div><button class="btn primary" onclick="downloadRolloutReportPdf('rolloutDailyReportArea')">تنزيل PDF</button></div><div class="workflow-lane" style="margin:14px 0"><div class="workflow-pill"><span>Cable Progress (m)</span><strong>${fmt(areaMetric.cableMeters||0)}</strong></div><div class="workflow-pill good"><span>Box Deployment</span><strong>${fmt(areaMetric.totalBoxes||0)}</strong></div><div class="workflow-pill"><span>Actual Users</span><strong>${fmt(areaMetric.actualUsers||0)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile"><span>Issued to Area</span><strong>${fmt(issued)}</strong></div><div class="status-tile good"><span>Installed</span><strong>${fmt(installed)}</strong></div><div class="status-tile warn"><span>Open Difference</span><strong>${fmt(difference)}</strong></div></div>${rows.length?rowsTable([['Material','description'],['Installed Qty','quantity',(v)=>fmt(v)],['Unit','description',()=>`Pcs.`],['Comments','comments',(v)=>esc(v?[...v].join(', '):'')]],rows):'<div class="empty-soft">No installed materials for this area.</div>'}`;renderRolloutReport()}
-async function refreshRolloutDailyProgress(showToast=true){if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');const stamp=Date.now();const d=await api(`/api/warehouse/rollout-daily-progress?limit=1000&refresh=${stamp}`);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usage=await api(`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
+async function refreshRolloutDailyProgress(showToast=true){if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');const stamp=Date.now();const d=await api(`/api/warehouse/rollout-daily-progress?limit=5000&refresh=${stamp}`);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usage=await api(`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
 function rolloutDashDateLabel(value){if(!value)return 'Latest data';const d=new Date(`${value}T00:00:00`);return isNaN(d)?value:d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
 function rolloutDaysInclusive(start,end){const a=new Date(`${start}T00:00:00`),b=new Date(`${end}T00:00:00`);if(isNaN(a)||isNaN(b))return 0;return Math.max(1,Math.round((b-a)/86400000)+1)}
 function rolloutMetricFromRows(rows){
@@ -1264,12 +1309,23 @@ function rolloutMetricFromRows(rows){
     if(isXbox)metric.xbox+=qty;
   });
   metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
-  metric.actualUsers=(metric.distributionQty+metric.fourCoreQty)*8;
+  metric.actualUsers=metric.distributionQty*8;
   return metric;
 }
 function rolloutPlanFor(city,area){
   if(normalizeText(area)==='allareas')return null;
   return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&normalizeText(p.area)===normalizeText(area))||ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.area)===normalizeText(area))||null;
+}
+function rolloutTargetFor(city,area){
+  const plan=rolloutPlanFor(city,area)||{};
+  return {
+    cableMeters:Number(plan.targetCableMeters||0),
+    subEndBox:Number(plan.targetSubEndBox||0),
+    hubBox:Number(plan.targetHubBox||0),
+    xbox:Number(plan.targetXbox||0),
+    totalBoxes:Number(plan.targetSubEndBox||0)+Number(plan.targetHubBox||0)+Number(plan.targetXbox||0),
+    users:Number(plan.targetUsers||0)
+  };
 }
 function setRolloutDashboardFilter(key,value){
   rolloutDashboardFilters[key]=value||'';
@@ -1277,6 +1333,7 @@ function setRolloutDashboardFilter(key,value){
     const options=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
     rolloutDashboardFilters.area=options.includes(rolloutDashboardFilters.area)?rolloutDashboardFilters.area:(options[0]||'All Areas');
   }
+  if(key==='area'||key==='city')syncWarehouseFiberScope(rolloutDashboardFilters.area);
   renderRolloutDailyProgress();
 }
 function renderRolloutDailyProgress(){
@@ -1289,6 +1346,7 @@ if(!rows.length){
   table.innerHTML='<div class="empty">No rollout progress data loaded yet.</div>';
   renderRolloutWarehouseVsField();
   renderRolloutAreaReportPanel();
+  renderRolloutMapPanel();
   switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
   return;
 }
@@ -1306,23 +1364,26 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)))})).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area))),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
 const metric=rolloutMetricFromRows(scopedRows);
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
-const maxCableMeters=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.cableMeters||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.cableMeters||0)),1);
-const maxBoxes=isAllDashboardArea?Math.max(allMetricRows.reduce((s,r)=>s+Number(r.totalBoxes||0),0),1):Math.max(...allMetricRows.map(r=>Number(r.totalBoxes||0)),1);
-const cableScore=(metric.cableMeters/maxCableMeters)*100;
-const boxScore=(metric.totalBoxes/maxBoxes)*100;
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0)}),{cableMeters:0,totalBoxes:0,users:0}):rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
+const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
+const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
+const boxScore=Math.min(100,(metric.totalBoxes/targetBoxes)*100);
 const productivity=(cableScore*.8)+(boxScore*.2);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const targetUsers=plan?.targetUsers||Math.max(metric.actualUsers,1);
+const targetUsers=Number(dashboardTarget.users||plan?.targetUsers||metric.actualUsers||1);
 const usersPct=Math.min(100,(metric.actualUsers/Math.max(targetUsers,1))*100);
 const latest=metric.latestDate||[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'';
 const timelineStart=plan?.start||ROLLOUT_DASHBOARD_PLAN.map(p=>p.start).sort()[0]||latest;
 const timelineEnd=plan?.end||ROLLOUT_DASHBOARD_PLAN.map(p=>p.end).sort().pop()||latest;
 const totalDays=rolloutDaysInclusive(timelineStart,timelineEnd);
 const selectedDate=rolloutDashboardFilters.date||latest||new Date().toISOString().slice(0,10);
-const elapsedDays=Math.min(totalDays,Math.max(1,rolloutDaysInclusive(timelineStart,selectedDate)));
+const timelineStartMs=new Date(`${timelineStart}T00:00:00`).getTime();
+const selectedDateMs=new Date(`${selectedDate}T00:00:00`).getTime();
+const elapsedDays=Number.isFinite(timelineStartMs)&&Number.isFinite(selectedDateMs)?Math.min(totalDays,Math.max(0,Math.floor((selectedDateMs-timelineStartMs)/86400000)+1)):0;
 const plannedPct=Math.max(0,Math.min(100,totalDays?(elapsedDays/totalDays)*100:0));
 const actualPct=Math.max(0,Math.min(100,productivity));
 const diff=actualPct-plannedPct;
@@ -1332,7 +1393,7 @@ const areaName=displayedArea||'All Areas';
 const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
-const topRows=allMetricRows.map(r=>{const totalBoxes=r.totalBoxes||0;const prod=((r.cableMeters/maxCableMeters)*80)+((totalBoxes/maxBoxes)*20);return {...r,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
+const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
 table.innerHTML=`
 <div class="rollout-management">
   <div class="mgmt-toolbar">
@@ -1340,13 +1401,30 @@ table.innerHTML=`
     <div class="field"><label>City</label><select onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
     <div class="field"><label>Area</label><select onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
   </div>
-  <div class="mgmt-key-label">Key Metrics · ${esc(areaName)}</div>
-  <div class="mgmt-kpis">
-    <div class="mgmt-card"><h3>Overall productivity</h3><small>20% box + 80% cable progress</small><div class="big">${actualPct.toFixed(0)}% <span class="ratio">weighted</span></div><div class="mgmt-progress"><i style="width:${actualPct}%"></i></div></div>
-    <div class="mgmt-card"><h3>Cable progress</h3><small>Core + distribution cable length</small><div class="big"><span class="accent">${fmt(metric.cableMeters)}</span><span class="ratio">m</span></div><div class="mgmt-progress"><i style="width:${Math.min(100,cableScore)}%"></i></div></div>
-    <div class="mgmt-card"><h3>Box deployment</h3><small>SUB / END, HUB, and XBOX</small><div class="big"><span class="teal">${fmt(metric.totalBoxes)}</span><span class="ratio">BOX</span></div><div class="mgmt-box-lines"><div><span>XBOX</span><b>${fmt(metric.xbox)}</b></div><div><span>HUB BOX</span><b>${fmt(metric.hubBox)}</b></div><div><span>SUB / END BOX</span><b>${fmt(metric.subEndBox)}</b></div></div><div class="mgmt-progress"><i class="teal" style="width:${Math.min(100,boxScore)}%"></i></div></div>
-    <div class="mgmt-card blue"><h3>Actual users</h3><small>Installed distribution and 4-core cables × 8</small><div class="big"><span class="accent">${fmt(metric.actualUsers)}</span><span class="ratio">/ ${fmt(targetUsers)} users</span></div><small>${fmt(metric.distributionQty+metric.fourCoreQty)} / ${fmt(Math.ceil(targetUsers/8))} user cable units</small><div class="mgmt-progress"><i style="width:${usersPct}%"></i></div></div>
-    <div class="mgmt-card red"><h3>Project note</h3><div class="mgmt-note">${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</div><small style="margin-top:12px">Records: ${fmt(scopedRows.length)} · Latest: ${esc(rolloutDashDateLabel(latest))}</small></div>
+  <div class="command-hero">
+    <div class="command-head">
+      <div class="command-health">System healthy</div>
+      <div class="command-title">
+        <small>Live Rollout Command Center <span class="pulse-dot"></span></small>
+        <h3>Rollout Progress Dashboard</h3>
+        <p>${esc(areaName)} · ${esc(rolloutDashboardFilters.city||'All Cities')} · ${esc(rolloutDashDateLabel(latest))}</p>
+      </div>
+    </div>
+    <div class="command-kpis">
+      <div class="command-kpi"><span>Overall Productivity</span><strong>${actualPct.toFixed(0)}%</strong><small>20% box + 80% cable</small></div>
+      <div class="command-kpi"><span>Cable Progress</span><strong>${fmt(metric.cableMeters)}</strong><small>of ${fmt(targetCableMeters)} m</small></div>
+      <div class="command-kpi"><span>Box Deployment</span><strong>${fmt(metric.totalBoxes)}</strong><small>of ${fmt(targetBoxes)} boxes</small></div>
+      <div class="command-kpi"><span>Actual Users</span><strong>${fmt(metric.actualUsers)}</strong><small>of ${fmt(targetUsers)} users</small></div>
+    </div>
+  </div>
+  <div class="status-strip" style="margin:4px 0 2px">
+    <div class="status-tile good"><span>Installed Cable</span><strong>${fmt(metric.distributionQty+metric.fourCoreQty)}</strong><small>Distribution ${fmt(metric.distributionQty)} · 4-core ${fmt(metric.fourCoreQty)}</small></div>
+    <div class="status-tile warn"><span>Planned Pace</span><strong>${plannedPct.toFixed(0)}%</strong></div>
+    <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
+  </div>
+  <div class="dash-grid">
+    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div><strong>${fmt(scopedRows.length)}</strong></div><div class="mini-row"><div><b>Latest Update</b><small>Latest record date in the selected scope</small></div><strong>${esc(rolloutDashDateLabel(latest))}</strong></div></div></div>
+    <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
   </div>
   <div class="mgmt-timeline">
     <div class="mgmt-timeline-head"><div><h3>Project timeline</h3><p>One line comparing planned pace and actual output.</p></div><span class="timeline-status ${timelineGood?'good':''}">${timelineGood?'On track':'Behind schedule'}</span></div>
@@ -1358,8 +1436,28 @@ table.innerHTML=`
     </div>
   </div>
   <div class="rollout-mini-panels">
-    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${pct(r.cableMeters,maxCableMeters)}%"></div></div><strong>${fmt(r.cableMeters)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
-    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} · HUB ${fmt(r.hubBox)} · XBOX ${fmt(r.xbox)}</small></div><strong>${fmt(r.totalBoxes)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
+    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${Math.min(100,Number(r.cablePct||0))}%"></div></div><strong>${fmt(r.cableMeters)} / ${fmt(r.target?.cableMeters||0)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
+    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} / ${fmt(r.target?.subEndBox||0)} · HUB ${fmt(r.hubBox)} / ${fmt(r.target?.hubBox||0)} · XBOX ${fmt(r.xbox)} / ${fmt(r.target?.xbox||0)}</small></div><strong>${fmt(r.totalBoxes)} / ${fmt(r.target?.totalBoxes||0)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
+  </div>
+  <div class="rollout-support">
+    <div class="rollout-support-head"><h3>Site Survey progress</h3><span class="tag">Live from Survey sheet</span></div>
+    <div class="survey-grid">
+      <div class="survey-tile"><span>Tripoli Total Survey</span><strong>170,983</strong><small>Survey Done and On Hold By Hatif Libya (36,329)</small></div>
+      <div class="survey-tile"><span>Misurata Total Survey</span><strong>104,436</strong><small>Survey Done and On Hold By Hatif Libya (0)</small></div>
+      <div class="survey-tile"><span>Total Survey</span><strong>275,419</strong><small>Total Survey Done and On Hold By Hatif Libya (36,329)</small></div>
+    </div>
+  </div>
+  <div class="rollout-support">
+    <div class="rollout-support-head"><h3>Material Shipment & Customs Status</h3><span class="tag">Project logistics tracking</span></div>
+    <table class="shipment-table"><thead><tr><th>Shipment</th><th>Shipping Date</th><th>Estimated Arrival Date</th><th>Actual Arrival Date</th><th>Arrival Status</th><th>Custom Clearance</th><th>Clearance Date</th></tr></thead><tbody>
+      <tr><td><b>1st Air Shipment (1,500) - Pilot Area</b></td><td>25-Mar-26</td><td>2-Apr-26</td><td>2-Apr-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>15-May-26</td></tr>
+      <tr><td><b>1st Sea Shipment (100.000)</b></td><td>2-Apr-26</td><td>11-Jun-26</td><td>11-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>27-Jun-26</td></tr>
+      <tr><td><b>Missing Accessories by Air</b></td><td>15-May-26</td><td>23-Jun-26</td><td>23-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>18-Jun-26</td></tr>
+      <tr><td><b>Missing Accessories by Sea</b></td><td>9-May-26</td><td>17-Jun-26</td><td>23-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>17-Jul-26</td></tr>
+      <tr><td><b>2nd Sea Shipment (98.500)</b></td><td>20-May-26</td><td>23-Jun-26</td><td>23-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>17-Jul-26</td></tr>
+      <tr><td><b>Part of Drop Cables</b></td><td>27-May-26</td><td>27-Jun-26</td><td>23-Jun-26</td><td><span class="ship-chip done">Done</span></td><td><span class="ship-chip done">Done</span></td><td>17-Jul-26</td></tr>
+      <tr><td><b>Remaining material for 200K user after...</b></td><td>Not shipped yet</td><td></td><td></td><td><span class="ship-chip pending">Pending</span></td><td><span class="ship-chip pending">Pending</span></td><td></td></tr>
+    </tbody></table>
   </div>
 </div>`;
 const dashboardSelects=table.querySelectorAll('.mgmt-toolbar select');
@@ -1368,6 +1466,7 @@ if(dashboardSelects[1])dashboardSelects[1].value=rolloutDashboardFilters.city;
 if(dashboardSelects[2])dashboardSelects[2].value=rolloutDashboardFilters.area;
 renderRolloutWarehouseVsField();
 renderRolloutAreaReportPanel(topRows);
+renderRolloutMapPanel();
 switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
 }
 function visibleScanLogs(){if(roleKey()==='admin'||roleKey()==='management'||roleKey()==='warehousemanager'||canApprove())return wh.scanLogs||[];const visibleIds=new Set((wh.mrs||[]).filter(userOwnsMr).map(r=>String(r.id)));return (wh.scanLogs||[]).filter(r=>visibleIds.has(String(r.material_requisition_id))||normalizeText(r.scanned_by)===normalizeText(activeUser))}
@@ -1523,6 +1622,135 @@ if(session)loadWarehouse();
 setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{if(!session||document.hidden)return;const active=document.querySelector('.view.active')?.id;const delay=active==='rolloutDaily'?900000:900000;if(Date.now()-lastRolloutAutoRefresh>=delay)refreshRolloutDailyProgress(false)},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&session&&document.querySelector('.view.active')?.id==='rolloutDaily')refreshRolloutDailyProgress(false)});
+var warehouseFiberReference=null;
+var warehouseFiberReferenceLoading=false;
+
+function wfmValue(row,names){
+  const wanted=(Array.isArray(names)?names:[names]).map(v=>String(v).toLowerCase());
+  const key=Object.keys(row||{}).find(k=>wanted.includes(String(k).toLowerCase()));
+  return key===undefined?'':row[key];
+}
+function wfmKey(value){return String(value??'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9]/g,'').replace(/([HLS])0+(\d)/g,'$1$2')}
+function wfmAreaKey(value){
+  return wfmKey(value).replace(/^HAYALANDALUS/,'HAYANDALUS');
+}
+function wfmAreaMatches(row,area){
+  const target=wfmAreaKey(area), areaKey=wfmAreaKey(wfmValue(row,['Area','area'])), zoneKey=wfmAreaKey(wfmValue(row,['Zone','zone']));
+  if(!target)return true;
+  if(target===areaKey||target===zoneKey)return true;
+  const combined=`${areaKey}${zoneKey}`;
+  return combined.includes(target)||target.includes(areaKey)&&target.includes(zoneKey);
+}
+function wfmCodeKey(value){
+  return wfmKey(String(value||'').replace(/^X\-?\d+[-_]/i,''));
+}
+function wfmXboxKey(value){
+  const match=String(value||'').toUpperCase().match(/X\-?BOX?\-?(\d+)/i)||String(value||'').toUpperCase().match(/^X\-?(\d+)/i);
+  return match?`X${Number(match[1])}`:wfmKey(value);
+}
+function wfmText(row){return ['item','material type','item detail','description'].map(name=>wfmValue(row,[name])).filter(value=>String(value||'').trim()).join(' ')}
+function wfmLength(row){
+  const text=wfmText(row);
+  const match=text.match(/_(\d+)\s*m\b/i)||text.match(/\b(\d+)\s*m\b/i);
+  return match?Number(match[1]):0;
+}
+function wfmRouteLabel(rows){
+  const text=rows.map(row=>String(wfmValue(row,['Cable route','cable route','route'])).toLowerCase()).join(' ');
+  if(text.includes('under'))return 'Under';
+  if(text.includes('aerial')||text.includes('arial'))return 'Ar';
+  if(text.includes('mix'))return 'Mix';
+  return '';
+}
+function wfmRecordScope(row,part){
+  if(!wfmAreaMatches(row,part.area))return false;
+  const xbox=wfmValue(row,['Related to XBOX','related to xbox','XBOX','xbox']);
+  return !part.xbox||wfmXboxKey(xbox)===wfmXboxKey(part.xbox);
+}
+function wfmRecordMatchesCode(row,code){
+  const target=wfmCodeKey(code);if(!target)return false;
+  return ['ID','id','cable code','Cable code','box code','Box code','code','Code'].some(name=>{
+    const value=wfmCodeKey(wfmValue(row,[name]));
+    return value===target||value.includes(target)||target.includes(value)&&value.length>3;
+  });
+}
+function wfmDistribution(row){return /single[\s-]*core\s+distribution\s+cable/i.test(wfmText(row))&&wfmLength(row)>0}
+function wfmFourCore(row){return /4[\s-]*core\s*cable/i.test(wfmText(row))&&wfmLength(row)>0}
+function wfmBoxType(row){
+  const text=wfmKey(wfmText(row));
+  if(text.includes('ENDBOX')||text.endsWith('END'))return 'END';
+  if(text.includes('SUBBOX')||text.includes('SUB'))return 'SUB';
+  return '';
+}
+function wfmRowsForPart(part,rows){return (rows||[]).filter(row=>wfmRecordScope(row,part))}
+function wfmRowsForCode(part,rows,code,kind){
+  return wfmRowsForPart(part,rows).filter(row=>wfmRecordMatchesCode(row,code)).filter(row=>kind==='box'?Boolean(wfmBoxType(row)):kind==='distribution'?wfmDistribution(row):kind==='fourcore'?wfmFourCore(row):true)
+}
+function wfmNodeState(part,rows,code,expectedType){
+  const matches=wfmRowsForCode(part,rows,code,'box');
+  if(matches.some(row=>expectedType&&wfmBoxType(row)&&wfmBoxType(row)!==expectedType))return{status:'mismatch',rows:matches};
+  return{status:matches.length?'installed':'missing',rows:matches};
+}
+function wfmCableState(part,rows,code,expectedLength,kind){
+  const matches=wfmRowsForCode(part,rows,code,kind);
+  if(matches.some(row=>wfmLength(row)===Number(expectedLength||0)))return{status:'installed',rows:matches,routeLabel:wfmRouteLabel(matches)};
+  return{status:matches.length?'mismatch':'missing',rows:matches,routeLabel:wfmRouteLabel(matches)};
+}
+function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
+function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
+function wfmParts(area,xbox){
+  if(!warehouseFiberReference)return[];
+  const boxes=wfmUnique((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Box code'])].join('|'));
+  const routes=wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|'));
+  const groups=new Map();
+  [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
+  return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length)
+}
+function wfmDynamicRows(part){
+  const pairs=new Map();(part.routeRows||[]).forEach(row=>{const from=String(wfmValue(row,['Route from'])).match(/^H(\d+)$/i),to=String(wfmValue(row,['Route to'])).match(/^H(\d+)$/i);if(from&&to)pairs.set(Number(from[1]),Number(to[1]))});const used=new Set(),rows=[];
+  [...part.hubs].sort((a,b)=>a-b).forEach(hub=>{if(used.has(hub))return;const pair=pairs.get(hub);if(pair&&part.hubs.includes(pair)&&!used.has(pair)){rows.push([hub,pair]);used.add(hub);used.add(pair)}else{rows.push([hub]);used.add(hub)}});return rows;
+}
+function wfmHubPosition(part,hub){const rows=wfmDynamicRows(part),rowIndex=Math.max(0,rows.findIndex(row=>row.includes(hub))),col=Math.max(0,(rows[rowIndex]||[hub]).indexOf(hub));return{x:col===0?440:1400,y:560+rowIndex*800}}
+function wfmRouteForHub(part,hub){return(part.routeRows||[]).find(row=>String(wfmValue(row,['Route to'])).toUpperCase()===`H${hub}`)||null}
+function wfmTerminals(part,hub,line){return(part.boxRows||[]).filter(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line).sort((a,b)=>wfmOrdinal(wfmValue(a,['Splitter']))-wfmOrdinal(wfmValue(b,['Splitter'])))}
+function wfmDb(row){const value=Number(wfmValue(row,['dB','db']));return Number.isFinite(value)?`${value.toFixed(1)} dB`:String(wfmValue(row,['dB','db'])||'')}
+function wfmRenderXbox(part,rows){const x=90,y=250,ports=Array.from({length:16},(_,i)=>{const yy=y+24+i*8;return`<line x1="${x+20}" y1="${yy}" x2="${x+56}" y2="${yy}" stroke="${['#16a34a','#22c55e','#1778ff','#ff0000','#111827','#d97706','#ff00c8','#1bc4ee'][i%8]}" stroke-width="2"/><circle cx="${x+58}" cy="${yy}" r="4" fill="#ff0000"/>`}).join('');return`<text x="${x+28}" y="${y-18}" class="conn-small-label">X-BOX</text><rect x="${x}" y="${y}" width="160" height="150" class="conn-xbox-panel"/>${ports}${[0,1,2,3].map(i=>`<circle cx="${x+190}" cy="${y+46+i*30}" r="8" fill="#004cff"/>`).join('')}`}
+function wfmRenderHub(part,hub,rows){
+  const pos=wfmHubPosition(part,hub),x=pos.x,y=pos.y,width=205,height=104,centerX=x+width/2,centerY=y+height/2,route=wfmRouteForHub(part,hub),routeState=wfmCableState(part,rows,wfmValue(route,['Route code']),wfmValue(route,['Cable length m']),'fourcore'),from=String(wfmValue(route,['Route from'])).match(/^H(\d+)$/i),coreLabel=from?'3-4C':'1-2C';
+  let routePath=`M 285 ${292+((hub-1)%4)*30} H ${x-120} V ${centerY} H ${x}`,labelX=x-70,labelY=centerY-35;
+  if(from){const source=wfmHubPosition(part,Number(from[1])),startX=source.x+width+34,startY=source.y+height/2,elbow=Math.round((startX+x)/2);routePath=`M ${startX} ${startY} H ${elbow} V ${centerY} H ${x}`;labelX=elbow;labelY=Math.round((startY+centerY)/2)-28}
+  const terminals=[];const terminalStartX=x+340,terminalGapX=150,terminalTopOffset=430,terminalGapY=120;
+  for(let line=1;line<=4;line++){const portX=x+24+(line-1)*34,rowY=y-terminalTopOffset+(line-1)*terminalGapY;terminals.push(`<path d="M ${portX} ${y-22} V ${rowY} H ${terminalStartX-92}" class="conn-fiber-line"/><rect x="${portX-6}" y="${y-39}" width="12" height="22" rx="2" class="conn-port"/><text x="${portX}" y="${y-3}" class="conn-port-number" text-anchor="middle">${line}</text>`);wfmTerminals(part,hub,line).forEach((ref,index)=>{const cx=terminalStartX+index*terminalGapX,code=wfmValue(ref,['Box code']),type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',node=wfmNodeState(part,rows,code,type),used=Number(wfmValue(ref,['Cable length m'])||0),actual=Number(wfmValue(ref,['Real length m'])||0),segment=wfmCableState(part,rows,code,used,'distribution'),start=index===0?terminalStartX-112:terminalStartX+(index-1)*terminalGapX+26,end=cx-19,mid=Math.round((start+end)/2);terminals.push(`<g><line x1="${start}" y1="${rowY}" x2="${end}" y2="${rowY}" class="conn-drop-segment ${segment.status}"/><text x="${mid}" y="${rowY-16}" class="conn-segment-label ${segment.status}" text-anchor="middle">${actual}m</text><text x="${mid}" y="${rowY+18}" class="conn-segment-label ${segment.status}" text-anchor="middle">${used}m</text><text x="${mid}" y="${rowY+36}" class="conn-segment-label ${segment.status}" text-anchor="middle">${esc(segment.routeLabel||'')}</text><g class="conn-node ${node.status}"><text x="${cx}" y="${rowY-30}" class="conn-node-code" text-anchor="middle">${esc(code)}</text><circle cx="${cx}" cy="${rowY}" r="18"/><text x="${cx}" y="${rowY+5}" class="conn-node-type" text-anchor="middle">${type}</text><text x="${cx}" y="${rowY+39}" class="conn-node-db" text-anchor="middle">${esc(wfmDb(ref))}</text><text x="${cx}" y="${rowY+57}" class="conn-node-meta" text-anchor="middle">${node.status==='installed'?'OK':node.status}</text></g></g>`)})}
+  const routeActual=Number(wfmValue(route,['Real length m'])||0),routeUsed=Number(wfmValue(route,['Cable length m'])||0),hubState=wfmNodeState(part,rows,`H${hub}`,'');return`<path d="${routePath}" class="conn-route-line ${routeState.status}"/><circle cx="${x-18}" cy="${centerY}" r="8" class="conn-route-dot ${routeState.status}"/><text x="${labelX}" y="${labelY}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(wfmValue(route,['Route code'])||'')}</text><text x="${labelX}" y="${labelY+22}" class="conn-route-label ${routeState.status}" text-anchor="middle">${route?routeActual:''}m</text><text x="${labelX}" y="${labelY+46}" class="conn-route-label ${routeState.status}" text-anchor="middle">${route?routeUsed:''}m</text><text x="${labelX}" y="${labelY+70}" class="conn-route-label ${routeState.status}" text-anchor="middle">${route?'4-coreCable':''}</text><text x="${labelX}" y="${labelY+94}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(routeState.routeLabel||'')}</text><rect x="${x}" y="${y}" width="${width}" height="${height}" class="conn-hub ${hubState.status==='installed'?'installed':'missing'}"/><text x="${centerX}" y="${y+44}" class="conn-hub-text" text-anchor="middle">H${hub}</text><text x="${centerX}" y="${y+78}" class="conn-hub-text" text-anchor="middle">${esc(wfmXboxKey(part.xbox))}</text><text x="${centerX}" y="${y+128}" class="conn-route-label" text-anchor="middle">${coreLabel}</text><circle cx="${x+width+34}" cy="${centerY}" r="8" fill="#004cff"/>${terminals.join('')}`;
+}
+function wfmRenderPart(part,rows){const height=Math.max(1300,Math.max(...part.hubs.map(h=>wfmHubPosition(part,h).y),560)+850);return`<div class="map-card"><svg class="fiber-map-svg" viewBox="0 0 2400 ${height}" role="img" aria-label="${esc(part.title)}"><rect x="1" y="1" width="2398" height="${height-2}" fill="#fff" stroke="#ff00d4" stroke-width="1.5"/><text x="88" y="78" class="conn-title">${esc(part.title)}</text><text x="96" y="124" class="conn-small-label">${esc(part.subtitle)}</text>${wfmRenderXbox(part,rows)}${part.hubs.map(h=>wfmRenderHub(part,h,rows)).join('')}</svg></div>`}
+function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),wfmValue(ref,['Cable length m']),'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
+var warehouseFiberSelectedScope='x4';
+var WFM_MAP_SCOPES=[
+  {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
+  {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
+  {id:'maqawba-x1',title:'Maqawba - X-BOX1',area:'Maqawba',xbox:'X1'},
+  {id:'maqawba-x2',title:'Maqawba - X-BOX2',area:'Maqawba',xbox:'X2'},
+  {id:'maqawba-x3',title:'Maqawba - X-BOX3',area:'Maqawba',xbox:'X3'}
+];
+function wfmMapAreaKey(value){
+  const key=normalizeText(value||'').replace(/\s+/g,' ');
+  if(key==='hay al andalus zone 2'||key==='hay andalus zone 2')return 'hay andalus zone 2';
+  return key;
+}
+function wfmScopesForArea(area){
+  const key=wfmMapAreaKey(area);
+  if(!key||key==='all areas')return WFM_MAP_SCOPES;
+  return WFM_MAP_SCOPES.filter(scope=>wfmMapAreaKey(scope.area)===key);
+}
+function syncWarehouseFiberScope(area){
+  const scopes=wfmScopesForArea(area);
+  if(scopes.length&&!scopes.some(scope=>scope.id===warehouseFiberSelectedScope))warehouseFiberSelectedScope=scopes[0].id;
+}
+function renderRolloutMapPanel(){
+  const box=document.getElementById('rolloutDailyMap');if(!box)return;const allScopes=WFM_MAP_SCOPES||[{id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'}];const scopes=wfmScopesForArea(rolloutDashboardFilters?.area);const available=scopes.length?scopes:allScopes;syncWarehouseFiberScope(rolloutDashboardFilters?.area);const page=available.find(scope=>scope.id===warehouseFiberSelectedScope)||available[0];warehouseFiberSelectedScope=page.id;
+  if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){warehouseFiberReferenceLoading=true;fetch('/static/assets/fiber-map-data.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>{warehouseFiberReference=data}).catch(error=>{box.innerHTML=`<div class="map-note">${esc(error.message)}</div>`}).finally(()=>{warehouseFiberReferenceLoading=false;if(warehouseFiberReference)renderRolloutMapPanel()})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
+  const parts=wfmParts(page.area,page.xbox),rows=wh.rolloutDailyProgress||[],counts=wfmMapCounts(parts,rows);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox)} · live status from Rollout Daily Progress</p></div><label class="map-scope-picker">Map<select onchange="warehouseFiberSelectedScope=this.value;renderRolloutMapPanel()">${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===page.id?'selected':''}>${esc(scope.xbox)} · ${esc(scope.title)}</option>`).join('')}</select></label></div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows)).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
+}
 </script>
 </body>
 </html>
