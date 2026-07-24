@@ -1726,7 +1726,8 @@ function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,box
 var warehouseFiberSelectedScope='x4';
 var WFM_MAP_SCOPES=[
   {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
-  {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'}
+  {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
+  {id:'maqawba-x1',title:'Maqawba - X-BOX1',area:'Maqawba',xbox:'X1'}
 ];
 function renderRolloutMapPanel(){
   const box=document.getElementById('rolloutDailyMap');if(!box)return;const scopes=WFM_MAP_SCOPES||[{id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'}];const page=scopes.find(scope=>scope.id===warehouseFiberSelectedScope)||scopes[0];
