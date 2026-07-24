@@ -1644,7 +1644,7 @@ function wfmXboxKey(value){
   const match=String(value||'').toUpperCase().match(/X\-?BOX?\-?(\d+)/i)||String(value||'').toUpperCase().match(/^X\-?(\d+)/i);
   return match?`X${Number(match[1])}`:wfmKey(value);
 }
-function wfmText(row){return [wfmValue(row,['item','Item','material type','Material type','item detail','Item detail','description','Description'])].join(' ')}
+function wfmText(row){return ['item','material type','item detail','description'].map(name=>wfmValue(row,[name])).filter(value=>String(value||'').trim()).join(' ')}
 function wfmLength(row){
   const text=wfmText(row);
   const match=text.match(/_(\d+)\s*m\b/i)||text.match(/\b(\d+)\s*m\b/i);
