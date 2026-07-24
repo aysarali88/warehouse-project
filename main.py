@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import hmac
@@ -10,6 +11,7 @@ import time
 import urllib.parse
 import urllib.request
 import ssl
+from threading import Lock
 import bcrypt
 from datetime import datetime, timezone, timedelta
 from email.utils import formataddr
@@ -54,6 +56,9 @@ WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
 ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
+ROLLOUT_SYNC_TTL_SECONDS = int(os.getenv("ROLLOUT_SYNC_TTL_SECONDS", "900"))
+ROLLOUT_LAST_SYNC_AT = 0.0
+ROLLOUT_SYNC_LOCK = Lock()
 ROLLOUT_DAILY_PROGRESS_SHEET_ID = "1ZT9e9acJ9Y60J4f_DIFZiYyHa8GvNZdlTvpucHju7Ec"
 ROLLOUT_DAILY_PROGRESS_GID = "440090582"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsheets/d/{ROLLOUT_DAILY_PROGRESS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ROLLOUT_DAILY_PROGRESS_GID}"
@@ -72,6 +77,13 @@ def ensure_optional_columns():
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS related_to_xbox VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS entry_time VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS cable_code VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS box_code VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS olt VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS cable_route VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS notes VARCHAR DEFAULT ''",
         ]
     else:
         statements = [
@@ -81,6 +93,13 @@ def ensure_optional_columns():
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN related_to_xbox VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN entry_time VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN cable_code VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN box_code VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN olt VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN cable_route VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN notes VARCHAR DEFAULT ''",
         ]
     with engine.begin() as conn:
         for statement in statements:
@@ -888,6 +907,13 @@ def row_to_record(row: RolloutRecord) -> dict:
         "acceptance": row.acceptance,
         "scan": row.scan,
         "labeling": row.labeling,
+        "Related to XBOX": row.related_to_xbox,
+        "entry time": row.entry_time,
+        "cable code": row.cable_code,
+        "box code": row.box_code,
+        "OLT": row.olt,
+        "Cable route": row.cable_route,
+        "Notes": row.notes,
     }
 
 
@@ -1008,23 +1034,61 @@ def db_rollout_records(db: Session) -> list[dict]:
     return [row_to_record(row) for row in db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).all()]
 
 
+def stable_rollout_record_id(data: dict) -> str:
+    source_id = str(first_value(data, "ID", "id", default="") or "").strip()
+    if source_id:
+        return source_id
+    payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+    return f"RDP-SOURCE-{digest}"
+
+
+def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[dict], str]:
+    global ROLLOUT_LAST_SYNC_AT
+
+    now = time.monotonic()
+    if not force and ROLLOUT_LAST_SYNC_AT and now - ROLLOUT_LAST_SYNC_AT < ROLLOUT_SYNC_TTL_SECONDS:
+        return db_rollout_records(db), "database"
+
+    with ROLLOUT_SYNC_LOCK:
+        now = time.monotonic()
+        if not force and ROLLOUT_LAST_SYNC_AT and now - ROLLOUT_LAST_SYNC_AT < ROLLOUT_SYNC_TTL_SECONDS:
+            return db_rollout_records(db), "database"
+
+        rows, _source = fetch_rollout_daily_progress_csv(force=True)
+        if not rows:
+            return db_rollout_records(db), "database"
+
+        source_ids = [stable_rollout_record_id(row) for row in rows]
+        existing = {
+            row.record_id: row
+            for row in db.query(RolloutRecord).filter(RolloutRecord.record_id.in_(source_ids)).all()
+        }
+        try:
+            for row in rows:
+                upsert_rollout_record(row, db, existing)
+            db.commit()
+            ROLLOUT_LAST_SYNC_AT = time.monotonic()
+            return db_rollout_records(db), "database"
+        except Exception:
+            db.rollback()
+            logger.exception("Rollout CSV sync failed; keeping existing database records")
+            return db_rollout_records(db), "database"
+
+
 def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
-    rows, source = fetch_rollout_daily_progress_csv(force)
-    if rows:
-        return rows, source
-    return db_rollout_records(db), "database"
+    return sync_rollout_daily_progress(db, force=force)
 
 
-def upsert_rollout_record(data: dict, db: Session) -> tuple[RolloutRecord, bool]:
-    record_id = str(first_value(data, "ID", "id", default="")).strip()
-    if not record_id:
-        seed = db.query(RolloutRecord).count() + 1
-        record_id = f"RDP-{seed:03d}"
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
+def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, RolloutRecord] | None = None) -> tuple[RolloutRecord, bool]:
+    record_id = stable_rollout_record_id(data)
+    row = existing_by_id.get(record_id) if existing_by_id is not None else db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
     created = row is None
     if row is None:
         row = RolloutRecord(record_id=record_id)
         db.add(row)
+        if existing_by_id is not None:
+            existing_by_id[record_id] = row
 
     row.date = str(first_value(data, "Date", "date", default="") or "")
     row.supervisor_name = str(first_value(data, "Supervisor Name", "supervisor_name", default="") or "")
@@ -1044,6 +1108,13 @@ def upsert_rollout_record(data: dict, db: Session) -> tuple[RolloutRecord, bool]
     row.acceptance = str(first_value(data, "acceptance", "Acceptance", default="") or "")
     row.scan = str(first_value(data, "scan", "Scan", default="") or "")
     row.labeling = str(first_value(data, "labeling", "Labeling", default="") or "")
+    row.related_to_xbox = str(first_value(data, "Related to XBOX", "related to xbox", "related_to_xbox", default="") or "")
+    row.entry_time = str(first_value(data, "entry time", "Entry Time", "entry_time", default="") or "")
+    row.cable_code = str(first_value(data, "cable code", "Cable Code", "cable_code", default="") or "")
+    row.box_code = str(first_value(data, "box code", "Box Code", "box_code", default="") or "")
+    row.olt = str(first_value(data, "OLT", "olt", default="") or "")
+    row.cable_route = str(first_value(data, "Cable route", "Cable Route", "cable_route", default="") or "")
+    row.notes = str(first_value(data, "Notes", "notes", default="") or "")
     return row, created
 
 
@@ -1832,8 +1903,9 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/rollout-daily-progress")
-def list_rollout_daily_progress(limit: int = 500, db: Session = Depends(db_session)):
-    rows, source = rollout_daily_progress_records(db, force=True)
+def list_rollout_daily_progress(limit: int = 500, refresh: str = "", db: Session = Depends(db_session)):
+    force_refresh = str(refresh or "").strip().lower() in {"1", "true", "yes", "now"} or str(refresh or "").strip().isdigit()
+    rows, source = rollout_daily_progress_records(db, force=force_refresh)
     clear_warehouse_cache()
     limited = list(reversed(rows))[: min(max(limit, 1), 10000)]
     return {
