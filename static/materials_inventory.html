@@ -1618,8 +1618,8 @@ if(session)loadWarehouse();
 setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{if(!session||document.hidden)return;const active=document.querySelector('.view.active')?.id;const delay=active==='rolloutDaily'?900000:900000;if(Date.now()-lastRolloutAutoRefresh>=delay)refreshRolloutDailyProgress(false)},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&session&&document.querySelector('.view.active')?.id==='rolloutDaily')refreshRolloutDailyProgress(false)});
-let warehouseFiberReference=null;
-let warehouseFiberReferenceLoading=false;
+var warehouseFiberReference=null;
+var warehouseFiberReferenceLoading=false;
 
 function wfmValue(row,names){
   const wanted=(Array.isArray(names)?names:[names]).map(v=>String(v).toLowerCase());
