@@ -978,8 +978,13 @@ def rollout_csv_urls() -> list[tuple[str, str]]:
     live_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL).strip()
     published_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
     urls = []
-    if live_url:
-        urls.append(("google_live_csv", live_url))
+    # Prefer the live gviz endpoint so a stale Publish-to-web snapshot cannot
+    # silently replace the current sheet with an older, shorter export.
+    canonical_live_url = DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL.strip()
+    if canonical_live_url:
+        urls.append(("google_live_csv", canonical_live_url))
+    if live_url and live_url not in {canonical_live_url, published_url}:
+        urls.append(("google_live_csv_configured", live_url))
     if published_url and published_url != live_url:
         urls.append(("google_published_csv", published_url))
     return urls
