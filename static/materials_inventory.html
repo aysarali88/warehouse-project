@@ -362,6 +362,9 @@ th{
 @media(max-width:960px){.mgmt-kpis,.rollout-mini-panels,.rollout-map-layout{grid-template-columns:1fr}.rollout-management .mgmt-toolbar{justify-content:stretch}.rollout-management .mgmt-toolbar .field{min-width:0}.timeline-ticks{margin-top:70px}.rollout-management .chart-row{grid-template-columns:1fr!important}.rollout-map-head{display:grid}.map-legend{justify-content:flex-start}.map-stage img{min-width:760px}}
 /* Dynamic map overlay: preserve the original schematic and only add live status colors. */
 .map-chip{z-index:5}.map-chip.box{width:24px;height:24px}.map-chip.hub{width:92px;height:62px;font-size:18px}.map-chip.cable{width:84px;height:9px}.map-chip.core{width:118px;height:11px}.map-chip.cable:after{content:attr(data-label);position:absolute;left:50%;top:-19px;transform:translateX(-50%);color:currentColor;background:rgba(255,255,255,.92);padding:1px 4px;border-radius:4px;font-size:10px;font-weight:900}
+/* Keep the structured fiber map inside the available page width. */
+.fiber-map-svg{width:100%;max-width:100%;min-width:0;height:auto}
+.map-stage{overflow-x:hidden}
 </style>
 </head>
 <body>
