@@ -57,9 +57,10 @@ This is a monolith. Most backend routes, data normalization, role logic, cache l
   - receive orders, issue orders
   - material requisitions, transfers, returns
   - scan logs and audit logs
-- Google Sheets CSV:
+- Google Sheets CSV (read-only source; the app never writes to the sheet):
   - configured through `ROLLOUT_DAILY_PROGRESS_CSV_URL`
   - backend fetch logic is in `main.py` (`read_rollout_daily_progress_url`, `fetch_rollout_daily_progress_csv`, `rollout_daily_progress_records`)
+  - fetched rows are upserted into `rollout_records` and subsequent warehouse reads use the database
 
 ## Authentication And Roles
 - Login API: `POST /api/auth/login`
@@ -97,6 +98,7 @@ Defined or used in repo:
 - `DATABASE_URL`
 - `ROLLOUT_DAILY_PROGRESS_CSV_URL`
 - `ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL`
+- `ROLLOUT_SYNC_TTL_SECONDS`
 - `DB_POOL_SIZE`
 - `DB_MAX_OVERFLOW`
 - `DB_POOL_TIMEOUT`

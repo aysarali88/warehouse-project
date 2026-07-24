@@ -27,6 +27,13 @@ class RolloutRecord(Base):
     acceptance = Column(String, default="")
     scan = Column(String, default="")
     labeling = Column(String, default="")
+    related_to_xbox = Column(String, default="")
+    entry_time = Column(String, default="")
+    cable_code = Column(String, default="")
+    box_code = Column(String, default="")
+    olt = Column(String, default="")
+    cable_route = Column(String, default="")
+    notes = Column(String, default="")
 
 
 class Warehouse(Base):
