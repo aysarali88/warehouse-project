@@ -1333,6 +1333,7 @@ function setRolloutDashboardFilter(key,value){
     const options=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
     rolloutDashboardFilters.area=options.includes(rolloutDashboardFilters.area)?rolloutDashboardFilters.area:(options[0]||'All Areas');
   }
+  if(key==='area'||key==='city')syncWarehouseFiberScope(rolloutDashboardFilters.area);
   renderRolloutDailyProgress();
 }
 function renderRolloutDailyProgress(){
@@ -1728,10 +1729,25 @@ var WFM_MAP_SCOPES=[
   {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
   {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
   {id:'maqawba-x1',title:'Maqawba - X-BOX1',area:'Maqawba',xbox:'X1'},
-  {id:'maqawba-x2',title:'Maqawba - X-BOX2',area:'Maqawba',xbox:'X2'}
+  {id:'maqawba-x2',title:'Maqawba - X-BOX2',area:'Maqawba',xbox:'X2'},
+  {id:'maqawba-x3',title:'Maqawba - X-BOX3',area:'Maqawba',xbox:'X3'}
 ];
+function wfmMapAreaKey(value){
+  const key=normalizeText(value||'').replace(/\s+/g,' ');
+  if(key==='hay al andalus zone 2'||key==='hay andalus zone 2')return 'hay andalus zone 2';
+  return key;
+}
+function wfmScopesForArea(area){
+  const key=wfmMapAreaKey(area);
+  if(!key||key==='all areas')return WFM_MAP_SCOPES;
+  return WFM_MAP_SCOPES.filter(scope=>wfmMapAreaKey(scope.area)===key);
+}
+function syncWarehouseFiberScope(area){
+  const scopes=wfmScopesForArea(area);
+  if(scopes.length&&!scopes.some(scope=>scope.id===warehouseFiberSelectedScope))warehouseFiberSelectedScope=scopes[0].id;
+}
 function renderRolloutMapPanel(){
-  const box=document.getElementById('rolloutDailyMap');if(!box)return;const scopes=WFM_MAP_SCOPES||[{id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'}];const page=scopes.find(scope=>scope.id===warehouseFiberSelectedScope)||scopes[0];
+  const box=document.getElementById('rolloutDailyMap');if(!box)return;const allScopes=WFM_MAP_SCOPES||[{id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'}];const scopes=wfmScopesForArea(rolloutDashboardFilters?.area);const available=scopes.length?scopes:allScopes;syncWarehouseFiberScope(rolloutDashboardFilters?.area);const page=available.find(scope=>scope.id===warehouseFiberSelectedScope)||available[0];warehouseFiberSelectedScope=page.id;
   if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){warehouseFiberReferenceLoading=true;fetch('/static/assets/fiber-map-data.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>{warehouseFiberReference=data}).catch(error=>{box.innerHTML=`<div class="map-note">${esc(error.message)}</div>`}).finally(()=>{warehouseFiberReferenceLoading=false;if(warehouseFiberReference)renderRolloutMapPanel()})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
   const parts=wfmParts(page.area,page.xbox),rows=wh.rolloutDailyProgress||[],counts=wfmMapCounts(parts,rows);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox)} · live status from Rollout Daily Progress</p></div><label class="map-scope-picker">Map<select onchange="warehouseFiberSelectedScope=this.value;renderRolloutMapPanel()">${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===page.id?'selected':''}>${esc(scope.xbox)} · ${esc(scope.title)}</option>`).join('')}</select></label></div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows)).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
 }
