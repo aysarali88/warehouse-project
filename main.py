@@ -808,7 +808,10 @@ def db_session():
 
 
 def next_number(db: Session, model, prefix: str) -> str:
-    return f"{prefix}-{db.query(model).count() + 1:05d}"
+    candidate = db.query(model).count() + 1
+    while db.query(model).filter(model.order_number == f"{prefix}-{candidate:05d}").first():
+        candidate += 1
+    return f"{prefix}-{candidate:05d}"
 
 
 def clear_warehouse_cache():
