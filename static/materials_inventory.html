@@ -1424,7 +1424,7 @@ table.innerHTML=`
     <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
   </div>
   <div class="dash-grid">
-    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div><strong>${fmt(scopedRows.length)}</strong></div><div class="mini-row"><div><b>Latest Update</b><small>Latest record date in the selected scope</small></div><strong>${esc(rolloutDashDateLabel(latest))}</strong></div></div></div>
+    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div></div></div>
     <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
   </div>
   <div class="mgmt-timeline">
