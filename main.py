@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import hashlib
 import io
 import json
@@ -3009,12 +3009,31 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     return row
 
 
+def next_import_order_number(db: Session) -> str:
+    """Return the next unused numeric MR number for sheets without an Order No."""
+    values = db.query(MaterialRequisition.order_number).all()
+    numbers = []
+    for (value,) in values:
+        try:
+            numbers.append(int(str(value).strip()))
+        except (TypeError, ValueError):
+            continue
+    candidate = max(numbers, default=0) + 1
+    while db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == str(candidate)).first():
+        candidate += 1
+    return str(candidate)
+
+
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str) -> MaterialRequisition:
     grid = sheet_grid(sheet)
     warehouse = find_warehouse_for_import(db, grid, default_warehouse_id)
     items = parse_import_items(db, grid)
     today = local_today()
-    order_number = str(db.query(MaterialRequisition).count() + 1)
+    order_number = find_sheet_value(grid, "Order No", "Order Number", "MR No", "MR Number").strip()
+    if not order_number:
+        order_number = next_import_order_number(db)
+    elif db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == order_number).first():
+        raise ValueError(f"Order No {order_number} already exists")
     row = MaterialRequisition(
         order_number=order_number,
         creation_date=find_sheet_value(grid, "Creation Date", "Date") or today,
