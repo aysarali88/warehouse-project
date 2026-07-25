@@ -978,8 +978,13 @@ def rollout_csv_urls() -> list[tuple[str, str]]:
     live_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL).strip()
     published_url = (os.getenv("ROLLOUT_DAILY_PROGRESS_CSV_URL") or DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL).strip()
     urls = []
-    if live_url:
-        urls.append(("google_live_csv", live_url))
+    # Prefer the live gviz endpoint so a stale Publish-to-web snapshot cannot
+    # silently replace the current sheet with an older, shorter export.
+    canonical_live_url = DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL.strip()
+    if canonical_live_url:
+        urls.append(("google_live_csv", canonical_live_url))
+    if live_url and live_url not in {canonical_live_url, published_url}:
+        urls.append(("google_live_csv_configured", live_url))
     if published_url and published_url != live_url:
         urls.append(("google_published_csv", published_url))
     return urls
@@ -3004,12 +3009,31 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     return row
 
 
+def next_import_order_number(db: Session) -> str:
+    """Return the next unused numeric MR number for sheets without an Order No."""
+    values = db.query(MaterialRequisition.order_number).all()
+    numbers = []
+    for (value,) in values:
+        try:
+            numbers.append(int(str(value).strip()))
+        except (TypeError, ValueError):
+            continue
+    candidate = max(numbers, default=0) + 1
+    while db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == str(candidate)).first():
+        candidate += 1
+    return str(candidate)
+
+
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str) -> MaterialRequisition:
     grid = sheet_grid(sheet)
     warehouse = find_warehouse_for_import(db, grid, default_warehouse_id)
     items = parse_import_items(db, grid)
     today = local_today()
-    order_number = str(db.query(MaterialRequisition).count() + 1)
+    order_number = find_sheet_value(grid, "Order No", "Order Number", "MR No", "MR Number").strip()
+    if not order_number:
+        order_number = next_import_order_number(db)
+    elif db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == order_number).first():
+        raise ValueError(f"Order No {order_number} already exists")
     row = MaterialRequisition(
         order_number=order_number,
         creation_date=find_sheet_value(grid, "Creation Date", "Date") or today,
