@@ -390,7 +390,7 @@ th{
     <button data-view="mr">Material Request</button>
     <button data-view="mrHistory">MR History</button>
     <button data-view="receive">استلام مخزون</button>
-    <button data-view="balances">المخزون</button>
+    <button data-view="balances">Inventory</button>
     <button data-view="rolloutDaily">Rollout Progress</button>
     <button data-view="scans">Scan History</button>
     <button data-view="audit">الحركات</button>
@@ -883,7 +883,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetSubEndBox:292,targetHubBox:23,targetXbox:2,targetCableMeters:32630,targetUsers:2368,note:'Execution risk update'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:432,targetHubBox:30,targetXbox:3,targetCableMeters:43190,targetUsers:3284,note:'Execution risk update'}
 ];
-const titles={dashboard:['WH Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['المخزون','عرض مخزون المستودعات ومخزون كل فني.'],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
+const titles={dashboard:['WH Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
