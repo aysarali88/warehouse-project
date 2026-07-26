@@ -3262,7 +3262,7 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
-    order_number = str(db.query(MaterialRequisition).count() + 1)
+    order_number = next_import_order_number(db)
     row = MaterialRequisition(
         order_number=order_number,
         creation_date=data.creation_date,
@@ -3322,7 +3322,10 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     db.commit()
     db.refresh(row)
     if row.status == "pending_approval":
-        notify_mr_created(row, db)
+        try:
+            notify_mr_created(row, db)
+        except Exception:
+            logger.exception("MR notification failed after save: %s", row.order_number)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
 
 
@@ -3382,7 +3385,10 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     log_audit(db, "resubmit_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
     db.commit()
     db.refresh(row)
-    notify_mr_created(row, db)
+    try:
+        notify_mr_created(row, db)
+    except Exception:
+        logger.exception("MR notification failed after resubmit: %s", row.order_number)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
