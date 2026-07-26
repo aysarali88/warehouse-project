@@ -2404,17 +2404,10 @@ def list_stock_usage(db: Session = Depends(db_session)):
             .all()
         )
     }
-    reset_at = (
-        db.query(func.max(AuditLog.created_at))
-        .filter(AuditLog.action.in_(["replace_inventory_from_final_wh", "recorrect_inventory_to_final_wh_only"]))
-        .scalar()
-    )
     consumed_query = (
         db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
         .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]))
     )
-    if reset_at:
-        consumed_query = consumed_query.filter(StockMovement.created_at > reset_at)
     consumed_totals = {
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in consumed_query.group_by(StockMovement.warehouse_id, StockMovement.product_id).all()
