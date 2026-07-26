@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import hashlib
 import io
 import json
@@ -808,8 +808,18 @@ def db_session():
 
 
 def next_number(db: Session, model, prefix: str) -> str:
+    number_column = next(
+        (
+            getattr(model, name)
+            for name in ("order_number", "transfer_number", "return_number")
+            if hasattr(model, name)
+        ),
+        None,
+    )
+    if number_column is None:
+        raise RuntimeError(f"No number column configured for {model.__name__}")
     candidate = db.query(model).count() + 1
-    while db.query(model).filter(model.order_number == f"{prefix}-{candidate:05d}").first():
+    while db.query(model).filter(number_column == f"{prefix}-{candidate:05d}").first():
         candidate += 1
     return f"{prefix}-{candidate:05d}"
 
@@ -2750,7 +2760,15 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    row = (
+        db.query(MaterialRequisition)
+        .options(
+            joinedload(MaterialRequisition.warehouse),
+            selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product),
+        )
+        .filter(MaterialRequisition.id == requisition_id)
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     return {"success": True, "requisition": requisition_to_dict(row)}
@@ -3255,7 +3273,7 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
-    order_number = str(db.query(MaterialRequisition).count() + 1)
+    order_number = next_import_order_number(db)
     row = MaterialRequisition(
         order_number=order_number,
         creation_date=data.creation_date,
@@ -3315,7 +3333,10 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     db.commit()
     db.refresh(row)
     if row.status == "pending_approval":
-        notify_mr_created(row, db)
+        try:
+            notify_mr_created(row, db)
+        except Exception:
+            logger.exception("MR notification failed after save: %s", row.order_number)
     return {"success": True, "issue_order": issue_order, "requisition": requisition_to_dict(row)}
 
 
@@ -3375,7 +3396,10 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     log_audit(db, "resubmit_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
     db.commit()
     db.refresh(row)
-    notify_mr_created(row, db)
+    try:
+        notify_mr_created(row, db)
+    except Exception:
+        logger.exception("MR notification failed after resubmit: %s", row.order_number)
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
