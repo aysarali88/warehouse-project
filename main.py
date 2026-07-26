@@ -56,6 +56,8 @@ WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
 ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
+ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
+ROLLOUT_DB_CACHE_TTL = 30
 ROLLOUT_SYNC_TTL_SECONDS = int(os.getenv("ROLLOUT_SYNC_TTL_SECONDS", "900"))
 ROLLOUT_LAST_SYNC_AT = 0.0
 ROLLOUT_SYNC_LOCK = Lock()
@@ -828,6 +830,11 @@ def clear_warehouse_cache():
     WAREHOUSE_CACHE.clear()
 
 
+def clear_rollout_db_cache():
+    global ROLLOUT_DB_CACHE
+    ROLLOUT_DB_CACHE = None
+
+
 def log_audit(db: Session, action: str, entity_type: str, entity_id: str, actor: str, details: dict):
     clear_warehouse_cache()
     db.add(
@@ -1049,7 +1056,13 @@ def fetch_rollout_daily_progress_csv(force: bool = False) -> tuple[list[dict], s
 
 
 def db_rollout_records(db: Session) -> list[dict]:
-    return [row_to_record(row) for row in db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).all()]
+    global ROLLOUT_DB_CACHE
+    now = time.monotonic()
+    if ROLLOUT_DB_CACHE and now - ROLLOUT_DB_CACHE[0] < ROLLOUT_DB_CACHE_TTL:
+        return ROLLOUT_DB_CACHE[1]
+    records = [row_to_record(row) for row in db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).all()]
+    ROLLOUT_DB_CACHE = (now, records)
+    return records
 
 
 def stable_rollout_record_id(data: dict) -> str:
@@ -1087,6 +1100,7 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
                 upsert_rollout_record(row, db, existing)
             db.commit()
             ROLLOUT_LAST_SYNC_AT = time.monotonic()
+            clear_rollout_db_cache()
             return db_rollout_records(db), "database"
         except Exception:
             db.rollback()
@@ -1911,6 +1925,7 @@ def save_record(data: dict, db: Session = Depends(db_session)):
     row, _ = upsert_rollout_record(data, db)
     db.commit()
     clear_warehouse_cache()
+    clear_rollout_db_cache()
     db.refresh(row)
 
     return {
@@ -1924,7 +1939,6 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 def list_rollout_daily_progress(limit: int = 500, refresh: str = "", db: Session = Depends(db_session)):
     force_refresh = str(refresh or "").strip().lower() in {"1", "true", "yes", "now"} or str(refresh or "").strip().isdigit()
     rows, source = rollout_daily_progress_records(db, force=force_refresh)
-    clear_warehouse_cache()
     limited = list(reversed(rows))[: min(max(limit, 1), 10000)]
     return {
         "success": True,
