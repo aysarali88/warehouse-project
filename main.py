@@ -2757,7 +2757,15 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    row = (
+        db.query(MaterialRequisition)
+        .options(
+            joinedload(MaterialRequisition.warehouse),
+            selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product),
+        )
+        .filter(MaterialRequisition.id == requisition_id)
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     return {"success": True, "requisition": requisition_to_dict(row)}
