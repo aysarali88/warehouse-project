@@ -808,8 +808,18 @@ def db_session():
 
 
 def next_number(db: Session, model, prefix: str) -> str:
+    number_column = next(
+        (
+            getattr(model, name)
+            for name in ("order_number", "transfer_number", "return_number")
+            if hasattr(model, name)
+        ),
+        None,
+    )
+    if number_column is None:
+        raise RuntimeError(f"No number column configured for {model.__name__}")
     candidate = db.query(model).count() + 1
-    while db.query(model).filter(model.order_number == f"{prefix}-{candidate:05d}").first():
+    while db.query(model).filter(number_column == f"{prefix}-{candidate:05d}").first():
         candidate += 1
     return f"{prefix}-{candidate:05d}"
 
