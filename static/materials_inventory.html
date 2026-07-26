@@ -933,6 +933,8 @@ async function loadWarehouse(){try{const cached=localStorage.getItem('warehouseB
 async function loadWarehouseFull(showToast=true){try{const data=await api('/api/warehouse/bootstrap');localStorage.setItem('warehouseBootstrap',JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
 async function refreshWarehouse(){try{toast('تحديث سريع...');const data=await api('/api/warehouse/bootstrap?light=1');applyWarehouseData(data,true);toast('ظهرت البيانات الأساسية، جاري تحديث التفاصيل...');loadWarehouseFull(false)}catch(e){toast(e.message)}}
 function syncWarehouseLater(){localStorage.removeItem('warehouseBootstrap');setTimeout(()=>loadWarehouse(),80)}
+async function refreshStockUsage(){const data=await api('/api/warehouse/stock-usage');wh.stockUsage=data.usage||[];renderWarehouse()}
+setTimeout(()=>{refreshStockUsage().catch(()=>{})},2500)
 function upsertLocalMr(req){if(!req)return;const rows=wh.mrs||[];const i=rows.findIndex(r=>String(r.id)===String(req.id));if(i>=0)rows[i]=req;else rows.unshift(req);wh.mrs=rows;renderWarehouse()}
 function upsertLocalTransfer(row){if(!row)return;const rows=wh.transfers||[];const i=rows.findIndex(r=>String(r.id)===String(row.id));if(i>=0)rows[i]=row;else rows.unshift(row);wh.transfers=rows;renderWarehouse()}
 function upsertLocalReturn(row){if(!row)return;const rows=wh.returns||[];const i=rows.findIndex(r=>String(r.id)===String(row.id));if(i>=0)rows[i]=row;else rows.unshift(row);wh.returns=rows;renderWarehouse()}
