@@ -2416,7 +2416,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
     }
     consumed_query = (
         db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-        .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]))
+        .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "issue_to_technician")
     )
     consumed_totals = {
         (warehouse_id, product_id): total or 0
