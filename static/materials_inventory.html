@@ -1314,10 +1314,6 @@ const approvedMrs=wh.mrs.filter(r=>r.status==='approved'||r.status==='signed').l
 const pendingMrs=wh.mrs.filter(r=>r.status==='pending_approval'||r.status==='draft').length;
 const waitingApproval=wh.mrs.filter(r=>r.status==='pending_approval').length;
 const readyIssue=wh.mrs.filter(r=>r.status==='approved').length;
-const todayKey=today();
-const issuedToday=wh.mrs.filter(r=>r.status==='issued'&&String(r.creation_date||'')===todayKey).length;
-const receivedToday=(wh.receipts||[]).filter(r=>String(r.receipt_date||r.created_at?.slice(0,10)||'')===todayKey).reduce((s,r)=>s+(r.items||[]).reduce((a,it)=>a+Number(it.quantity||0),0),0);
-const returnedToday=(wh.returns||[]).filter(r=>String(r.return_date||r.created_at?.slice(0,10)||'')===todayKey).reduce((s,r)=>s+(r.items||[]).reduce((a,it)=>a+Number(it.quantity||0),0),0);
 const rolloutUsed=wh.rolloutUsage.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);
 document.getElementById('dashboardHealth').textContent=lowRows.length?`${lowRows.length} Stock Alert`:'System healthy';
 document.getElementById('summaryKpis').innerHTML=[
@@ -1327,7 +1323,7 @@ document.getElementById('dashboardStatus').innerHTML=[
 ['المستودعات',wh.summary.warehouses,'good'],['مواد منخفضة',lowRows.length,lowRows.length?'bad':'good'],['Rollout Used',rolloutUsed,rolloutUsed?'warn':'good']
 ].map(x=>`<div class="status-tile ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
 document.getElementById('opsSnapshot').innerHTML=[
-['Pending Approval',waitingApproval,'warn'],['Ready Issue',readyIssue,'warn'],['Issued Today',issuedToday,'good'],['Returned Today',returnedToday,'good']
+['Pending Approval',waitingApproval,'warn'],['Ready Issue',readyIssue,'warn']
 ].map(x=>`<div class="workflow-pill ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
