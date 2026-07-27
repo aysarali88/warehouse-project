@@ -414,6 +414,14 @@ th{
 .fiber-map-svg{width:100%;max-width:100%;min-width:0;height:auto}
 .map-stage{overflow-x:hidden}
 .map-filter-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:flex-end}.map-filter-row .map-scope-picker{min-width:150px}.map-filter-row select{display:block;min-width:150px;margin-top:4px}
+.warehouse-rings{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:18px;align-items:center;padding:18px 14px;border-radius:8px;background:radial-gradient(circle at 15% 10%,rgba(90,218,181,.16),transparent 30%),linear-gradient(135deg,#08253c,#0b344f 58%,#075b73);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 14px 30px rgba(5,38,64,.14)}
+.warehouse-ring-card{display:grid;justify-items:center;gap:8px;min-width:0;color:#fff}
+.warehouse-ring{width:118px;height:118px;overflow:visible;transform:rotate(-90deg)}
+.warehouse-ring-track{fill:none;stroke:rgba(138,178,210,.18);stroke-width:11}
+.warehouse-ring-progress{fill:none;stroke-width:11;stroke-linecap:round;filter:drop-shadow(0 0 8px currentColor)}
+.warehouse-ring-percent{color:#fff;font-size:24px;font-weight:1000;line-height:1;margin-top:-74px;min-height:28px;text-shadow:0 2px 10px rgba(0,0,0,.28)}
+.warehouse-ring-name{width:100%;color:rgba(245,250,255,.94);font-size:13px;font-weight:900;text-align:center;overflow-wrap:anywhere}
+.warehouse-ring-stock{color:rgba(191,218,237,.78);font-size:11px;font-weight:900}
 </style>
 <style>
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1180,10 +1188,21 @@ function animateProgressBars(root){
     requestAnimationFrame(()=>{bar.style.transition='width 900ms cubic-bezier(.22,1,.36,1)';bar.style.width=target});
   });
 }
+function animateDashboardRings(root){
+  if(!root)return;
+  root.querySelectorAll('.warehouse-ring-progress').forEach(ring=>{
+    const target=Math.max(0,Math.min(100,Number(ring.dataset.p||0)));
+    ring.style.transition='none';
+    ring.style.strokeDasharray='0 100';
+    ring.getBoundingClientRect();
+    requestAnimationFrame(()=>{ring.style.transition='stroke-dasharray 1000ms cubic-bezier(.22,1,.36,1)';ring.style.strokeDasharray=`${target} 100`});
+  });
+}
 function animateDashboardSurface(root){
   if(!root)return;
-  root.querySelectorAll('.command-kpi strong,.workflow-pill strong,.status-tile strong,.chart-row strong,.survey-tile strong,.status-summary-head strong,.status-summary-item strong').forEach(animateValueText);
+  root.querySelectorAll('.command-kpi strong,.workflow-pill strong,.status-tile strong,.chart-row strong,.survey-tile strong,.status-summary-head strong,.status-summary-item strong,.warehouse-ring-percent').forEach(animateValueText);
   animateProgressBars(root);
+  animateDashboardRings(root);
 }
 async function api(path,opts={}){const isForm=opts.body instanceof FormData;const headers={...(opts.headers||{})};if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(path,{cache:'no-store',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
 function bindScannerInput(id,handler){const input=document.getElementById(id);if(!input)return;input.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(scanDebounceTimers[id]);handler()}});input.addEventListener('input',()=>{clearTimeout(scanDebounceTimers[id]);const value=input.value.trim();if(value.length<3)return;scanDebounceTimers[id]=setTimeout(()=>handler(),650)})}
@@ -1314,7 +1333,8 @@ document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.ma
 const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,stock:0,stockOut:0,rollout:0,remainingAfterRollout:0};const stock=Number(r.remaining||0);const stockOut=Number(r.total_consumed||0);const rollout=Number(r.rollout_consumed_qty||0);cur.stock+=stock;cur.stockOut+=stockOut;cur.rollout+=rollout;cur.remainingAfterRollout+=stock-rollout;byWh.set(r.warehouse,cur)});
 const whRows=[...byWh.values()].sort((a,b)=>b.stock-a.stock);
 const maxStock=Math.max(...whRows.map(r=>r.stock),1);
-document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div>${whRows.map(r=>`<div class="chart-row"><b>${esc(r.warehouse)}</b><div class="chart-track" title="Current stock"><div class="chart-fill" style="width:${pct(r.stock,maxStock)}%"></div></div><strong>${fmt(r.stock)}</strong></div>`).join('')}</div>${rowsTable([['MR Stock Out','stockOut',(v)=>fmt(v)],['Current Stock','stock',(v)=>fmt(v)],['WH','warehouse']],whRows)}`:'<div class="empty-soft">لا توجد أرصدة</div>';
+const ringColors=['#5ce0b1','#2f9dff','#f0525b','#f5a623','#22c7d9'];
+document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-rings">${whRows.map((r,i)=>{const ringPct=Math.round(Math.max(0,Math.min(100,pct(r.stock,maxStock))));const color=ringColors[i%ringColors.length];return `<div class="warehouse-ring-card" title="Current stock: ${fmt(r.stock)}"><svg class="warehouse-ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="warehouse-ring-track" cx="60" cy="60" r="48" pathLength="100"></circle><circle class="warehouse-ring-progress" cx="60" cy="60" r="48" pathLength="100" data-p="${ringPct}" style="color:${color};stroke:${color};stroke-dasharray:0 100"></circle></svg><strong class="warehouse-ring-percent">${ringPct}%</strong><b class="warehouse-ring-name">${esc(r.warehouse)}</b><small class="warehouse-ring-stock">${fmt(r.stock)} in stock</small></div>`}).join('')}</div>`:'<div class="empty-soft">لا توجد أرصدة</div>';
 const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
 document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="movement-stream">${focusRows.map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
 const receiptRows=(wh.receipts||[]).slice(0,5);
