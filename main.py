@@ -132,7 +132,7 @@ APP_USERS = [
     {"username": "FreeZone", "name": "FreeZone", "role": "Warehouse Manager", "password_hash": "$2b$12$dLg/7wO3.EBdDBzislnwlujcdQoMlPwrGi6H61X3OwMIiq3PgoIQS", "warehouse_name": "FreeZone"},
 ]
 
-TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE = "Misurata"
+TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE = ""
 
 
 try:
@@ -301,13 +301,16 @@ def active_user_emails(db: Session, role: str, identifiers: list[str] | None = N
     query = db.query(AppUser).filter(AppUser.status == "active", func.lower(AppUser.role) == role.strip().lower())
     rows = query.all()
     if identifiers:
-        keys = {normalize_usage_key(value) for value in identifiers if str(value or "").strip()}
+        keys: set[str] = set()
+        for value in identifiers:
+            if str(value or "").strip():
+                keys.update(warehouse_scope_keys(value) or {normalize_usage_key(value)})
         rows = [
             row
             for row in rows
             if normalize_usage_key(row.username) in keys
             or normalize_usage_key(row.name) in keys
-            or normalize_usage_key(getattr(row, "warehouse_name", "")) in keys
+            or bool(warehouse_scope_keys(getattr(row, "warehouse_name", "")).intersection(keys))
         ]
     return normalize_email_list([row.email for row in rows])
 
@@ -317,12 +320,31 @@ def requester_notification_emails(row: MaterialRequisition, db: Session) -> list
     return active_user_emails(db, "requester", identifiers)
 
 
+def warehouse_scope_keys(value: str) -> set[str]:
+    key = normalize_usage_key(value)
+    if not key:
+        return set()
+    keys = {key}
+    if "freezone" in key:
+        keys.update({"freezone", "misuratafreezone", "misratafreezone"})
+    elif any(token in key for token in ("misurata", "misrata", "misrat")):
+        keys.update({"misurata", "misrata", "misuratalnet", "misratalnet"})
+    elif "tripoli" in key:
+        keys.add("tripoli")
+    return keys
+
+
+def warehouse_scope_matches(viewer: str, warehouse_name: str) -> bool:
+    viewer_keys = warehouse_scope_keys(viewer)
+    warehouse_keys = warehouse_scope_keys(warehouse_name)
+    return bool(viewer_keys and warehouse_keys and viewer_keys.intersection(warehouse_keys))
+
+
 def warehouse_manager_handles_mr(viewer: str, row: MaterialRequisition) -> bool:
-    viewer_key = normalize_usage_key(viewer)
     override_key = normalize_usage_key(TEMP_MR_WAREHOUSE_MANAGER_OVERRIDE)
     if override_key:
-        return viewer_key == override_key
-    return normalize_usage_key(row.warehouse.name if row.warehouse else "") == viewer_key
+        return override_key in warehouse_scope_keys(viewer)
+    return warehouse_scope_matches(viewer, row.warehouse.name if row.warehouse else "")
 
 
 def warehouse_manager_notification_emails(row: MaterialRequisition, db: Session) -> list[str]:
@@ -337,8 +359,8 @@ def transfer_source_warehouse_manager_emails(row: MaterialTransfer, db: Session)
 
 def is_source_warehouse_manager(actor: str, row: MaterialTransfer, db: Session) -> bool:
     actor_key = normalize_usage_key(actor)
-    warehouse_key = normalize_usage_key(row.from_warehouse.name if row.from_warehouse else "")
-    if not actor_key or not warehouse_key:
+    warehouse_name = row.from_warehouse.name if row.from_warehouse else ""
+    if not actor_key or not warehouse_name:
         return False
     rows = (
         db.query(AppUser)
@@ -347,7 +369,24 @@ def is_source_warehouse_manager(actor: str, row: MaterialTransfer, db: Session) 
     )
     return any(
         (normalize_usage_key(user.username) == actor_key or normalize_usage_key(user.name) == actor_key)
-        and normalize_usage_key(getattr(user, "warehouse_name", "")) == warehouse_key
+        and warehouse_scope_matches(getattr(user, "warehouse_name", ""), warehouse_name)
+        for user in rows
+    )
+
+
+def is_requisition_warehouse_manager(actor: str, row: MaterialRequisition, db: Session) -> bool:
+    actor_key = normalize_usage_key(actor)
+    warehouse_name = row.warehouse.name if row.warehouse else ""
+    if not actor_key or not warehouse_name:
+        return False
+    rows = (
+        db.query(AppUser)
+        .filter(AppUser.status == "active", func.lower(AppUser.role) == "warehouse manager")
+        .all()
+    )
+    return any(
+        (normalize_usage_key(user.username) == actor_key or normalize_usage_key(user.name) == actor_key)
+        and warehouse_scope_matches(getattr(user, "warehouse_name", ""), warehouse_name)
         for user in rows
     )
 
@@ -1627,9 +1666,25 @@ def user_can_view_requisition(row: MaterialRequisition, viewer: str = "", role: 
     if role_key in {"admin", "management"}:
         return True
     if role_key == "warehousemanager":
-        return warehouse_manager_handles_mr(viewer, row) or normalize_usage_key(row.created_by) == viewer_key
+        return warehouse_manager_handles_mr(viewer, row)
     if role_key in {"approval", "approver"}:
         return row.status == "pending_approval" or normalize_usage_key(row.receiver_name) == viewer_key
+    if role_key == "requester":
+        return normalize_usage_key(row.requester_name) == viewer_key or normalize_usage_key(row.created_by) == viewer_key
+    return normalize_usage_key(row.created_by) == viewer_key
+
+
+def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = "") -> bool:
+    role_key = normalize_usage_key(role)
+    viewer_key = normalize_usage_key(viewer)
+    if role_key in {"admin", "management"}:
+        return True
+    if role_key == "warehousemanager":
+        return warehouse_scope_matches(viewer, row.from_warehouse.name if row.from_warehouse else "") or warehouse_scope_matches(
+            viewer, row.to_warehouse.name if row.to_warehouse else ""
+        )
+    if role_key in {"approval", "approver"}:
+        return row.status == "pending_approval" or normalize_usage_key(row.approver_name) == viewer_key
     if role_key == "requester":
         return normalize_usage_key(row.requester_name) == viewer_key or normalize_usage_key(row.created_by) == viewer_key
     return normalize_usage_key(row.created_by) == viewer_key
@@ -1996,8 +2051,8 @@ def warehouse_summary(db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/bootstrap")
-def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
-    cache_key = "light" if light else "full"
+def warehouse_bootstrap(light: bool = False, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
+    cache_key = f"{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
     cached = WAREHOUSE_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < WAREHOUSE_CACHE_TTL:
         return {**cached[1], "cached": True}
@@ -2005,9 +2060,17 @@ def warehouse_bootstrap(light: bool = False, db: Session = Depends(db_session)):
     stock = list_stock_balances(db)
     usage = list_stock_usage(db)
     movements = list_stock_movements(12 if light else 40, db)
-    mrs = list_material_requisition_headers(80, db) if light else list_material_requisitions(200, db)
+    mrs = (
+        list_material_requisition_headers(80, db=db, viewer=viewer, role=role)
+        if light
+        else list_material_requisitions(200, db=db, viewer=viewer, role=role)
+    )
     receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
-    transfers = list_material_transfer_headers(120, db) if light else list_material_transfers(200, db)
+    transfers = (
+        list_material_transfer_headers(120, db=db, viewer=viewer, role=role)
+        if light
+        else list_material_transfers(200, db=db, viewer=viewer, role=role)
+    )
     returns = list_material_return_headers(120, db) if light else list_material_returns(200, db)
     scans = list_material_scans(80 if light else 300, db)
     payload = {
@@ -2753,30 +2816,30 @@ def list_audit_logs(limit: int = 50, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/material-requisitions")
-def list_material_requisitions(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_requisitions(limit: int = 50, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
         .order_by(MaterialRequisition.id.desc())
-        .limit(min(limit, 200))
         .all()
     )
-    return {"success": True, "requisitions": [requisition_to_dict(r) for r in rows]}
+    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role)]
+    return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
-def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = ""):
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse))
         .order_by(MaterialRequisition.id.desc())
-        .limit(min(limit, 200))
         .all()
     )
-    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in rows]}
+    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role)]
+    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
-def get_material_requisition(requisition_id: int, db: Session = Depends(db_session)):
+def get_material_requisition(requisition_id: int, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
     row = (
         db.query(MaterialRequisition)
         .options(
@@ -2788,6 +2851,8 @@ def get_material_requisition(requisition_id: int, db: Session = Depends(db_sessi
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
+    if not user_can_view_requisition(row, viewer, role):
+        raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
     return {"success": True, "requisition": requisition_to_dict(row)}
 
 
@@ -3150,19 +3215,19 @@ async def import_material_requisition_excels(
     }
 
 
-def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = ""):
     rows = (
         db.query(MaterialTransfer)
         .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
         .order_by(MaterialTransfer.id.desc())
-        .limit(min(limit, 200))
         .all()
     )
-    return {"success": True, "transfers": [transfer_to_dict(r, include_items=False) for r in rows]}
+    visible_rows = [r for r in rows if user_can_view_transfer(r, viewer, role)]
+    return {"success": True, "transfers": [transfer_to_dict(r, include_items=False) for r in visible_rows[: min(limit, 200)]]}
 
 
 @app.get("/api/warehouse/material-transfers")
-def list_material_transfers(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
     rows = (
         db.query(MaterialTransfer)
         .options(
@@ -3171,17 +3236,19 @@ def list_material_transfers(limit: int = 50, db: Session = Depends(db_session)):
             selectinload(MaterialTransfer.items).joinedload(MaterialTransferItem.product),
         )
         .order_by(MaterialTransfer.id.desc())
-        .limit(min(limit, 200))
         .all()
     )
-    return {"success": True, "transfers": [transfer_to_dict(r) for r in rows]}
+    visible_rows = [r for r in rows if user_can_view_transfer(r, viewer, role)]
+    return {"success": True, "transfers": [transfer_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
 @app.get("/api/warehouse/material-transfers/{transfer_id}")
-def get_material_transfer(transfer_id: int, db: Session = Depends(db_session)):
+def get_material_transfer(transfer_id: int, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
     row = db.get(MaterialTransfer, transfer_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
+    if not user_can_view_transfer(row, viewer, role):
+        raise HTTPException(status_code=403, detail="Not allowed to view this material transfer")
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
@@ -3251,8 +3318,8 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     approved_transfer_count = len(approved_transfer_rows) if not user_key else sum(
         1
         for row in approved_transfer_rows
-        if normalize_usage_key(row.from_warehouse.name if row.from_warehouse else "") == user_key
-        or normalize_usage_key(row.to_warehouse.name if row.to_warehouse else "") == user_key
+        if warehouse_scope_matches(user, row.from_warehouse.name if row.from_warehouse else "")
+        or warehouse_scope_matches(user, row.to_warehouse.name if row.to_warehouse else "")
     )
     return {
         "success": True,
@@ -3707,6 +3774,8 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
     if row.status != "approved":
         raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
     actor = data.actor.strip()
+    if not is_workflow_role(data.title) and not is_requisition_warehouse_manager(actor, row, db):
+        raise HTTPException(status_code=403, detail="Only the assigned warehouse manager can return this MR")
     row.receiver_comment = data.comment
     row.return_reason = data.comment
     row.status = "returned_for_edit"
@@ -3722,6 +3791,8 @@ def issue_material_requisition(requisition_id: int, data: MaterialRequisitionAct
     row = db.get(MaterialRequisition, requisition_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
+    if not is_workflow_role(data.title) and not is_requisition_warehouse_manager(data.actor.strip(), row, db):
+        raise HTTPException(status_code=403, detail="Only the assigned warehouse manager can issue this MR")
     issue_order = issue_material_requisition_row(db, row, data.actor)
     db.commit()
     db.refresh(row)
