@@ -1083,6 +1083,44 @@ const titles={dashboard:['WH Dashboard',''],setup:['التأسيس','إضافة 
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
+function animateValueText(el){
+  if(!el||el.dataset.animating==='1')return;
+  const node=[...el.childNodes].find(n=>n.nodeType===Node.TEXT_NODE&&/\d/.test(n.textContent||''))||el.firstChild;
+  if(!node||node.nodeType!==Node.TEXT_NODE)return;
+  const text=node.textContent||'';
+  const match=text.match(/^([^0-9-]*)(-?[\d,]+(?:\.\d+)?)(.*)$/);
+  if(!match)return;
+  const value=Number(match[2].replace(/,/g,''));
+  if(!Number.isFinite(value))return;
+  const decimals=(match[2].split('.')[1]||'').length;
+  const prefix=match[1],suffix=match[3],start=performance.now(),duration=850;
+  el.dataset.animating='1';
+  const step=now=>{
+    const t=Math.min(1,(now-start)/duration);
+    const eased=1-Math.pow(1-t,3);
+    const current=value*eased;
+    node.textContent=prefix+current.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals})+suffix;
+    if(t<1)requestAnimationFrame(step);else{node.textContent=text;delete el.dataset.animating}
+  };
+  node.textContent=prefix+(0).toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals})+suffix;
+  requestAnimationFrame(step);
+}
+function animateProgressBars(root){
+  if(!root)return;
+  root.querySelectorAll('.chart-fill,.usage-fill,.meter i,.kpi-progress i').forEach(bar=>{
+    const target=bar.style.width||getComputedStyle(bar).width;
+    if(!target||target==='0px')return;
+    bar.style.transition='none';
+    bar.style.width='0%';
+    bar.getBoundingClientRect();
+    requestAnimationFrame(()=>{bar.style.transition='width 900ms cubic-bezier(.22,1,.36,1)';bar.style.width=target});
+  });
+}
+function animateDashboardSurface(root){
+  if(!root)return;
+  root.querySelectorAll('.command-kpi strong,.workflow-pill strong,.status-tile strong,.chart-row strong,.survey-tile strong,.status-summary-head strong,.status-summary-item strong').forEach(animateValueText);
+  animateProgressBars(root);
+}
 async function api(path,opts={}){const isForm=opts.body instanceof FormData;const headers={...(opts.headers||{})};if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(path,{cache:'no-store',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
 function bindScannerInput(id,handler){const input=document.getElementById(id);if(!input)return;input.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(scanDebounceTimers[id]);handler()}});input.addEventListener('input',()=>{clearTimeout(scanDebounceTimers[id]);const value=input.value.trim();if(value.length<3)return;scanDebounceTimers[id]=setTimeout(()=>handler(),650)})}
 function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
@@ -1223,7 +1261,7 @@ const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort
 const maxRollout=Math.max(...rolloutRows.map(r=>Number(r.rollout_used_qty||0)),1);
 document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?`<div>${rolloutRows.map(r=>`<div class="chart-row"><b>${esc(r.area)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.rollout_used_qty,maxRollout)}%"></div></div><strong>${fmt(r.rollout_used_qty)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد استهلاك Rollout مطابق بعد</div>';
 }
-function renderWarehouse(){renderExecutiveDashboard();renderWorkflowQueues();
+function renderWarehouse(){renderExecutiveDashboard();animateDashboardSurface(document.getElementById('dashboard'));renderWorkflowQueues();
 const myMovements=(wh.movements||[]).filter(userOwnsMovement);
 const myAudit=(wh.audit||[]).filter(userOwnsAudit);
 const stockWhFilter=document.getElementById('stockWhFilter');
@@ -1701,6 +1739,7 @@ renderRolloutWarehouseVsField();
 renderRolloutAreaReportPanel(topRows);
 renderRolloutMapPanel();
 switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
+animateDashboardSurface(table);
 }
 function visibleScanLogs(){if(roleKey()==='admin'||roleKey()==='management'||roleKey()==='warehousemanager'||canApprove())return wh.scanLogs||[];const visibleIds=new Set((wh.mrs||[]).filter(userOwnsMr).map(r=>String(r.id)));return (wh.scanLogs||[]).filter(r=>visibleIds.has(String(r.material_requisition_id))||normalizeText(r.scanned_by)===normalizeText(activeUser))}
 function renderScanLogs(){const box=document.getElementById('scanLogsTable');if(!box)return;box.innerHTML=rowsTable([['MR','mr_order'],['Status','mr_status',(v)=>statusChip(v)],['Site','site_id'],['Warehouse','warehouse'],['SKU','sku'],['Material','material'],['Serial / Code','serial_number',(v,r)=>esc(v||r.scan_code)],['Match','match_type'],['Scanned By','scanned_by'],['Time','created_at',(v)=>esc(String(v||'').replace('T',' ').slice(0,19))]],visibleScanLogs())}
