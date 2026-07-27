@@ -172,18 +172,19 @@ body{
   box-shadow:0 12px 24px rgba(6,31,70,.16);
 }
 .warehouse-flow{
-  margin:2px 0 4px;
-  min-height:250px;
+  margin:8px 0 0;
+  min-height:280px;
+  flex:1;
   display:grid;
   align-items:center;
   justify-items:center;
   opacity:.96;
   position:relative;
-  padding:8px 0 10px;
-  border-block:1px solid rgba(255,255,255,.10);
+  padding:14px 0 6px;
+  border-top:1px solid rgba(255,255,255,.12);
 }
 .warehouse-flow svg{
-  width:min(100%,218px);
+  width:min(100%,226px);
   height:auto;
   overflow:visible;
   filter:drop-shadow(0 18px 24px rgba(2,21,48,.22));
@@ -213,9 +214,9 @@ body{
 }
 .flow-pulse.pink{fill:#ff9ba0;filter:drop-shadow(0 0 8px #ff9ba0)}
 .flow-pulse.blue{fill:#9bccff;filter:drop-shadow(0 0 8px #9bccff)}
-.flow-dot-a{offset-path:path("M105 32 C36 82 34 142 101 166 C151 184 160 226 112 262");animation:flowRun 5.8s linear infinite}
-.flow-dot-b{offset-path:path("M105 32 C168 84 172 141 106 166 C54 186 54 228 112 262");animation:flowRun 4.9s linear infinite .8s}
-.flow-dot-c{offset-path:path("M101 166 C134 128 137 80 105 32");animation:flowRun 4.4s linear infinite 1.4s}
+.flow-dot-a{offset-path:path("M52 66 C126 38 190 94 150 150");animation:flowRun 4.8s linear infinite}
+.flow-dot-b{offset-path:path("M150 150 C187 209 132 260 72 270");animation:flowRun 5.3s linear infinite .7s}
+.flow-dot-c{offset-path:path("M52 66 C22 151 35 236 72 270");animation:flowRun 5.7s linear infinite 1.3s}
 @keyframes flowRun{to{offset-distance:100%}}
 @media(max-width:760px){.warehouse-flow{display:none}}
 .main{padding:26px 24px 30px}
@@ -647,22 +648,6 @@ th{
     <div class="logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
     <div class="brand-copy"><h1>Materials Inventory Management</h1></div>
   </div>
-  <div class="warehouse-flow" aria-hidden="true">
-    <svg viewBox="0 0 220 300" role="img">
-      <path class="flow-link main" d="M105 32 C36 82 34 142 101 166 C151 184 160 226 112 262"/>
-      <path class="flow-link" d="M105 32 C168 84 172 141 106 166 C54 186 54 228 112 262"/>
-      <path class="flow-link" d="M101 166 C134 128 137 80 105 32"/>
-      <circle class="flow-pulse blue flow-dot-a" r="4"/>
-      <circle class="flow-pulse flow-dot-b" r="4"/>
-      <circle class="flow-pulse pink flow-dot-c" r="4"/>
-      <circle class="flow-node tripoli" cx="105" cy="32" r="15"/>
-      <circle class="flow-node freezone" cx="101" cy="166" r="20"/>
-      <circle class="flow-node lnet" cx="112" cy="262" r="10"/>
-      <text class="flow-label" x="128" y="38">Tripoli</text>
-      <text class="flow-label" x="124" y="171">Misurata FZ</text>
-      <text class="flow-label" x="130" y="267">Lnet</text>
-    </svg>
-  </div>
   <nav class="nav">
     <button class="active" data-view="dashboard">WH Dashboard</button>
     <button data-view="mr">Material Request</button>
@@ -674,6 +659,22 @@ th{
     <button data-view="audit">الحركات</button>
     <button class="admin-only" data-view="users">المستخدمين</button>
   </nav>
+  <div class="warehouse-flow" aria-hidden="true">
+    <svg viewBox="0 0 220 300" role="img">
+      <path class="flow-link main" d="M52 66 C126 38 190 94 150 150"/>
+      <path class="flow-link" d="M150 150 C187 209 132 260 72 270"/>
+      <path class="flow-link main" d="M52 66 C22 151 35 236 72 270"/>
+      <circle class="flow-pulse blue flow-dot-a" r="4"/>
+      <circle class="flow-pulse flow-dot-b" r="4"/>
+      <circle class="flow-pulse pink flow-dot-c" r="4"/>
+      <circle class="flow-node freezone" cx="52" cy="66" r="18"/>
+      <circle class="flow-node tripoli" cx="150" cy="150" r="15"/>
+      <circle class="flow-node lnet" cx="72" cy="270" r="11"/>
+      <text class="flow-label" x="77" y="71">Misurata FZ</text>
+      <text class="flow-label" x="122" y="181">Tripoli</text>
+      <text class="flow-label" x="91" y="276">Lnet</text>
+    </svg>
+  </div>
 </aside>
 <main class="main">
   <div class="top">
