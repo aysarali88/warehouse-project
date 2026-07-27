@@ -173,26 +173,27 @@ body{
 }
 .warehouse-flow{
   margin:8px 0 0;
-  min-height:280px;
+  min-height:500px;
   flex:1;
   display:grid;
-  align-items:center;
+  align-items:stretch;
   justify-items:center;
   opacity:.96;
   position:relative;
-  padding:14px 0 6px;
+  padding:18px 0 8px;
   border-top:1px solid rgba(255,255,255,.12);
 }
 .warehouse-flow svg{
-  width:min(100%,226px);
-  height:auto;
+  width:100%;
+  height:100%;
+  min-height:474px;
   overflow:visible;
   filter:drop-shadow(0 18px 24px rgba(2,21,48,.22));
 }
 .flow-link{
   fill:none;
   stroke:rgba(77,230,177,.28);
-  stroke-width:2.4;
+  stroke-width:2.8;
   stroke-linecap:round;
 }
 .flow-link.main{stroke:rgba(112,211,255,.24)}
@@ -202,7 +203,7 @@ body{
 .flow-node.lnet{color:#ff8b8f;fill:#ff8b8f}
 .flow-label{
   fill:rgba(255,255,255,.86);
-  font-size:12px;
+  font-size:15px;
   font-weight:900;
   paint-order:stroke;
   stroke:rgba(8,45,98,.7);
@@ -214,9 +215,9 @@ body{
 }
 .flow-pulse.pink{fill:#ff9ba0;filter:drop-shadow(0 0 8px #ff9ba0)}
 .flow-pulse.blue{fill:#9bccff;filter:drop-shadow(0 0 8px #9bccff)}
-.flow-dot-a{offset-path:path("M52 66 C126 38 190 94 150 150");animation:flowRun 4.8s linear infinite}
-.flow-dot-b{offset-path:path("M150 150 C187 209 132 260 72 270");animation:flowRun 5.3s linear infinite .7s}
-.flow-dot-c{offset-path:path("M52 66 C22 151 35 236 72 270");animation:flowRun 5.7s linear infinite 1.3s}
+.flow-dot-a{offset-path:path("M42 60 C125 20 206 130 159 250");animation:flowRun 4.8s linear infinite}
+.flow-dot-b{offset-path:path("M159 250 C201 347 130 447 62 465");animation:flowRun 5.3s linear infinite .7s}
+.flow-dot-c{offset-path:path("M42 60 C5 210 26 388 62 465");animation:flowRun 5.7s linear infinite 1.3s}
 @keyframes flowRun{to{offset-distance:100%}}
 @media(max-width:760px){.warehouse-flow{display:none}}
 .main{padding:26px 24px 30px}
@@ -660,19 +661,19 @@ th{
     <button class="admin-only" data-view="users">المستخدمين</button>
   </nav>
   <div class="warehouse-flow" aria-hidden="true">
-    <svg viewBox="0 0 220 300" role="img">
-      <path class="flow-link main" d="M52 66 C126 38 190 94 150 150"/>
-      <path class="flow-link" d="M150 150 C187 209 132 260 72 270"/>
-      <path class="flow-link main" d="M52 66 C22 151 35 236 72 270"/>
-      <circle class="flow-pulse blue flow-dot-a" r="4"/>
-      <circle class="flow-pulse flow-dot-b" r="4"/>
-      <circle class="flow-pulse pink flow-dot-c" r="4"/>
-      <circle class="flow-node freezone" cx="52" cy="66" r="18"/>
-      <circle class="flow-node tripoli" cx="150" cy="150" r="15"/>
-      <circle class="flow-node lnet" cx="72" cy="270" r="11"/>
-      <text class="flow-label" x="77" y="71">Misurata FZ</text>
-      <text class="flow-label" x="122" y="181">Tripoli</text>
-      <text class="flow-label" x="91" y="276">Lnet</text>
+    <svg viewBox="0 0 220 520" preserveAspectRatio="xMidYMin meet" role="img">
+      <path class="flow-link main" d="M42 60 C125 20 206 130 159 250"/>
+      <path class="flow-link" d="M159 250 C201 347 130 447 62 465"/>
+      <path class="flow-link main" d="M42 60 C5 210 26 388 62 465"/>
+      <circle class="flow-pulse blue flow-dot-a" r="5"/>
+      <circle class="flow-pulse flow-dot-b" r="5"/>
+      <circle class="flow-pulse pink flow-dot-c" r="5"/>
+      <circle class="flow-node freezone" cx="42" cy="60" r="25"/>
+      <circle class="flow-node tripoli" cx="159" cy="250" r="22"/>
+      <circle class="flow-node lnet" cx="62" cy="465" r="17"/>
+      <text class="flow-label" x="75" y="67">Misurata FZ</text>
+      <text class="flow-label" x="86" y="293">Tripoli</text>
+      <text class="flow-label" x="90" y="471">Lnet</text>
     </svg>
   </div>
 </aside>
