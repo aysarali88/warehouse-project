@@ -2547,7 +2547,8 @@ def list_stock_usage(db: Session = Depends(db_session)):
         product_name = product_display_name(balance.product)
         material_key = canonical_material_key(product_name or (balance.product.sku if balance.product else ""))
         warehouse_key = normalize_usage_key(balance.warehouse.name if balance.warehouse else "")
-        rollout_consumed = rollout_consumed_by_warehouse_material.get((warehouse_key, material_key), 0)
+        rollout_actual = rollout_consumed_by_warehouse_material.get((warehouse_key, material_key), 0)
+        rollout_consumed = min(rollout_actual, total_consumed)
         remaining_after_rollout = display_total - rollout_consumed
         rollout_usage_percent = round((rollout_consumed / display_total) * 100, 2) if display_total else 0
         usage_rows.append(
