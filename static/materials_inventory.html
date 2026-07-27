@@ -1667,11 +1667,6 @@ table.innerHTML=`
       <div class="command-kpi"><span>Actual users</span><strong>${fmt(metric.actualUsers)} <em>/ ${fmt(targetUsers)} users</em></strong><small>${fmt(metric.distributionQty)} / ${fmt(targetDistributionQty)} Single-Core Distribution cables</small><div class="kpi-progress"><i style="width:${usersPct}%"></i></div></div>
     </div>
   </div>
-  <div class="status-strip" style="margin:4px 0 2px">
-    <div class="status-tile good"><span>Installed Cable</span><strong>${fmt(metric.distributionQty+metric.fourCoreQty)}</strong><small>Distribution ${fmt(metric.distributionQty)} · 4-core ${fmt(metric.fourCoreQty)}</small></div>
-    <div class="status-tile warn"><span>Planned Pace</span><strong>${plannedPct.toFixed(0)}%</strong></div>
-    <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
-  </div>
   <div class="dash-grid">
     <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div>${adjustmentHtml}</div></div>
     <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
@@ -1684,10 +1679,6 @@ table.innerHTML=`
       <div class="timeline-ticks"><div>25%<span>${Math.ceil(totalDays*.25)} days</span></div><div>50%<span>${Math.ceil(totalDays*.5)} days</span></div><div>75%<span>${Math.ceil(totalDays*.75)} days</span></div></div>
       <div class="timeline-foot">${timelineGood?'Actual output is aligned with planned pace.':`Behind by ${Math.abs(diff).toFixed(0)}%. Required productivity is ${plannedPct.toFixed(0)}% by ${esc(rolloutDashDateLabel(selectedDate))}; actual productivity is ${actualPct.toFixed(0)}%.`} Actual output ${fmt(metric.actualUsers)} users.</div>
     </div>
-  </div>
-  <div class="rollout-mini-panels">
-    <div class="dash-panel"><h3>Cable Progress by Area (m)</h3>${topRows.length?topRows.map(r=>`<div class="chart-row"><b>${esc(r.name)}</b><div class="chart-track"><div class="chart-fill" style="width:${Math.min(100,Number(r.cablePct||0))}%"></div></div><strong>${fmt(r.cableMeters)} / ${fmt(r.target?.cableMeters||0)}</strong></div>`).join(''):'<div class="empty-soft">No cable progress yet.</div>'}</div>
-    <div class="dash-panel"><h3>Box Deployment by Area</h3>${topRows.length?topRows.map(r=>`<div class="mini-row"><div><b>${esc(r.name)}</b><small>SUB / END ${fmt(r.subEndBox)} / ${fmt(r.target?.subEndBox||0)} · HUB ${fmt(r.hubBox)} / ${fmt(r.target?.hubBox||0)} · XBOX ${fmt(r.xbox)} / ${fmt(r.target?.xbox||0)}</small></div><strong>${fmt(r.totalBoxes)} / ${fmt(r.target?.totalBoxes||0)}</strong></div>`).join(''):'<div class="empty-soft">No box deployment yet.</div>'}</div>
   </div>
   <div class="rollout-support">
     <div class="rollout-support-head"><h3>Site Survey progress</h3><span class="tag">Live from Survey sheet</span></div>
