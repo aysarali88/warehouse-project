@@ -1287,7 +1287,7 @@ if(box)box.innerHTML=latest&&latestItem?`<div class="mini-list">
 ${latestItem.qr_code?`<div class="hint">QR Code: ${esc(latestItem.qr_code)}</div>`:''}
 </div>`:'<div class="empty">لم يتم استلام مواد بعد</div>';
 const receiptRows=(wh.receipts||[]).flatMap(r=>(r.items||[]).map(item=>({source:'DB Receive',order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
-const referenceRows=(initialStockReference.rows||[]).map(r=>({source:'Initial Stock Reference',order_number:r.container_number||'final_WH_tmp.xlsx',receipt_date:'Reference',supplier:r.vendor,warehouse:r.warehouse,sku:r.sku,qr_code:'',name:r.item,quantity:r.quantity,unit:r.unit||'PCS'}));
+const referenceRows=(initialStockReference.rows||[]).map(r=>({source:'Initial Stock Reference',order_number:r.item||'final_WH_tmp.xlsx',receipt_date:'Reference',supplier:r.vendor,warehouse:r.warehouse,sku:r.sku,qr_code:'',name:r.item,quantity:r.quantity,unit:r.unit||'PCS'}));
 const allRows=receiptRows.concat(referenceRows);
 const vendorFilter=document.getElementById('receiveVendorFilter');
 const whFilter=document.getElementById('receiveWhFilter');
