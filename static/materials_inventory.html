@@ -1085,7 +1085,7 @@ const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2'],M
 const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-07-30',targetSubEndBox:292,targetHubBox:23,targetXbox:2,targetCableMeters:32630,targetUsers:2368,note:'Execution risk update'},
-  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:432,targetHubBox:30,targetXbox:3,targetCableMeters:43190,targetUsers:3284,note:'Execution risk update'}
+  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:430,targetHubBox:30,targetXbox:3,targetCableMeters:42940,targetUsers:3284,adjustmentCableMeters:-250,adjustmentSubEndBox:-2,note:'Execution risk update. Map adjustment applied: -250 m cable and -2 SUB / END boxes from the area total.'}
 ];
 const titles={dashboard:['WH Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -1643,6 +1643,7 @@ const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
 const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
+const adjustmentHtml=plan&&(Number(plan.adjustmentCableMeters||0)||Number(plan.adjustmentSubEndBox||0))?`<div class="mini-row"><div><b>Dashboard total adjustment</b><small>${fmt(Math.abs(Number(plan.adjustmentCableMeters||0)))} m cable removed · ${fmt(Math.abs(Number(plan.adjustmentSubEndBox||0)))} SUB / END boxes removed</small></div><strong>${fmt(targetCableMeters)} m / ${fmt(targetSubEndBox)} SUB</strong></div>`:'';
 table.innerHTML=`
 <div class="rollout-management">
   <div class="mgmt-toolbar">
@@ -1672,7 +1673,7 @@ table.innerHTML=`
     <div class="status-tile"><span>User Progress</span><strong>${usersPct.toFixed(1)}%</strong></div>
   </div>
   <div class="dash-grid">
-    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div></div></div>
+    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div>${adjustmentHtml}</div></div>
     <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
   </div>
   <div class="mgmt-timeline">
