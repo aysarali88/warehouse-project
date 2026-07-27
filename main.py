@@ -325,18 +325,26 @@ def warehouse_scope_keys(value: str) -> set[str]:
     if not key:
         return set()
     keys = {key}
+    if any(token in key for token in ("misurata", "misrata", "misrat")):
+        keys.update({"misurata", "misrata", "misuratalnet", "misratalnet"})
     if "freezone" in key:
         keys.update({"freezone", "misuratafreezone", "misratafreezone"})
-    elif any(token in key for token in ("misurata", "misrata", "misrat")):
-        keys.update({"misurata", "misrata", "misuratalnet", "misratalnet"})
-    elif "tripoli" in key:
+    if "tripoli" in key:
         keys.add("tripoli")
     return keys
 
 
 def warehouse_scope_matches(viewer: str, warehouse_name: str) -> bool:
     viewer_keys = warehouse_scope_keys(viewer)
-    warehouse_keys = warehouse_scope_keys(warehouse_name)
+    warehouse_key = normalize_usage_key(warehouse_name)
+    if "freezone" in warehouse_key:
+        warehouse_keys = {"freezone", "misuratafreezone", "misratafreezone"}
+    elif any(token in warehouse_key for token in ("misurata", "misrata", "misrat")):
+        warehouse_keys = {"misurata", "misrata", "misuratalnet", "misratalnet"}
+    elif "tripoli" in warehouse_key:
+        warehouse_keys = {"tripoli"}
+    else:
+        warehouse_keys = warehouse_scope_keys(warehouse_name)
     return bool(viewer_keys and warehouse_keys and viewer_keys.intersection(warehouse_keys))
 
 
