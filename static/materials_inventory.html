@@ -373,6 +373,199 @@ th{
 .command-kpi small{display:block;margin-top:5px;color:rgba(255,255,255,.78);font-size:11px;font-weight:800}
 .kpi-progress{height:6px;margin-top:10px;background:rgba(255,255,255,.24);border-radius:999px;overflow:hidden}
 .kpi-progress i{display:block;height:100%;background:rgba(255,255,255,.9);border-radius:inherit}
+#rolloutDaily>.card{
+  border:1px solid rgba(33,72,245,.14);
+  border-radius:22px;
+  padding:22px;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.96),rgba(242,248,255,.96)),
+    radial-gradient(circle at 0 0,rgba(33,72,245,.10),transparent 30%),
+    radial-gradient(circle at 100% 12%,rgba(19,166,167,.12),transparent 28%);
+  box-shadow:0 22px 55px rgba(17,54,102,.12);
+}
+#rolloutDaily .top{
+  border-radius:18px;
+  background:linear-gradient(135deg,#082d62 0%,#0b4d95 52%,#0a7ba2 100%);
+  border:0;
+  color:#fff;
+  box-shadow:0 18px 38px rgba(11,77,149,.20);
+}
+#rolloutDaily .top h3{
+  margin:0;
+  color:#fff;
+  font-size:34px;
+  line-height:1.15;
+  font-weight:900;
+}
+#rolloutDaily .top .btn.soft{
+  height:44px;
+  padding-inline:18px;
+  border-color:rgba(255,255,255,.45);
+  background:rgba(255,255,255,.94);
+  color:#0b4d95;
+  font-size:16px;
+}
+#rolloutDaily .tabs{
+  padding:8px;
+  border:1px solid #cfe0fb;
+  border-radius:16px;
+  background:linear-gradient(180deg,#f8fbff,#edf5ff);
+}
+#rolloutDaily .tab{
+  height:42px;
+  border-radius:12px;
+  padding-inline:16px;
+  font-size:16px;
+}
+#rolloutDaily .rollout-management{
+  gap:18px;
+  font-size:16px;
+}
+#rolloutDaily .rollout-management .mgmt-toolbar{
+  justify-content:flex-start;
+  padding:14px;
+  border:1px solid #d8e6f1;
+  border-radius:16px;
+  background:#fff;
+}
+#rolloutDaily .field label{
+  font-size:14px;
+  color:#0b4d95;
+}
+#rolloutDaily select,
+#rolloutDaily input{
+  height:46px;
+  border-radius:12px;
+  font-size:16px;
+  font-weight:800;
+}
+#rolloutDaily .command-hero{
+  border-radius:20px;
+  padding:28px;
+  background:linear-gradient(135deg,#082d62 0%,#0b4d95 50%,#0a7ba2 100%);
+}
+#rolloutDaily .command-title small,
+#rolloutDaily .command-title p{
+  font-size:16px;
+}
+#rolloutDaily .command-title h3{
+  font-size:42px;
+  line-height:1.12;
+}
+#rolloutDaily .command-health{
+  height:44px;
+  display:inline-flex;
+  align-items:center;
+  font-size:15px;
+}
+#rolloutDaily .command-kpis{
+  gap:16px;
+}
+#rolloutDaily .command-kpi{
+  min-height:168px;
+  border-radius:16px;
+  padding:18px;
+}
+#rolloutDaily .command-kpi span{
+  font-size:15px;
+}
+#rolloutDaily .command-kpi strong{
+  font-size:36px;
+  line-height:1.12;
+}
+#rolloutDaily .command-kpi small,
+#rolloutDaily .command-kpi em{
+  font-size:14px;
+  line-height:1.5;
+}
+#rolloutDaily .kpi-progress{
+  height:10px;
+  margin-top:14px;
+}
+#rolloutDaily .status-strip,
+#rolloutDaily .workflow-lane{
+  gap:14px;
+}
+#rolloutDaily .status-tile,
+#rolloutDaily .workflow-pill{
+  border-radius:16px;
+  padding:18px;
+}
+#rolloutDaily .status-tile span,
+#rolloutDaily .workflow-pill span,
+#rolloutDaily .status-tile small{
+  font-size:15px;
+}
+#rolloutDaily .status-tile strong,
+#rolloutDaily .workflow-pill strong{
+  font-size:34px;
+}
+#rolloutDaily .dash-panel,
+#rolloutDaily .rollout-support,
+#rolloutDaily .mgmt-timeline,
+#rolloutDaily .rollout-map-board{
+  border-radius:18px;
+  border-color:#d8e6f1;
+  background:linear-gradient(180deg,#fff,#f7fbff);
+  box-shadow:0 16px 34px rgba(17,54,102,.08);
+}
+#rolloutDaily .dash-panel h3,
+#rolloutDaily .rollout-support h3,
+#rolloutDaily .mgmt-timeline h3,
+#rolloutDaily .rollout-map-head h3{
+  font-size:22px;
+  color:#0b4d95;
+}
+#rolloutDaily .mini-row b,
+#rolloutDaily .chart-row b{
+  font-size:15px;
+}
+#rolloutDaily .mini-row small,
+#rolloutDaily .mgmt-timeline p,
+#rolloutDaily .timeline-foot{
+  font-size:14px;
+}
+#rolloutDaily .mini-row strong,
+#rolloutDaily .chart-row strong{
+  font-size:18px;
+  color:#0a335d;
+}
+#rolloutDaily .survey-tile{
+  border-radius:16px;
+  padding:16px;
+}
+#rolloutDaily .survey-tile span,
+#rolloutDaily .survey-tile small{
+  font-size:14px;
+}
+#rolloutDaily .survey-tile strong{
+  font-size:34px;
+}
+#rolloutDaily .shipment-table th,
+#rolloutDaily .shipment-table td,
+#rolloutDaily table th,
+#rolloutDaily table td{
+  font-size:15px;
+  padding:13px 14px;
+}
+#rolloutDaily .empty,
+#rolloutDaily .empty-soft{
+  border-radius:16px;
+  padding:28px;
+  font-size:18px;
+  font-weight:900;
+  background:#f7fbff;
+  color:#0b4d95;
+}
+@media(max-width:960px){
+  #rolloutDaily>.card{padding:14px;border-radius:16px}
+  #rolloutDaily .top{display:grid;grid-template-columns:1fr;border-radius:16px}
+  #rolloutDaily .top h3{font-size:28px}
+  #rolloutDaily .command-title h3{font-size:32px}
+  #rolloutDaily .command-kpis,
+  #rolloutDaily .status-strip,
+  #rolloutDaily .workflow-lane{grid-template-columns:1fr}
+}
 .kpi-breakdown{display:grid;gap:4px;margin-top:8px;font-size:10px;color:rgba(255,255,255,.8)}
 .kpi-breakdown b{display:flex;justify-content:space-between;gap:8px}
 .kpi-breakdown i{font-style:normal;color:#fff}
