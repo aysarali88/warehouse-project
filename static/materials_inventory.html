@@ -40,6 +40,7 @@
   .nav::-webkit-scrollbar{height:0}
   .nav button{flex:0 0 auto;min-width:max-content;height:40px;border-radius:999px;padding:0 14px;background:rgba(255,255,255,.1);font-size:13px;text-align:center;scroll-snap-align:start}
   .nav button.active{background:#fff;color:#073f58}
+  .warehouse-flow{display:none}
   .main{padding:12px 10px 18px;overflow:visible}
   .top{display:grid;gap:10px;margin-bottom:12px}
   .top h2{font-size:24px;line-height:1.2}
@@ -170,6 +171,50 @@ body{
   color:#083d75;
   box-shadow:0 12px 24px rgba(6,31,70,.16);
 }
+.warehouse-flow{
+  margin-top:auto;
+  min-height:270px;
+  display:grid;
+  align-items:center;
+  opacity:.96;
+  position:relative;
+}
+.warehouse-flow svg{
+  width:100%;
+  height:auto;
+  overflow:visible;
+  filter:drop-shadow(0 18px 24px rgba(2,21,48,.18));
+}
+.flow-link{
+  fill:none;
+  stroke:rgba(77,230,177,.28);
+  stroke-width:2.4;
+  stroke-linecap:round;
+}
+.flow-link.main{stroke:rgba(112,211,255,.24)}
+.flow-node{filter:drop-shadow(0 0 12px currentColor)}
+.flow-node.tripoli{color:#8fc5ff;fill:#8fc5ff}
+.flow-node.freezone{color:#55e0a2;fill:#55e0a2}
+.flow-node.lnet{color:#ff8b8f;fill:#ff8b8f}
+.flow-label{
+  fill:rgba(255,255,255,.86);
+  font-size:12px;
+  font-weight:900;
+  paint-order:stroke;
+  stroke:rgba(8,45,98,.7);
+  stroke-width:3px;
+}
+.flow-pulse{
+  fill:#7fffd4;
+  filter:drop-shadow(0 0 8px #7fffd4);
+}
+.flow-pulse.pink{fill:#ff9ba0;filter:drop-shadow(0 0 8px #ff9ba0)}
+.flow-pulse.blue{fill:#9bccff;filter:drop-shadow(0 0 8px #9bccff)}
+.flow-dot-a{offset-path:path("M36 150 C88 94 156 73 221 77 C279 81 322 121 365 169");animation:flowRun 5.8s linear infinite}
+.flow-dot-b{offset-path:path("M38 155 C126 136 236 140 366 171");animation:flowRun 4.7s linear infinite .8s}
+.flow-dot-c{offset-path:path("M36 150 C108 92 168 67 235 78");animation:flowRun 4.9s linear infinite 1.5s}
+@keyframes flowRun{to{offset-distance:100%}}
+@media(max-width:760px){.warehouse-flow{display:none}}
 .main{padding:26px 24px 30px}
 .top{
   display:grid;
@@ -602,6 +647,22 @@ th{
     <button data-view="audit">الحركات</button>
     <button class="admin-only" data-view="users">المستخدمين</button>
   </nav>
+  <div class="warehouse-flow" aria-hidden="true">
+    <svg viewBox="0 0 410 280" role="img">
+      <path class="flow-link main" d="M36 150 C88 94 156 73 221 77 C279 81 322 121 365 169"/>
+      <path class="flow-link" d="M38 155 C126 136 236 140 366 171"/>
+      <path class="flow-link" d="M36 150 C108 92 168 67 235 78"/>
+      <circle class="flow-pulse blue flow-dot-a" r="4"/>
+      <circle class="flow-pulse flow-dot-b" r="4"/>
+      <circle class="flow-pulse pink flow-dot-c" r="4"/>
+      <circle class="flow-node freezone" cx="36" cy="150" r="20"/>
+      <circle class="flow-node tripoli" cx="235" cy="78" r="16"/>
+      <circle class="flow-node lnet" cx="365" cy="171" r="9"/>
+      <text class="flow-label" x="58" y="156">Misurata FZ</text>
+      <text class="flow-label" x="258" y="83">Tripoli</text>
+      <text class="flow-label" x="383" y="176">Lnet</text>
+    </svg>
+  </div>
 </aside>
 <main class="main">
   <div class="top">
