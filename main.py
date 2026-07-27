@@ -1566,17 +1566,17 @@ def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor
 
 @app.get("/")
 def home():
-    return FileResponse("static/materials_inventory.html")
+    return FileResponse("static/materials_inventory.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/rollout")
 def rollout_home():
-    return FileResponse("static/ftth_rollout.html")
+    return FileResponse("static/ftth_rollout.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/warehouse")
 def warehouse_home():
-    return FileResponse("static/materials_inventory.html")
+    return FileResponse("static/materials_inventory.html", headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/auth/login")
