@@ -2735,6 +2735,251 @@ def area_usage_keys(site_id: str, site_address: str) -> set[str]:
     return {key} if key else set()
 
 
+def material_ledger_product_options(db: Session, query: str = "", product_id: int = 0) -> list[Product]:
+    if product_id:
+        product = db.get(Product, product_id)
+        return [product] if product else []
+    term = str(query or "").strip()
+    if not term:
+        return []
+    needle = f"%{term.lower()}%"
+    rows = (
+        db.query(Product)
+        .filter(
+            or_(
+                func.lower(Product.sku).like(needle),
+                func.lower(Product.name).like(needle),
+                func.lower(Product.part_number).like(needle),
+                func.lower(Product.qr_code).like(needle),
+            )
+        )
+        .order_by(Product.name.asc(), Product.sku.asc())
+        .limit(20)
+        .all()
+    )
+    normalized = normalize_usage_key(term)
+    return sorted(
+        rows,
+        key=lambda row: (
+            normalize_usage_key(row.sku) != normalized,
+            normalize_usage_key(row.name) != normalized,
+            row.name,
+            row.sku,
+        ),
+    )
+
+
+def material_ledger_event(
+    *,
+    date: str,
+    event_type: str,
+    reference: str,
+    warehouse: str = "",
+    from_wh: str = "",
+    to_wh: str = "",
+    area: str = "",
+    qty: float = 0,
+    status: str = "",
+    actor: str = "",
+    note: str = "",
+) -> dict:
+    return {
+        "date": str(date or ""),
+        "type": event_type,
+        "reference": reference,
+        "warehouse": warehouse,
+        "from": from_wh,
+        "to": to_wh,
+        "area": area,
+        "quantity": qty or 0,
+        "status": status,
+        "actor": actor,
+        "note": note,
+    }
+
+
+@app.get("/api/warehouse/material-ledger")
+def material_ledger(query: str = "", product_id: int = 0, force: bool = False, db: Session = Depends(db_session)):
+    products = material_ledger_product_options(db, query=query, product_id=product_id)
+    selected = products[0] if products else None
+    matches = [product_to_dict(row) for row in products]
+    if selected is None:
+        return {
+            "success": True,
+            "query": query,
+            "matches": matches,
+            "material": None,
+            "summary": {},
+            "stock_by_warehouse": [],
+            "events": [],
+        }
+
+    product_key = canonical_material_key(product_display_name(selected) or selected.sku)
+    events: list[dict] = []
+    summary = {
+        "total_received": 0,
+        "mr_issued": 0,
+        "tr_out": 0,
+        "tr_in": 0,
+        "returned": 0,
+        "rollout_used": 0,
+        "current_stock": 0,
+    }
+
+    balances = (
+        db.query(StockBalance)
+        .options(joinedload(StockBalance.warehouse))
+        .filter(StockBalance.product_id == selected.id)
+        .order_by(StockBalance.warehouse_id.asc())
+        .all()
+    )
+    stock_by_warehouse = [balance_to_dict(row) for row in balances]
+    summary["current_stock"] = sum(float(row.quantity or 0) for row in balances)
+
+    receipts = (
+        db.query(ReceiveOrder)
+        .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items))
+        .join(ReceiveOrderItem, ReceiveOrderItem.receive_order_id == ReceiveOrder.id)
+        .filter(ReceiveOrderItem.product_id == selected.id)
+        .order_by(ReceiveOrder.id.asc())
+        .all()
+    )
+    for receipt in receipts:
+        qty = sum(float(item.quantity or 0) for item in receipt.items if item.product_id == selected.id)
+        if receipt.status == "confirmed":
+            summary["total_received"] += qty
+        events.append(
+            material_ledger_event(
+                date=receipt.receipt_date or (receipt.created_at.date().isoformat() if receipt.created_at else ""),
+                event_type="GRN",
+                reference=receipt.order_number,
+                warehouse=receipt.warehouse.name if receipt.warehouse else "",
+                qty=qty,
+                status=receipt.status,
+                actor=receipt.created_by,
+                note=receipt.supplier,
+            )
+        )
+
+    requisitions = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
+        .join(MaterialRequisitionItem, MaterialRequisitionItem.requisition_id == MaterialRequisition.id)
+        .filter(MaterialRequisitionItem.product_id == selected.id)
+        .order_by(MaterialRequisition.id.asc())
+        .all()
+    )
+    for requisition in requisitions:
+        qty = sum(float(item.quantity or 0) for item in requisition.items if item.product_id == selected.id)
+        if requisition.status in {"issued", "signed"}:
+            summary["mr_issued"] += qty
+        events.append(
+            material_ledger_event(
+                date=requisition.creation_date or (requisition.created_at.date().isoformat() if requisition.created_at else ""),
+                event_type="MR",
+                reference=requisition.order_number,
+                warehouse=requisition.warehouse.name if requisition.warehouse else "",
+                area=requisition.site_id or requisition.site_address,
+                qty=qty,
+                status=requisition.status,
+                actor=requisition.requester_name or requisition.created_by,
+                note=requisition.team_leader or requisition.receiver_name,
+            )
+        )
+
+    transfers = (
+        db.query(MaterialTransfer)
+        .options(
+            joinedload(MaterialTransfer.from_warehouse),
+            joinedload(MaterialTransfer.to_warehouse),
+            selectinload(MaterialTransfer.items),
+        )
+        .join(MaterialTransferItem, MaterialTransferItem.transfer_id == MaterialTransfer.id)
+        .filter(MaterialTransferItem.product_id == selected.id)
+        .order_by(MaterialTransfer.id.asc())
+        .all()
+    )
+    for transfer in transfers:
+        qty = sum(float(item.quantity or 0) for item in transfer.items if item.product_id == selected.id)
+        if transfer.status == "transferred":
+            summary["tr_out"] += qty
+            summary["tr_in"] += qty
+        common = {
+            "date": transfer.transfer_date or (transfer.created_at.date().isoformat() if transfer.created_at else ""),
+            "reference": transfer.transfer_number,
+            "from_wh": transfer.from_warehouse.name if transfer.from_warehouse else "",
+            "to_wh": transfer.to_warehouse.name if transfer.to_warehouse else "",
+            "qty": qty,
+            "status": transfer.status,
+            "actor": transfer.requester_name or transfer.created_by,
+            "note": transfer.reason or transfer.reference_no,
+        }
+        events.append(material_ledger_event(event_type="TR Out", warehouse=common["from_wh"], **common))
+        events.append(material_ledger_event(event_type="TR In", warehouse=common["to_wh"], **common))
+
+    returns = (
+        db.query(MaterialReturn)
+        .options(joinedload(MaterialReturn.warehouse), selectinload(MaterialReturn.items))
+        .join(MaterialReturnItem, MaterialReturnItem.return_id == MaterialReturn.id)
+        .filter(MaterialReturnItem.product_id == selected.id)
+        .order_by(MaterialReturn.id.asc())
+        .all()
+    )
+    for returned in returns:
+        qty = sum(float(item.quantity or 0) for item in returned.items if item.product_id == selected.id)
+        if returned.status == "confirmed":
+            summary["returned"] += qty
+        events.append(
+            material_ledger_event(
+                date=returned.return_date or (returned.created_at.date().isoformat() if returned.created_at else ""),
+                event_type="RN",
+                reference=returned.return_number,
+                warehouse=returned.warehouse.name if returned.warehouse else "",
+                area=returned.site_id or returned.site_address,
+                qty=qty,
+                status=returned.status,
+                actor=returned.returned_by or returned.created_by,
+                note=returned.reason,
+            )
+        )
+
+    rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
+    for record in rollout_rows:
+        material = str(record.get("material type") or record.get("item") or "").strip()
+        if canonical_material_key(material) != product_key:
+            continue
+        actual = safe_float(record.get("actual"))
+        if actual <= 0:
+            continue
+        summary["rollout_used"] += actual
+        events.append(
+            material_ledger_event(
+                date=str(record.get("Date") or record.get("date") or "")[:10],
+                event_type="Rollout Used",
+                reference=str(record.get("ID") or record.get("id") or record.get("record_id") or ""),
+                area=str(record.get("Area") or record.get("area") or ""),
+                qty=actual,
+                status=str(record.get("status") or record.get("staus") or ""),
+                actor=str(record.get("Supervisor Name") or record.get("supervisor_name") or record.get("team leader") or ""),
+                note=str(record.get("item") or ""),
+            )
+        )
+
+    events.sort(key=lambda row: (row.get("date") or "", row.get("reference") or "", row.get("type") or ""), reverse=True)
+    summary["net_out_mr_tr"] = summary["mr_issued"] + summary["tr_out"]
+    summary["variance_vs_rollout"] = summary["net_out_mr_tr"] - summary["rollout_used"]
+    return {
+        "success": True,
+        "query": query,
+        "matches": matches,
+        "material": product_to_dict(selected),
+        "summary": summary,
+        "stock_by_warehouse": stock_by_warehouse,
+        "events": events[:1000],
+        "rollout_source": rollout_source,
+    }
+
+
 @app.get("/api/warehouse/rollout-material-usage")
 def list_rollout_material_usage(db: Session = Depends(db_session), force: bool = False):
     rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
