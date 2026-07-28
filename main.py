@@ -2821,6 +2821,8 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
         "mr_issued": 0,
         "tr_out": 0,
         "tr_in": 0,
+        "transferred": 0,
+        "net_transfer": 0,
         "returned": 0,
         "rollout_used": 0,
         "current_stock": 0,
@@ -2904,6 +2906,7 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
         if transfer.status == "transferred":
             summary["tr_out"] += qty
             summary["tr_in"] += qty
+            summary["transferred"] += qty
         common = {
             "date": transfer.transfer_date or (transfer.created_at.date().isoformat() if transfer.created_at else ""),
             "reference": transfer.transfer_number,
@@ -2966,8 +2969,9 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
         )
 
     events.sort(key=lambda row: (row.get("date") or "", row.get("reference") or "", row.get("type") or ""), reverse=True)
-    summary["net_out_mr_tr"] = summary["mr_issued"] + summary["tr_out"]
-    summary["variance_vs_rollout"] = summary["net_out_mr_tr"] - summary["rollout_used"]
+    summary["net_transfer"] = summary["tr_in"] - summary["tr_out"]
+    summary["mr_vs_rollout"] = summary["mr_issued"] - summary["rollout_used"]
+    summary["variance_vs_rollout"] = summary["mr_vs_rollout"]
     return {
         "success": True,
         "query": query,
