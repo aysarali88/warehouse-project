@@ -1314,7 +1314,7 @@ function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&w
 function warehouseBootstrapUrl(light=false){const q=authQueryParams();if(light)q.set('light','1');const text=q.toString();return '/api/warehouse/bootstrap'+(text?'?'+text:'')}
 async function loadWarehouse(){try{const cacheKey=warehouseBootstrapCacheKey();const cached=localStorage.getItem(cacheKey);if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function loadWarehouseFull(showToast=true){try{const data=await api(warehouseBootstrapUrl(false));localStorage.setItem(warehouseBootstrapCacheKey(),JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
-async function refreshWarehouse(){try{toast('تحديث سريع...');const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);toast('ظهرت البيانات الأساسية، جاري تحديث التفاصيل...');loadWarehouseFull(false)}catch(e){toast(e.message)}}
+async function refreshWarehouse(){try{toast('جاري تحديث المخزون وبيانات Rollout...');const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);await refreshRolloutDailyProgress(false,true);loadWarehouseFull(false);toast('تم تحديث المخزون وبيانات Rollout')}catch(e){toast(e.message)}}
 function syncWarehouseLater(){localStorage.removeItem(warehouseBootstrapCacheKey());setTimeout(()=>loadWarehouse(),80)}
 async function refreshStockUsage(){const data=await api('/api/warehouse/stock-usage');wh.stockUsage=data.usage||[];renderWarehouse()}
 setTimeout(()=>{refreshStockUsage().catch(()=>{})},2500)
