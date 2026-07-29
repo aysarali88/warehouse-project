@@ -1300,6 +1300,18 @@ let historyScanBusy=false;
 let rolloutRefreshBusy=false;
 let lastRolloutAutoRefresh=0;
 const UI_STATE_KEY='warehouseUiState';
+const APP_CACHE_VERSION='sr-split-20260729-3';
+function clearWarehouseLocalCaches(){
+  Object.keys(localStorage)
+    .filter(k=>k==='warehouseBootstrap'||k.startsWith('warehouseBootstrap:'))
+    .forEach(k=>localStorage.removeItem(k));
+}
+if(localStorage.getItem('warehouseAppCacheVersion')!==APP_CACHE_VERSION){
+  clearWarehouseLocalCaches();
+  localStorage.removeItem('warehouseSession');
+  localStorage.removeItem('warehouseProgram');
+  localStorage.setItem('warehouseAppCacheVersion',APP_CACHE_VERSION);
+}
 let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
 let activeUser=session?.name||'';
 let activeRole=session?.role||'';
@@ -1434,7 +1446,7 @@ setBalanceTab('materialLedger');
 loadMaterialLedger(false);
 }
 function serialLines(id){return document.getElementById(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
-function clearWarehouseBootstrapCache(){Object.keys(localStorage).filter(k=>k==='warehouseBootstrap'||k.startsWith('warehouseBootstrap:')).forEach(k=>localStorage.removeItem(k))}
+function clearWarehouseBootstrapCache(){clearWarehouseLocalCaches()}
 function chooseProgramBeforeLogin(program){currentProgram=normalizeProgram(program);localStorage.setItem('warehouseProgram',currentProgram);document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden');setTimeout(()=>document.getElementById('loginUser')?.focus(),50)}
 function backToProgramChoice(){loginPass.value='';document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
 async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
@@ -1471,7 +1483,12 @@ function canApproveTransfer(r){return isAdmin()||isManagement()||canApprove()}
 function userOwnsMovement(r){if(isAdmin()||isManagement())return true;const me=normalizeText(activeUser);return normalizeText(r.created_by)===me||normalizeText(r.technician)===me||normalizeText(r.warehouse)===me}
 function userOwnsAudit(r){if(isAdmin()||isManagement())return true;return normalizeText(r.actor)===normalizeText(activeUser)}
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
-function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};if(isSingleRan())clearSingleRanRolloutState(false);renderWarehouse()}
+function applyWarehouseData(data,merge=false){
+  if(normalizeProgram(data?.program)!==normalizeProgram(currentProgram))return;
+  wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};
+  if(isSingleRan())clearSingleRanRolloutState(false);
+  renderWarehouse()
+}
 function warehouseBootstrapUrl(light=false){const q=authQueryParams();if(light)q.set('light','1');const text=q.toString();return '/api/warehouse/bootstrap'+(text?'?'+text:'')}
 async function loadWarehouse(){try{const cacheKey=warehouseBootstrapCacheKey();const cached=localStorage.getItem(cacheKey);if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function loadWarehouseFull(showToast=true){try{const data=await api(warehouseBootstrapUrl(false));localStorage.setItem(warehouseBootstrapCacheKey(),JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
