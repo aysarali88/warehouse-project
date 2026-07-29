@@ -1138,6 +1138,7 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
             return db_rollout_records(db), "database"
 
         source_ids = [stable_rollout_record_id(row) for row in rows]
+        source_id_set = set(source_ids)
         existing = {
             row.record_id: row
             for row in db.query(RolloutRecord).filter(RolloutRecord.record_id.in_(source_ids)).all()
@@ -1145,6 +1146,10 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
         try:
             for row in rows:
                 upsert_rollout_record(row, db, existing)
+            # The Google Sheet is authoritative: discard records removed from it.
+            for record in db.query(RolloutRecord).all():
+                if record.record_id not in source_id_set:
+                    db.delete(record)
             db.commit()
             ROLLOUT_LAST_SYNC_AT = time.monotonic()
             clear_rollout_db_cache()
