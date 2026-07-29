@@ -221,6 +221,133 @@ body{
 .flow-dot-c{offset-path:path("M42 60 C5 210 26 388 62 465");animation:flowRun 5.7s linear infinite 1.3s}
 @keyframes flowRun{to{offset-distance:100%}}
 @media(max-width:760px){.warehouse-flow{display:none}}
+.program-picker{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:8px;
+  padding:10px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:14px;
+  background:rgba(255,255,255,.07);
+}
+.program-picker button{
+  height:40px;
+  border-radius:10px;
+  background:rgba(255,255,255,.1);
+  color:rgba(255,255,255,.86);
+  font-weight:900;
+}
+.program-picker button.active{
+  background:#fff;
+  color:#083d75;
+}
+.program-screen{
+  position:relative;
+  overflow:hidden;
+  min-height:100vh;
+  display:grid;
+  place-items:center;
+  padding:22px;
+  background:linear-gradient(180deg,#173e78 0%,#0b82a3 100%);
+}
+.program-screen:before{
+  content:"";
+  position:absolute;
+  inset:-40px;
+  pointer-events:none;
+  opacity:.28;
+  background-image:url("data:image/svg+xml,%3Csvg width='148' height='128' viewBox='0 0 148 128' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%236fd8ff' stroke-opacity='.32' stroke-width='1.4'%3E%3Cpath d='M37 2l35 20v40L37 82 2 62V22z'/%3E%3Cpath d='M111 46l35 20v40l-35 20-35-20V66z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size:148px 128px;
+  animation:hexPulse 7s ease-in-out infinite;
+}
+.program-screen:after{
+  content:"";
+  position:absolute;
+  inset:-25%;
+  pointer-events:none;
+  opacity:.34;
+  background:
+    linear-gradient(116deg,transparent 0 34%,rgba(122,220,255,.34) 35%,transparent 37%),
+    linear-gradient(116deg,transparent 0 54%,rgba(122,220,255,.2) 55%,transparent 57%),
+    linear-gradient(116deg,transparent 0 73%,rgba(255,255,255,.14) 74%,transparent 76%);
+  background-size:820px 260px,680px 220px,760px 240px;
+  animation:fiberFlow 12s linear infinite;
+}
+.program-particles{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  opacity:.45;
+  background:
+    radial-gradient(circle,rgba(255,255,255,.9) 0 1.5px,transparent 2px) 8% 92%/210px 250px,
+    radial-gradient(circle,rgba(255,255,255,.72) 0 1.2px,transparent 2px) 38% 106%/260px 300px,
+    radial-gradient(circle,rgba(255,255,255,.62) 0 1px,transparent 2px) 76% 96%/230px 280px;
+  animation:particlesRise 18s linear infinite;
+}
+.program-card{
+  position:relative;
+  z-index:1;
+  width:min(430px,100%);
+  display:grid;
+  align-content:start;
+  gap:22px;
+  padding:34px 20px;
+  text-align:center;
+  background:transparent;
+  color:#fff;
+  box-shadow:none;
+}
+@keyframes hexPulse{
+  0%,100%{opacity:.18;transform:scale(1)}
+  50%{opacity:.34;transform:scale(1.025)}
+}
+@keyframes fiberFlow{
+  from{transform:translate3d(-9%,6%,0)}
+  to{transform:translate3d(9%,-6%,0)}
+}
+@keyframes particlesRise{
+  from{background-position:8% 108%,38% 118%,76% 112%}
+  to{background-position:8% -22%,38% -18%,76% -24%}
+}
+.program-card h2{
+  max-width:320px;
+  margin:12px auto 8px;
+  font-size:26px;
+  line-height:1.25;
+  color:#fff;
+}
+.program-choice{
+  display:grid;
+  gap:10px;
+  width:min(330px,100%);
+  margin:8px auto 0;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:18px;
+  background:rgba(255,255,255,.08);
+}
+.program-choice button{
+  height:50px;
+  border-radius:10px;
+  background:rgba(255,255,255,.12);
+  color:#fff;
+  font-size:22px;
+  font-weight:900;
+}
+.program-choice button:first-child{
+  background:#fff;
+  color:#083d75;
+}
+body.awaiting-program .nav,
+body.awaiting-program .main{
+  display:none!important;
+}
+body.awaiting-program .side{
+  min-height:100vh;
+}
+body.awaiting-program .program-picker{
+  margin-top:12px;
+}
 .main{padding:26px 24px 30px}
 .top{
   display:grid;
@@ -635,7 +762,18 @@ th{
 </style>
 </head>
 <body>
-<div class="login-screen" id="loginScreen">
+<div class="program-screen" id="programScreen">
+  <div class="program-particles" aria-hidden="true"></div>
+  <div class="program-card">
+    <div class="login-logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
+    <h2>Materials Inventory Management</h2>
+    <div class="program-choice">
+      <button onclick="chooseProgramBeforeLogin('FTTH')">FTTH Warehouse</button>
+      <button onclick="chooseProgramBeforeLogin('SINGLE_RAN')">Single RAN</button>
+    </div>
+  </div>
+</div>
+<div class="login-screen hidden" id="loginScreen">
   <div class="login-card">
     <div class="login-logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
     <h2>Warehouse Login</h2>
@@ -643,24 +781,30 @@ th{
     <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="admin / requester / approval / warehouse"></div>
     <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
     <button class="btn primary full" onclick="loginApp()">Login</button>
+    <button class="btn soft full" onclick="backToProgramChoice()">Back</button>
   </div>
 </div>
 <div class="app hidden" id="appShell">
 <aside class="side">
   <div class="brand">
     <div class="logo"><img src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
-    <div class="brand-copy"><h1>Materials Inventory Management</h1></div>
+    <div class="brand-copy"><h1 id="brandTitle">Materials Inventory Management</h1></div>
+  </div>
+  <div class="program-picker admin-only hidden">
+    <button class="program-switch" data-program="FTTH">FTTH Warehouse</button>
+    <button class="program-switch" data-program="SINGLE_RAN">Single RAN</button>
   </div>
   <nav class="nav">
     <button class="active" data-view="dashboard">WH Dashboard</button>
+    <button class="admin-only" data-view="setup">Setup</button>
     <button data-view="mr">Material Request</button>
     <button data-view="mrHistory">MR History</button>
-    <button data-view="receive">استلام مخزون</button>
+    <button data-view="receive">Receive Inventory</button>
     <button data-view="balances">Inventory</button>
     <button data-view="rolloutDaily">Rollout Progress</button>
     <button data-view="scans">Scan History</button>
-    <button data-view="audit">الحركات</button>
-    <button class="admin-only" data-view="users">المستخدمين</button>
+    <button data-view="audit">Movements</button>
+    <button class="admin-only" data-view="users">Users</button>
   </nav>
   <div class="warehouse-flow" aria-hidden="true">
     <svg viewBox="0 0 220 520" preserveAspectRatio="xMidYMin meet" role="img">
@@ -1160,6 +1304,8 @@ let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
 let activeUser=session?.name||'';
 let activeRole=session?.role||'';
 let activeWarehouseAssignment=session?.warehouse_name||'';
+let currentProgram=session?.program||localStorage.getItem('warehouseProgram')||'FTTH';
+const PROGRAM_LABELS={FTTH:'FTTH',SINGLE_RAN:'Single RAN'};
 let lastApprovalCount=0;
 let appUsers=[];
 let currentEditingMrId=null;
@@ -1170,7 +1316,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-15',targetSubEndBox:292,targetHubBox:23,targetXbox:2,targetCableMeters:32630,targetUsers:2368,note:'Execution risk update'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:430,targetHubBox:30,targetXbox:3,targetCableMeters:42940,targetUsers:3284,adjustmentCableMeters:-250,adjustmentSubEndBox:-2,note:'Execution risk update. Map adjustment applied: -250 m cable and -2 SUB / END boxes from the area total.'}
 ];
-const titles={dashboard:['WH Dashboard',''],setup:['التأسيس','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['استلام مخزون','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['الحركات','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['المستخدمين','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
+const titles={dashboard:['WH Dashboard',''],setup:['Setup','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['Receive Inventory','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['Movements','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['Users','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function fmt(v){return Number(v||0).toLocaleString()}function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),2600)}
 function usageBar(percent){const p=Math.max(0,Math.min(100,Number(percent||0)));const cls=p>=75?'high':p>=40?'mid':'';return `<div class="usage-cell"><div class="usage-bar"><div class="usage-fill ${cls}" style="width:${p}%"></div></div><div class="usage-label">${p.toFixed(1)}% consumed</div></div>`}
@@ -1223,10 +1369,14 @@ function animateDashboardSurface(root){
   animateProgressBars(root);
   animateDashboardRings(root);
 }
-async function api(path,opts={}){const isForm=opts.body instanceof FormData;const headers={...(opts.headers||{})};if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(path,{cache:'no-store',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
+function normalizeProgram(v){const text=String(v||'').toUpperCase().replace(/[\s-]+/g,'_');return ['SINGLE_RAN','SR','SINGLERAN'].includes(text)?'SINGLE_RAN':'FTTH'}
+function programLabel(){return PROGRAM_LABELS[normalizeProgram(currentProgram)]||'FTTH'}
+function withProgramQuery(path){if(!String(path||'').startsWith('/api/warehouse'))return path;const [base,hash='']=String(path).split('#');const [url,query='']=base.split('?');const params=new URLSearchParams(query);if(!params.has('program'))params.set('program',normalizeProgram(currentProgram));return url+'?'+params.toString()+(hash?'#'+hash:'')}
+function scopedJsonBody(body){if(!body||typeof body!=='string')return body;try{const data=JSON.parse(body);if(data&&typeof data==='object'&&!Array.isArray(data)&&!data.program){data.program=normalizeProgram(currentProgram);return JSON.stringify(data)}}catch(e){}return body}
+async function api(path,opts={}){path=withProgramQuery(path);const isForm=opts.body instanceof FormData;if(isForm&&String(path).startsWith('/api/warehouse')&&!opts.body.has('program'))opts.body.append('program',normalizeProgram(currentProgram));else if(!isForm&&opts.body)opts={...opts,body:scopedJsonBody(opts.body)};const headers={...(opts.headers||{})};if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(path,{cache:'no-store',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
 function bindScannerInput(id,handler){const input=document.getElementById(id);if(!input)return;input.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(scanDebounceTimers[id]);handler()}});input.addEventListener('input',()=>{clearTimeout(scanDebounceTimers[id]);const value=input.value.trim();if(value.length<3)return;scanDebounceTimers[id]=setTimeout(()=>handler(),650)})}
 function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
-async function loadUsers(){try{const data=await api('/api/auth/users');appUsers=data.users||[];renderUsers()}catch(e){toast(e.message)}}
+async function loadUsers(){try{const data=await api('/api/auth/users?program='+encodeURIComponent(normalizeProgram(currentProgram)));appUsers=data.users||[];renderUsers()}catch(e){toast(e.message)}}
 function userRowKey(r){return `${String(r.id||'fallback').toLowerCase()}|${String(r.username||'').toLowerCase()}|${String(r.role||'').toLowerCase()}`}
 function userEmailInputId(r){return 'userEmail_'+encodeURIComponent(userRowKey(r)).replace(/%/g,'_')}
 function userWarehouseInputId(r){return 'userWarehouse_'+encodeURIComponent(userRowKey(r)).replace(/%/g,'_')}
@@ -1236,11 +1386,11 @@ function warehouseIdentityKeys(value){const key=normalizeText(value);if(!key)ret
 function warehouseScopeMatches(viewer,warehouse){const a=warehouseScopeKeys(viewer),b=warehouseIdentityKeys(warehouse);for(const key of a){if(b.has(key))return true}return false}
 function authQueryParams(){const p=new URLSearchParams();if(roleKey()==='warehousemanager')p.set('viewer',currentWarehouseKey());else if(activeUser)p.set('viewer',activeUser);if(activeRole)p.set('role',activeRole);return p}
 function authQueryString(prefix='?'){const q=authQueryParams().toString();return q?prefix+q:''}
-function warehouseBootstrapCacheKey(){return 'warehouseBootstrap:'+normalizeText(activeRole)+':'+normalizeText(currentWarehouseKey())+':'+normalizeText(activeUser)}
+function warehouseBootstrapCacheKey(){return 'warehouseBootstrap:'+normalizeProgram(currentProgram)+':'+normalizeText(activeRole)+':'+normalizeText(currentWarehouseKey())+':'+normalizeText(activeUser)}
 function renderUsers(){const box=document.getElementById('usersTable');if(!box)return;const order={'Admin':1,'Management':2,'Requester':3,'Approval':4,'Approver':4,'Warehouse Manager':5};const rows=[...appUsers].sort((a,b)=>(order[a.role]||9)-(order[b.role]||9)||String(a.username).localeCompare(String(b.username)));const enc=v=>encodeURIComponent(String(v??''));box.innerHTML=rowsTable([['Action','_action',(_,r)=>`<div class="row-actions"><button class="btn primary" onclick="saveExistingUserEmail(decodeURIComponent('${enc(r.username)}'),decodeURIComponent('${enc(r.role)}'),decodeURIComponent('${enc(r.name||r.username)}'))">حفظ</button><button class="btn danger" onclick="deleteAppUser(decodeURIComponent('${enc(r.username)}'),decodeURIComponent('${enc(r.role)}'))">حذف</button></div>`],['الصلاحية','role'],['Warehouse','warehouse_name',(_,r)=>`<input id="${userWarehouseInputId(r)}" value="${esc(r.warehouse_name||'')}" placeholder="Tripoli / Misurata / FreeZone" style="min-width:180px">`],['Email','email',(_,r)=>`<input id="${userEmailInputId(r)}" value="${esc(r.email||'')}" placeholder="user@example.com" style="min-width:220px">`],['User','username']],rows)}
-async function createAppUser(){if(!isAdmin()){toast('Admin فقط يقدر يضيف مستخدمين');return}const username=document.getElementById('newUserName').value.trim();const password=document.getElementById('newUserPass').value.trim();const email=document.getElementById('newUserEmail').value.trim();const warehouse_name=document.getElementById('newUserWarehouse').value.trim();const role=document.getElementById('newUserRole').value;if(!username||!password){toast('اكتب User و Pass');return}try{const data=await api('/api/auth/users',{method:'POST',body:JSON.stringify({username,password,role,name:username,email,warehouse_name:role==='Warehouse Manager'?warehouse_name:''})});const key=userRowKey(data.user);appUsers=[data.user,...appUsers.filter(r=>userRowKey(r)!==key)];renderUsers();document.getElementById('newUserName').value='';document.getElementById('newUserPass').value='';document.getElementById('newUserEmail').value='';document.getElementById('newUserWarehouse').value='';toast('تمت إضافة المستخدم')}catch(e){toast(e.message)}}
-async function saveExistingUserEmail(username,role,name){if(!isAdmin()){toast('Admin فقط يقدر يعدل المستخدمين');return}const row=appUsers.find(r=>String(r.username)===String(username)&&String(r.role)===String(role));if(!row){toast('User not found');return}const input=document.getElementById(userEmailInputId(row));const warehouseInput=document.getElementById(userWarehouseInputId(row));const email=(input?.value||'').trim();const warehouse_name=(warehouseInput?.value||'').trim();try{const data=await api('/api/auth/users',{method:'POST',body:JSON.stringify({username,role,name:name||username,email,warehouse_name:role==='Warehouse Manager'?warehouse_name:''})});const key=userRowKey(data.user);appUsers=[data.user,...appUsers.filter(r=>userRowKey(r)!==key)];renderUsers();toast('تم حفظ بيانات المستخدم')}catch(e){toast(e.message)}}
-async function deleteAppUser(username,role){if(!isAdmin()){toast('Admin فقط يقدر يحذف مستخدمين');return}if(normalizeText(username)===normalizeText(activeUser)&&normalizeText(role)===normalizeText(activeRole)){toast('لا تحذف المستخدم اللي داخل منه حالياً');return}if(!confirm(`حذف المستخدم ${username} - ${role}؟`))return;try{await api('/api/auth/users/delete',{method:'POST',body:JSON.stringify({username,role})});appUsers=appUsers.filter(r=>!(r.username===username&&r.role===role));renderUsers();toast('تم حذف المستخدم')}catch(e){toast(e.message)}}
+async function createAppUser(){if(!isAdmin()){toast('Admin فقط يقدر يضيف مستخدمين');return}const username=document.getElementById('newUserName').value.trim();const password=document.getElementById('newUserPass').value.trim();const email=document.getElementById('newUserEmail').value.trim();const warehouse_name=document.getElementById('newUserWarehouse').value.trim();const role=document.getElementById('newUserRole').value;if(!username||!password){toast('اكتب User و Pass');return}try{const data=await api('/api/auth/users',{method:'POST',body:JSON.stringify({program:normalizeProgram(currentProgram),username,password,role,name:username,email,warehouse_name:role==='Warehouse Manager'?warehouse_name:''})});const key=userRowKey(data.user);appUsers=[data.user,...appUsers.filter(r=>userRowKey(r)!==key)];renderUsers();document.getElementById('newUserName').value='';document.getElementById('newUserPass').value='';document.getElementById('newUserEmail').value='';document.getElementById('newUserWarehouse').value='';toast('تمت إضافة المستخدم')}catch(e){toast(e.message)}}
+async function saveExistingUserEmail(username,role,name){if(!isAdmin()){toast('Admin فقط يقدر يعدل المستخدمين');return}const row=appUsers.find(r=>String(r.username)===String(username)&&String(r.role)===String(role));if(!row){toast('User not found');return}const input=document.getElementById(userEmailInputId(row));const warehouseInput=document.getElementById(userWarehouseInputId(row));const email=(input?.value||'').trim();const warehouse_name=(warehouseInput?.value||'').trim();try{const data=await api('/api/auth/users',{method:'POST',body:JSON.stringify({program:normalizeProgram(currentProgram),username,role,name:name||username,email,warehouse_name:role==='Warehouse Manager'?warehouse_name:''})});const key=userRowKey(data.user);appUsers=[data.user,...appUsers.filter(r=>userRowKey(r)!==key)];renderUsers();toast('تم حفظ بيانات المستخدم')}catch(e){toast(e.message)}}
+async function deleteAppUser(username,role){if(!isAdmin()){toast('Admin فقط يقدر يحذف مستخدمين');return}if(normalizeText(username)===normalizeText(activeUser)&&normalizeText(role)===normalizeText(activeRole)){toast('لا تحذف المستخدم اللي داخل منه حالياً');return}if(!confirm(`حذف المستخدم ${username} - ${role}؟`))return;try{await api('/api/auth/users/delete',{method:'POST',body:JSON.stringify({program:normalizeProgram(currentProgram),username,role})});appUsers=appUsers.filter(r=>!(r.username===username&&r.role===role));renderUsers();toast('تم حذف المستخدم')}catch(e){toast(e.message)}}
 function fillSelect(id,rows,label){document.getElementById(id).innerHTML='<option value="">اختر</option>'+rows.map(r=>`<option value="${r.id}">${esc(label(r))}</option>`).join('')}
 function fillTextSelect(id,values,selected=''){const el=document.getElementById(id);if(!el)return;el.innerHTML='<option value="">All</option>'+(values||[]).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');el.value=selected||''}
 function productById(id){return wh.products.find(p=>String(p.id)===String(id))}
@@ -1285,25 +1435,32 @@ loadMaterialLedger(false);
 }
 function serialLines(id){return document.getElementById(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
 function clearWarehouseBootstrapCache(){Object.keys(localStorage).filter(k=>k==='warehouseBootstrap'||k.startsWith('warehouseBootstrap:')).forEach(k=>localStorage.removeItem(k))}
-async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value})});clearWarehouseBootstrapCache();session=data.user;localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
-function logoutApp(){localStorage.removeItem('warehouseSession');clearWarehouseBootstrapCache();session=null;activeUser='';activeRole='';activeWarehouseAssignment='';document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden')}
+function chooseProgramBeforeLogin(program){currentProgram=normalizeProgram(program);localStorage.setItem('warehouseProgram',currentProgram);document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden');setTimeout(()=>document.getElementById('loginUser')?.focus(),50)}
+function backToProgramChoice(){loginPass.value='';document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
+async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
+function logoutApp(){localStorage.removeItem('warehouseSession');clearWarehouseBootstrapCache();session=null;activeUser='';activeRole='';activeWarehouseAssignment='';document.body.classList.remove('awaiting-program');document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
 function uiState(){try{return JSON.parse(localStorage.getItem(UI_STATE_KEY)||'{}')}catch(e){return{}}}
 function saveUiState(patch){localStorage.setItem(UI_STATE_KEY,JSON.stringify({...uiState(),...patch}))}
-function pageLinkState(){const view=document.querySelector('.nav button.active')?.dataset.view||'dashboard';const params=new URLSearchParams();if(view==='rolloutDaily'){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab!=='kpi')params.set('tab',tab);if(tab==='map'){if(warehouseFiberSelectedArea)params.set('area',warehouseFiberSelectedArea);if(warehouseFiberSelectedScope)params.set('xbox',warehouseFiberSelectedScope)}}return `#${view}${params.size?`?${params}`:''}`}
+function pageLinkState(){const view=document.querySelector('.nav button.active')?.dataset.view||'dashboard';const params=new URLSearchParams();if(view==='rolloutDaily'&&!isSingleRan()){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab!=='kpi')params.set('tab',tab);if(tab==='map'){if(warehouseFiberSelectedArea)params.set('area',warehouseFiberSelectedArea);if(warehouseFiberSelectedScope)params.set('xbox',warehouseFiberSelectedScope)}}return `#${view}${params.size?`?${params}`:''}`}
 function updatePageLink(){const next=pageLinkState();if(location.hash!==next)history.replaceState(null,'',next)}
-function applyPageLink(){const raw=location.hash.replace(/^#/,'');if(!raw)return;const [view,query='']=raw.split('?');const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;const params=new URLSearchParams(query);if(view==='rolloutDaily'){warehouseFiberSelectedArea=params.get('area')||'';warehouseFiberSelectedScope=params.get('xbox')||''}switchView(view,false,false);if(view==='rolloutDaily'){const tab=params.get('tab');if(['kpi','compare','map','report','operations'].includes(tab))switchRolloutDailyTab(tab,false,false);if((tab||'kpi')==='map')renderRolloutMapPanel()}}
-function switchView(view,persist=true,syncLink=true){const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return false;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(persist)saveUiState({view});if(syncLink)updatePageLink();if(view==='receive')refreshReceiptsFast();if(view==='mr')refreshMrsFast();if(view==='mrHistory')loadMrHistory(false);if(view==='scans')historyScanFocus();if(view==='rolloutDaily')refreshRolloutDailyProgress(false);return true}
+function applyPageLink(){const raw=location.hash.replace(/^#/,'');if(!raw)return;const [view,query='']=raw.split('?');const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;const params=new URLSearchParams(query);if(view==='rolloutDaily'){warehouseFiberSelectedArea=params.get('area')||'';warehouseFiberSelectedScope=params.get('xbox')||''}switchView(view,false,false);if(view==='rolloutDaily'&&!isSingleRan()){const tab=params.get('tab');if(['kpi','compare','map','report','operations'].includes(tab))switchRolloutDailyTab(tab,false,false);if((tab||'kpi')==='map')renderRolloutMapPanel()}}
+async function switchProgram(program){if(!isAdmin()){toast('Admin only');return}const next=normalizeProgram(program);currentProgram=next;localStorage.setItem('warehouseProgram',next);clearWarehouseBootstrapCache();currentEditingMrId=null;setCurrentUserFromSession();applyPermissions();toast('Loading '+programLabel()+' warehouse...');await loadWarehouse();switchView('dashboard')}
+function switchView(view,persist=true,syncLink=true){if(view==='rolloutDaily'&&isSingleRan()){clearSingleRanRolloutState(false);view='dashboard'}const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return false;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(persist)saveUiState({view});if(syncLink)updatePageLink();if(view==='receive')refreshReceiptsFast();if(view==='mr')refreshMrsFast();if(view==='mrHistory')loadMrHistory(false);if(view==='scans')historyScanFocus();if(view==='rolloutDaily')refreshRolloutDailyProgress(false);return true}
 function roleKey(){return normalizeText(userRole())}
-function applyPermissions(){document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',btn.classList.contains('admin-only')&&roleKey()!=='admin'));document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.return-work').forEach(el=>el.classList.toggle('hidden',!canReturnMaterials()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.rollout-work').forEach(el=>el.classList.toggle('hidden',false));document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',roleKey()!=='admin'));if(roleKey()==='warehousemanager'&&document.querySelector('.nav button.active')?.dataset.view==='users')switchView('dashboard')}
+function isSingleRan(){return normalizeProgram(currentProgram)==='SINGLE_RAN'}
+function clearSingleRanRolloutState(clearView=true){wh.rolloutDailyProgress=[];wh.rolloutUsage=[];wh.rolloutRecords=0;wh.rolloutSource='';['rolloutDailyStats','rolloutDailyKpi','rolloutDailyCompare','rolloutDailyMap','rolloutDailyReport','rolloutDailyOperations','rolloutDailyTable'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=id==='rolloutDailyKpi'?'<div class="empty">Rollout Progress is not available for Single RAN.</div>':''});if(clearView&&document.querySelector('.view.active')?.id==='rolloutDaily')switchView('dashboard')}
+function applyProgramBranding(){const title=document.getElementById('brandTitle');if(title)title.textContent=isSingleRan()?'Single RAN Warehouse':'Materials Inventory Management';document.title=isSingleRan()?'Single RAN Warehouse':'Materials Inventory Management'}
+function applyProgramDefaults(){if(isSingleRan()){if(document.getElementById('mrEntity'))mrEntity.value='Single RAN';if(document.getElementById('mrProject'))mrProject.value='Single RAN';if(document.getElementById('mrDomain'))mrDomain.value='RAN'}else{if(document.getElementById('mrEntity')&&(!mrEntity.value||mrEntity.value==='Single RAN'))mrEntity.value='Rollout';if(document.getElementById('mrProject')&&(!mrProject.value||mrProject.value==='Single RAN'))mrProject.value='FTTH';if(document.getElementById('mrDomain')&&(!mrDomain.value||mrDomain.value==='RAN'))mrDomain.value='Passive'}}
+function applyPermissions(){document.body.classList.remove('awaiting-program');applyProgramBranding();document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',btn.classList.contains('admin-only')&&roleKey()!=='admin'));document.querySelectorAll('.program-picker').forEach(el=>el.classList.add('hidden'));document.querySelectorAll('.program-switch').forEach(btn=>btn.classList.toggle('active',normalizeProgram(btn.dataset.program)===normalizeProgram(currentProgram)));const rolloutBtn=document.querySelector('.nav button[data-view="rolloutDaily"]');if(rolloutBtn)rolloutBtn.classList.toggle('hidden',isSingleRan());document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.return-work').forEach(el=>el.classList.toggle('hidden',!canReturnMaterials()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.rollout-work').forEach(el=>el.classList.toggle('hidden',isSingleRan()));document.querySelectorAll('.admin-only').forEach(el=>{if(!el.classList.contains('program-picker'))el.classList.toggle('hidden',roleKey()!=='admin')});if(isSingleRan())clearSingleRanRolloutState(false);if((roleKey()==='warehousemanager'&&document.querySelector('.nav button.active')?.dataset.view==='users')||(isSingleRan()&&document.querySelector('.nav button.active')?.dataset.view==='rolloutDaily'))switchView('dashboard');applyProgramDefaults()}
 function restoreUiState(){const state=uiState();switchView(state.view||'dashboard',false);setBalanceTab(state.balanceTab||'stockBalances',false);setMrMode(state.mrMode||'mrForm',false);switchRolloutDailyTab(state.rolloutDailyTab||'kpi',false)}
-function applyAuthState(){if(!session){document.getElementById('loginScreen').classList.remove('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();if(location.hash)applyPageLink();else restoreUiState();if(roleKey()==='admin')loadUsers();pollNotifications(false);refreshMrsFast()}
+function applyAuthState(){if(!session){document.getElementById('programScreen').classList.remove('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.add('hidden');return}document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');setCurrentUserFromSession();applyPermissions();if(location.hash)applyPageLink();else restoreUiState();if(roleKey()==='admin')loadUsers();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}
 function isAdmin(){return roleKey()==='admin'}
 function isManagement(){return roleKey()==='management'}
 function canApprove(){return ['approver','approval','admin'].includes(roleKey())}
 function canCreateMr(){return ['requester','admin'].includes(roleKey())}
 function canViewAll(){return ['management','requester','approver','approval','admin'].includes(roleKey())}
-function setCurrentUserFromSession(){activeUser=session?.name||'';activeRole=session?.role||'';activeWarehouseAssignment=session?.warehouse_name||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver';if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa'}
+function setCurrentUserFromSession(){if(session?.program){currentProgram=normalizeProgram(session.program);localStorage.setItem('warehouseProgram',currentProgram)}activeUser=session?.name||'';activeRole=session?.role||'';activeWarehouseAssignment=session?.warehouse_name||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole} - ${programLabel()}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver';if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa'}
 function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
 function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
 function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
@@ -1314,7 +1471,7 @@ function canApproveTransfer(r){return isAdmin()||isManagement()||canApprove()}
 function userOwnsMovement(r){if(isAdmin()||isManagement())return true;const me=normalizeText(activeUser);return normalizeText(r.created_by)===me||normalizeText(r.technician)===me||normalizeText(r.warehouse)===me}
 function userOwnsAudit(r){if(isAdmin()||isManagement())return true;return normalizeText(r.actor)===normalizeText(activeUser)}
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
-function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};renderWarehouse()}
+function applyWarehouseData(data,merge=false){wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};if(isSingleRan())clearSingleRanRolloutState(false);renderWarehouse()}
 function warehouseBootstrapUrl(light=false){const q=authQueryParams();if(light)q.set('light','1');const text=q.toString();return '/api/warehouse/bootstrap'+(text?'?'+text:'')}
 async function loadWarehouse(){try{const cacheKey=warehouseBootstrapCacheKey();const cached=localStorage.getItem(cacheKey);if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function loadWarehouseFull(showToast=true){try{const data=await api(warehouseBootstrapUrl(false));localStorage.setItem(warehouseBootstrapCacheKey(),JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
@@ -1445,7 +1602,7 @@ const second=confirm('تأكيد أخير: هذه العملية لا يمكن �
 if(!second)return;
 try{
 await api(`/api/warehouse/products/${id}/purge`,{method:'POST',body:JSON.stringify({actor:activeUser||'admin',role:activeRole||'Admin'})});
-localStorage.removeItem('warehouseBootstrap');
+clearWarehouseBootstrapCache();
 toast('تم حذف المادة وسجلاتها');
 await loadWarehouse();
 }catch(e){toast(e.message)}
@@ -1520,7 +1677,7 @@ if(!body.name){toast('اكتب اسم المادة');return}
 if(!qty||qty<=0){toast('اكتب كمية صحيحة');return}
 const r=await api('/api/warehouse/receive-inventory',{method:'POST',body:JSON.stringify(body)});
 receiveReceipt.value='';receiveSku.value='';receiveQr.value='';receiveMaterialName.value='';receiveQty.value=1;
-localStorage.removeItem('warehouseBootstrap');
+clearWarehouseBootstrapCache();
 toast('تمت إضافة المخزون: '+r.order_number);
 await loadWarehouse();
 }catch(e){toast(e.message)}
@@ -1548,7 +1705,7 @@ const row=currentStockBySku(body.warehouse_id,body.sku);
 if(!row){toast('SKU غير موجود');return}
 if(!confirm(`تأكيد التسوية؟\n${row.product.name}\nمن ${fmt(row.quantity)} إلى ${fmt(body.quantity)}`))return;
 const r=await api('/api/warehouse/adjust-inventory',{method:'POST',body:JSON.stringify(body)});
-localStorage.removeItem('warehouseBootstrap');
+clearWarehouseBootstrapCache();
 toast(`تمت التسوية: ${fmt(r.old_quantity)} -> ${fmt(r.new_quantity)}`);
 adjustSku.value='';adjustQty.value=0;adjustNote.value='';
 await loadWarehouse();
@@ -1557,7 +1714,7 @@ await loadWarehouse();
 async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
 function setBalanceTab(tab='stockBalances',persist=true){document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));if(document.getElementById('stockBalances'))stockBalances.style.display=tab==='stockBalances'?'block':'none';if(document.getElementById('rolloutUsage'))rolloutUsage.style.display=tab==='rolloutUsage'?'block':'none';if(document.getElementById('materialLedger'))materialLedger.style.display=tab==='materialLedger'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(persist)saveUiState({balanceTab:tab})}
 function setMrMode(mode='mrForm',persist=true){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.toggle('active',x.dataset.mrMode===mode));document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===mode?'block':'none');if(mode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}if(mode==='returnForm'){renderReturnLines();renderReturnsTable()}if(persist)saveUiState({mrMode:mode})}
-document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.program)switchProgram(b.dataset.program);else switchView(b.dataset.view)}));
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
 if(b.dataset.balance){setBalanceTab(b.dataset.balance);return}
 if(b.dataset.mrMode){setMrMode(b.dataset.mrMode)}
@@ -1698,8 +1855,8 @@ function rolloutMapRowHasCode(row,code){const target=normalizeMapCode(code);cons
 function rolloutMapStatus(el,rows){const matches=rows.filter(row=>rolloutMapRowHasCode(row,el.code));if(!matches.length)return{key:'miss',label:'missing',note:'Code not found in rollout rows'};if(el.expectedLength){const exact=matches.some(row=>new RegExp(`(^|[^0-9])${el.expectedLength}\\s*m([^0-9]|$)`,'i').test(rolloutMapRowText(row)));return exact?{key:'ok',label:'correct',note:'Code and planned length found'}:{key:'diff',label:'different',note:'Code found, length not confirmed'}}return{key:'ok',label:'installed',note:'Code found in rollout rows'}}
 function renderRolloutMapPanel(){const box=document.getElementById('rolloutDailyMap');if(!box)return;const page=ROLLOUT_MAP_PAGES[0];box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox)}</p></div></div><div class="map-stage"><img src="${esc(page.image)}" alt="${esc(page.title)}"></div></div>`}function rolloutVarianceLabel(row){const diff=Number(row.remaining_after_rollout||0);if(diff===0)return '<span class="ok">Matched</span>';if(diff>0)return `<span class="bad">Open ${fmt(diff)}</span>`;return `<span class="bad">Over ${fmt(Math.abs(diff))}</span>`}
 function renderRolloutWarehouseVsField(){const box=document.getElementById('rolloutDailyCompare');if(!box)return;const rows=(wh.rolloutUsage||[]).filter(r=>Number(r.mr_issued_qty||0)>0||Number(r.rollout_used_qty||0)>0);if(!rows.length){box.innerHTML='<div class="empty">No warehouse vs field comparison data yet.</div>';return}const totalIssued=rows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const totalInstalled=rows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const totalOpen=rows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);const matchRate=totalIssued?((totalInstalled/totalIssued)*100):0;const viewRows=[...rows].sort((a,b)=>Math.abs(Number(b.remaining_after_rollout||0))-Math.abs(Number(a.remaining_after_rollout||0))||String(a.area).localeCompare(String(b.area)));box.innerHTML=`<div class="workflow-lane" style="margin-bottom:14px"><div class="workflow-pill"><span>Total Issued</span><strong>${fmt(totalIssued)}</strong></div><div class="workflow-pill good"><span>Installed in Field</span><strong>${fmt(totalInstalled)}</strong></div><div class="workflow-pill warn"><span>Open Difference</span><strong>${fmt(totalOpen)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile good"><span>Match Rate</span><strong>${matchRate.toFixed(1)}%</strong></div><div class="status-tile"><span>Compared Lines</span><strong>${fmt(viewRows.length)}</strong></div><div class="status-tile"><span>Areas Covered</span><strong>${fmt(new Set(viewRows.map(r=>r.area)).size)}</strong></div></div>${rowsTable([['Area','area'],['Material','material'],['SKU','sku'],['Issued','mr_issued_qty',(v)=>fmt(v)],['Installed','rollout_used_qty',(v)=>fmt(v)],['Difference','remaining_after_rollout',(v)=>fmt(v)],['Status','usage_match',(v,r)=>rolloutVarianceLabel(r)]],viewRows)}`}
-function renderRolloutAreaReportPanel(productivityRows=[]){const box=document.getElementById('rolloutDailyReport');if(!box)return;const area=selectedRolloutReportArea||'All Areas';if(!area){box.innerHTML='<div class="empty">No area available for report.</div>';return}const isAll=normalizeText(area)==='allareas';const rows=rolloutReportRows(area);const areaMetric=isAll?productivityRows.reduce((acc,r)=>({cableMeters:Number(acc.cableMeters||0)+Number(r.cableMeters||0),totalBoxes:Number(acc.totalBoxes||0)+Number(r.totalBoxes||0),actualUsers:Number(acc.actualUsers||0)+Number(r.actualUsers||0),subEndBox:Number(acc.subEndBox||0)+Number(r.subEndBox||0),hubBox:Number(acc.hubBox||0)+Number(r.hubBox||0),xbox:Number(acc.xbox||0)+Number(r.xbox||0)}),{cableMeters:0,totalBoxes:0,actualUsers:0,subEndBox:0,hubBox:0,xbox:0}):(productivityRows.find(r=>normalizeText(r.name)===normalizeText(area))||{cableMeters:0,totalBoxes:0,actualUsers:0,productivity:0,subEndBox:0,hubBox:0,xbox:0});box.innerHTML=`<div class="report-tools"><div class="field"><label>Select Area</label><select id="rolloutDailyReportArea" onchange="setRolloutReportArea(this.value)"></select></div><button class="btn primary" onclick="downloadRolloutReportPdf('rolloutDailyReportArea')">تنزيل PDF</button></div><div class="workflow-lane" style="margin:14px 0"><div class="workflow-pill"><span>Cable Progress (m)</span><strong>${fmt(areaMetric.cableMeters||0)}</strong></div><div class="workflow-pill good"><span>Box Deployment</span><strong>${fmt(areaMetric.totalBoxes||0)}</strong></div><div class="workflow-pill"><span>Actual Users</span><strong>${fmt(areaMetric.actualUsers||0)}</strong></div></div>${rows.length?rowsTable([['Material','description'],['Installed Qty','quantity',(v)=>fmt(v)],['Unit','description',()=>`Pcs.`],['Comments','comments',(v)=>esc(v?[...v].join(', '):'')]],rows):'<div class="empty-soft">No installed materials for this area.</div>'}`;renderRolloutReport()}
-async function refreshRolloutDailyProgress(showToast=true,forceRefresh=showToast){if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');if((wh.rolloutDailyProgress||[]).length||(wh.rolloutUsage||[]).length){renderRolloutDailyProgress();renderRolloutUsage()}const stamp=Date.now();const dailyUrl=forceRefresh?`/api/warehouse/rollout-daily-progress?limit=5000&refresh=${stamp}`:'/api/warehouse/rollout-daily-progress?limit=5000';const d=await api(dailyUrl);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usageUrl=forceRefresh?`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`:'/api/warehouse/rollout-material-usage';const usage=await api(usageUrl);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
+function renderRolloutAreaReportPanel(productivityRows=[]){const box=document.getElementById('rolloutDailyReport');if(!box)return;const area=selectedRolloutReportArea||'All Areas';if(!area){box.innerHTML='<div class="empty">No area available for report.</div>';return}const isAll=normalizeText(area)==='allareas';const rows=rolloutReportRows(area);const usageRows=(wh.rolloutUsage||[]).filter(r=>isAll||normalizeText(r.area)===normalizeText(area));const areaMetric=isAll?productivityRows.reduce((acc,r)=>({cableMeters:Number(acc.cableMeters||0)+Number(r.cableMeters||0),totalBoxes:Number(acc.totalBoxes||0)+Number(r.totalBoxes||0),actualUsers:Number(acc.actualUsers||0)+Number(r.actualUsers||0),subEndBox:Number(acc.subEndBox||0)+Number(r.subEndBox||0),hubBox:Number(acc.hubBox||0)+Number(r.hubBox||0),xbox:Number(acc.xbox||0)+Number(r.xbox||0)}),{cableMeters:0,totalBoxes:0,actualUsers:0,subEndBox:0,hubBox:0,xbox:0}):(productivityRows.find(r=>normalizeText(r.name)===normalizeText(area))||{cableMeters:0,totalBoxes:0,actualUsers:0,productivity:0,subEndBox:0,hubBox:0,xbox:0});const issued=usageRows.reduce((s,r)=>s+Number(r.mr_issued_qty||0),0);const installed=usageRows.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);const difference=usageRows.reduce((s,r)=>s+Math.max(0,Number(r.remaining_after_rollout||0)),0);box.innerHTML=`<div class="report-tools"><div class="field"><label>Select Area</label><select id="rolloutDailyReportArea" onchange="setRolloutReportArea(this.value)"></select></div><button class="btn primary" onclick="downloadRolloutReportPdf('rolloutDailyReportArea')">تنزيل PDF</button></div><div class="workflow-lane" style="margin:14px 0"><div class="workflow-pill"><span>Cable Progress (m)</span><strong>${fmt(areaMetric.cableMeters||0)}</strong></div><div class="workflow-pill good"><span>Box Deployment</span><strong>${fmt(areaMetric.totalBoxes||0)}</strong></div><div class="workflow-pill"><span>Actual Users</span><strong>${fmt(areaMetric.actualUsers||0)}</strong></div></div><div class="status-strip" style="margin-bottom:14px"><div class="status-tile"><span>Issued to Area</span><strong>${fmt(issued)}</strong></div><div class="status-tile good"><span>Installed</span><strong>${fmt(installed)}</strong></div><div class="status-tile warn"><span>Open Difference</span><strong>${fmt(difference)}</strong></div></div>${rows.length?rowsTable([['Material','description'],['Installed Qty','quantity',(v)=>fmt(v)],['Unit','description',()=>`Pcs.`],['Comments','comments',(v)=>esc(v?[...v].join(', '):'')]],rows):'<div class="empty-soft">No installed materials for this area.</div>'}`;renderRolloutReport()}
+async function refreshRolloutDailyProgress(showToast=true,forceRefresh=showToast){if(isSingleRan()){wh.rolloutDailyProgress=[];wh.rolloutUsage=[];wh.rolloutRecords=0;wh.rolloutSource='';return}if(rolloutRefreshBusy)return;rolloutRefreshBusy=true;try{if(showToast)toast('جاري تحديث Rollout Daily Progress...');if((wh.rolloutDailyProgress||[]).length||(wh.rolloutUsage||[]).length){renderRolloutDailyProgress();renderRolloutUsage()}const stamp=Date.now();const dailyUrl=forceRefresh?`/api/warehouse/rollout-daily-progress?limit=5000&refresh=${stamp}`:'/api/warehouse/rollout-daily-progress?limit=5000';const d=await api(dailyUrl);wh.rolloutDailyProgress=d.records||[];wh.rolloutRecords=d.count||wh.rolloutDailyProgress.length;wh.rolloutSource=d.source||wh.rolloutSource;try{const usageUrl=forceRefresh?`/api/warehouse/rollout-material-usage?force=true&refresh=${stamp}`:'/api/warehouse/rollout-material-usage';const usage=await api(usageUrl);wh.rolloutUsage=usage.usage||wh.rolloutUsage;wh.rolloutRecords=usage.rollout_records||wh.rolloutRecords;wh.rolloutSource=usage.rollout_source||wh.rolloutSource}catch(e){}renderRolloutDailyProgress();renderRolloutUsage();lastRolloutAutoRefresh=Date.now();if(showToast)toast('تم تحديث Rollout Daily Progress')}catch(e){if(showToast)toast(e.message)}finally{rolloutRefreshBusy=false}}
 function rolloutDashDateLabel(value){if(!value)return 'Latest data';const d=new Date(`${value}T00:00:00`);return isNaN(d)?value:d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
 function rolloutDaysInclusive(start,end){const a=new Date(`${start}T00:00:00`),b=new Date(`${end}T00:00:00`);if(isNaN(a)||isNaN(b))return 0;return Math.max(1,Math.round((b-a)/86400000)+1)}
 function rolloutMetricFromRows(rows){
@@ -2185,6 +2342,13 @@ function renderRolloutMapPanel(){
   if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){warehouseFiberReferenceLoading=true;fetch('/static/assets/fiber-map-data.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>{warehouseFiberReference=data}).catch(error=>{box.innerHTML=`<div class="map-note">${esc(error.message)}</div>`}).finally(()=>{warehouseFiberReferenceLoading=false;if(warehouseFiberReference)renderRolloutMapPanel()})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
   const parts=page.all?scopes.flatMap(scope=>wfmParts(scope.area,scope.xbox)):wfmParts(page.area,page.xbox),rows=wh.rolloutDailyProgress||[],counts=wfmMapCounts(parts,rows);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox==='ALL'?'All XBOXes':page.xbox)} · live status from Rollout Daily Progress</p></div>${controls}</div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows)).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
 }
+const baseRenderRolloutDailyProgress=renderRolloutDailyProgress;
+renderRolloutDailyProgress=function(){if(isSingleRan()){clearSingleRanRolloutState(false);return}return baseRenderRolloutDailyProgress()};
+const baseRefreshRolloutDailyProgress=refreshRolloutDailyProgress;
+refreshRolloutDailyProgress=async function(showToast=true,forceRefresh=showToast){if(isSingleRan()){clearSingleRanRolloutState(false);return}return baseRefreshRolloutDailyProgress(showToast,forceRefresh)};
+const baseRenderRolloutMapPanel=renderRolloutMapPanel;
+renderRolloutMapPanel=function(){if(isSingleRan()){const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='';return}return baseRenderRolloutMapPanel()};
+if(isSingleRan())clearSingleRanRolloutState(false);
 </script>
 </body>
 </html>

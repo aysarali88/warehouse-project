@@ -18,8 +18,8 @@ from email.utils import formataddr
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
 from email.message import EmailMessage
@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from database import Base, SessionLocal, engine
+from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker
 from models import (
     AuditLog,
     AppUser,
@@ -67,11 +67,31 @@ DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsh
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
 logger = logging.getLogger(__name__)
 
-Base.metadata.create_all(bind=engine)
+for program_key, db_engine in all_engines():
+    try:
+        Base.metadata.create_all(bind=db_engine)
+    except Exception:
+        logger.exception("%s database initialization failed", program_key)
 
 
-def ensure_optional_columns():
-    if engine.dialect.name == "postgresql":
+def ensure_optional_columns(target_engine=engine):
+    program_tables = [
+        "warehouses",
+        "technicians",
+        "products",
+        "product_serials",
+        "stock_balances",
+        "technician_balances",
+        "stock_movements",
+        "receive_orders",
+        "issue_orders",
+        "material_requisitions",
+        "material_transfers",
+        "material_returns",
+        "material_scan_logs",
+        "app_users",
+    ]
+    if target_engine.dialect.name == "postgresql":
         statements = [
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS part_number VARCHAR DEFAULT ''",
@@ -87,6 +107,35 @@ def ensure_optional_columns():
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS notes VARCHAR DEFAULT ''",
         ]
+        statements.extend([f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
+        statements.extend(
+            [
+                "ALTER TABLE warehouses DROP CONSTRAINT IF EXISTS warehouses_name_key",
+                "ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key",
+                "ALTER TABLE product_serials DROP CONSTRAINT IF EXISTS product_serials_serial_number_key",
+                "ALTER TABLE receive_orders DROP CONSTRAINT IF EXISTS receive_orders_order_number_key",
+                "ALTER TABLE issue_orders DROP CONSTRAINT IF EXISTS issue_orders_order_number_key",
+                "ALTER TABLE material_requisitions DROP CONSTRAINT IF EXISTS material_requisitions_order_number_key",
+                "ALTER TABLE material_transfers DROP CONSTRAINT IF EXISTS material_transfers_transfer_number_key",
+                "ALTER TABLE material_returns DROP CONSTRAINT IF EXISTS material_returns_return_number_key",
+                "DROP INDEX IF EXISTS ix_warehouses_name",
+                "DROP INDEX IF EXISTS ix_products_sku",
+                "DROP INDEX IF EXISTS ix_product_serials_serial_number",
+                "DROP INDEX IF EXISTS ix_receive_orders_order_number",
+                "DROP INDEX IF EXISTS ix_issue_orders_order_number",
+                "DROP INDEX IF EXISTS ix_material_requisitions_order_number",
+                "DROP INDEX IF EXISTS ix_material_transfers_transfer_number",
+                "DROP INDEX IF EXISTS ix_material_returns_return_number",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_program_name ON warehouses (program, name)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_program_sku ON products (program, sku)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_serial_program_serial ON product_serials (program, serial_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_receive_order_program_number ON receive_orders (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_issue_order_program_number ON issue_orders (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_requisition_program_number ON material_requisitions (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
+            ]
+        )
     else:
         statements = [
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
@@ -103,7 +152,28 @@ def ensure_optional_columns():
             "ALTER TABLE rollout_records ADD COLUMN cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN notes VARCHAR DEFAULT ''",
         ]
-    with engine.begin() as conn:
+        statements.extend([f"ALTER TABLE {table} ADD COLUMN program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
+        statements.extend(
+            [
+                "DROP INDEX IF EXISTS ix_warehouses_name",
+                "DROP INDEX IF EXISTS ix_products_sku",
+                "DROP INDEX IF EXISTS ix_product_serials_serial_number",
+                "DROP INDEX IF EXISTS ix_receive_orders_order_number",
+                "DROP INDEX IF EXISTS ix_issue_orders_order_number",
+                "DROP INDEX IF EXISTS ix_material_requisitions_order_number",
+                "DROP INDEX IF EXISTS ix_material_transfers_transfer_number",
+                "DROP INDEX IF EXISTS ix_material_returns_return_number",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_program_name ON warehouses (program, name)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_program_sku ON products (program, sku)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_serial_program_serial ON product_serials (program, serial_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_receive_order_program_number ON receive_orders (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_issue_order_program_number ON issue_orders (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_requisition_program_number ON material_requisitions (program, order_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
+            ]
+        )
+    with target_engine.begin() as conn:
         for statement in statements:
             try:
                 conn.execute(text(statement))
@@ -111,10 +181,102 @@ def ensure_optional_columns():
                 pass
 
 
-ensure_optional_columns()
+for program_key, db_engine in all_engines():
+    try:
+        ensure_optional_columns(db_engine)
+    except Exception:
+        logger.exception("%s optional database migration failed", program_key)
 
 app = FastAPI(title="FTTH Rollout")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+DEFAULT_PROGRAM = "FTTH"
+SINGLE_RAN_PROGRAM = "SINGLE_RAN"
+PROGRAM_LABELS = {
+    DEFAULT_PROGRAM: "FTTH",
+    SINGLE_RAN_PROGRAM: "Single RAN",
+}
+VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
+
+
+def raw_program_value(value: str = "") -> str:
+    return str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def normalize_program(value: str = "") -> str:
+    text = raw_program_value(value)
+    return SINGLE_RAN_PROGRAM if text in {"SINGLE_RAN", "SR", "SINGLERAN"} else DEFAULT_PROGRAM
+
+
+def is_valid_program_value(value: str = "") -> bool:
+    return raw_program_value(value) in VALID_PROGRAM_VALUES
+
+
+def is_single_ran(program: str = "") -> bool:
+    return normalize_program(program) == SINGLE_RAN_PROGRAM
+
+
+def program_filter(model, program: str = ""):
+    return getattr(model, "program") == normalize_program(program)
+
+
+def extract_program_from_body(body: bytes, content_type: str = "") -> str:
+    if not body:
+        return ""
+    text_content_type = str(content_type or "").lower()
+    if "application/json" in text_content_type:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return ""
+        if isinstance(payload, dict):
+            return str(payload.get("program") or "")
+        return ""
+    text = body.decode("utf-8", errors="ignore")
+    if "name=\"program\"" not in text:
+        return ""
+    match = re.search(r'name="program"[\s\S]*?\r?\n\r?\n([^\r\n-]+)', text)
+    return match.group(1).strip() if match else ""
+
+
+@app.middleware("http")
+async def require_program_scope(request: Request, call_next):
+    protected_paths = (
+        "/api/warehouse",
+        "/api/auth/login",
+        "/api/auth/users",
+    )
+    if not request.url.path.startswith(protected_paths):
+        return await call_next(request)
+
+    program_value = request.query_params.get("program", "")
+    body = b""
+    if not program_value and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        body = await request.body()
+        program_value = extract_program_from_body(body, request.headers.get("content-type", ""))
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive
+
+    if not program_value:
+        return JSONResponse({"detail": "Program scope is required"}, status_code=400)
+    if not is_valid_program_value(program_value):
+        return JSONResponse({"detail": "Invalid program scope"}, status_code=400)
+    request.state.program = normalize_program(program_value)
+    return await call_next(request)
+
+
+def is_admin_role(role: str = "") -> bool:
+    return str(role or "").strip().lower() == "admin"
+
+
+def app_user_matches_program(user, program: str = DEFAULT_PROGRAM) -> bool:
+    if is_admin_role(getattr(user, "role", "") if not isinstance(user, dict) else user.get("role", "")):
+        return True
+    user_program = user.get("program", DEFAULT_PROGRAM) if isinstance(user, dict) else getattr(user, "program", DEFAULT_PROGRAM)
+    return normalize_program(user_program) == normalize_program(program)
 
 
 APP_USERS = [
@@ -178,6 +340,7 @@ def verify_password(password: str, stored: str = "") -> bool:
 def serialize_app_user(row, fallback: bool = False) -> dict:
     return {
         "id": getattr(row, "id", "") or "",
+        "program": normalize_program(row.get("program", DEFAULT_PROGRAM) if fallback else getattr(row, "program", DEFAULT_PROGRAM)),
         "username": row["username"] if fallback else row.username,
         "name": (row.get("name") if fallback else row.name) or (row["username"] if fallback else row.username),
         "role": row["role"] if fallback else row.role,
@@ -193,31 +356,99 @@ def fallback_user_template(username: str, role: str) -> dict | None:
 
 
 def migrate_app_user_password_hashes() -> None:
-    with SessionLocal() as db:
-        rows = db.query(AppUser).all()
-        changed = False
-        for row in rows:
-            if row.password_hash and not is_bcrypt_hash(row.password_hash) and not is_legacy_password_hash(row.password_hash) and len(str(row.password_hash)) <= 72:
-                row.password_hash = hash_password(row.password_hash)
-                changed = True
-        if changed:
-            db.commit()
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                rows = db.query(AppUser).all()
+                changed = False
+                for row in rows:
+                    if row.password_hash and not is_bcrypt_hash(row.password_hash) and not is_legacy_password_hash(row.password_hash) and len(str(row.password_hash)) <= 72:
+                        row.password_hash = hash_password(row.password_hash)
+                        changed = True
+                if changed:
+                    db.commit()
+        except Exception:
+            logger.exception("%s app user password migration failed", program_key)
 
 
 migrate_app_user_password_hashes()
 
 
+def sync_admin_users_to_secondary_databases() -> None:
+    sessions = all_sessionmakers()
+    if len(sessions) < 2:
+        return
+    try:
+        with sessions[0][1]() as primary_db:
+            admins = (
+                primary_db.query(AppUser)
+                .filter(AppUser.status == "active", func.lower(AppUser.role) == "admin")
+                .all()
+            )
+            admin_rows = [
+                {
+                    "username": row.username,
+                    "name": row.name or row.username,
+                    "role": row.role,
+                    "password_hash": row.password_hash,
+                    "email": row.email or "",
+                    "warehouse_name": row.warehouse_name or "",
+                }
+                for row in admins
+                if row.username and row.password_hash
+            ]
+    except Exception:
+        logger.exception("Primary admin user read failed")
+        return
+    for program_key, session_factory in sessions[1:]:
+        try:
+            with session_factory() as db:
+                changed = False
+                for row in admin_rows:
+                    existing = (
+                        db.query(AppUser)
+                        .filter(func.lower(AppUser.username) == row["username"].lower(), func.lower(AppUser.role) == "admin")
+                        .first()
+                    )
+                    if existing:
+                        continue
+                    db.add(
+                        AppUser(
+                            program=program_key,
+                            username=row["username"],
+                            name=row["name"],
+                            role=row["role"],
+                            password_hash=row["password_hash"],
+                            email=row["email"],
+                            warehouse_name=row["warehouse_name"],
+                            status="active",
+                        )
+                    )
+                    changed = True
+                if changed:
+                    db.commit()
+        except Exception:
+            logger.exception("%s admin user sync failed", program_key)
+
+
+sync_admin_users_to_secondary_databases()
+
+
 def sync_product_part_numbers() -> None:
-    with SessionLocal() as db:
-        rows = db.query(Product).all()
-        changed = False
-        for row in rows:
-            desired = product_part_number(row.sku, row.part_number)
-            if desired != (row.part_number or ""):
-                row.part_number = desired
-                changed = True
-        if changed:
-            db.commit()
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                rows = db.query(Product).all()
+                changed = False
+                for row in rows:
+                    desired = product_part_number(row.sku, row.part_number)
+                    if desired != (row.part_number or ""):
+                        row.part_number = desired
+                        changed = True
+                if changed:
+                    db.commit()
+        except Exception:
+            logger.exception("%s product part number sync failed", program_key)
 
 
 
@@ -654,6 +885,7 @@ def notify_mr_issued(row: MaterialRequisition, db: Session) -> None:
 class LoginIn(BaseModel):
     username: str
     password: str
+    program: str = DEFAULT_PROGRAM
 
 
 class AppUserIn(BaseModel):
@@ -663,24 +895,29 @@ class AppUserIn(BaseModel):
     name: str = ""
     email: str = ""
     warehouse_name: str = ""
+    program: str = DEFAULT_PROGRAM
 
 
 class AppUserDeleteIn(BaseModel):
     username: str
     role: str
+    program: str = DEFAULT_PROGRAM
 
 
 class WarehouseIn(BaseModel):
     name: str
     location: str = ""
+    program: str = DEFAULT_PROGRAM
 
 
 class TechnicianIn(BaseModel):
     name: str
     phone: str = ""
+    program: str = DEFAULT_PROGRAM
 
 
 class ProductIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     sku: str
     part_number: str = ""
     category: str = ""
@@ -695,6 +932,7 @@ class ProductIn(BaseModel):
 class MaterialScanIn(BaseModel):
     code: str
     actor: str = "system"
+    program: str = DEFAULT_PROGRAM
 
 
 class ReceiveItemIn(BaseModel):
@@ -704,6 +942,7 @@ class ReceiveItemIn(BaseModel):
 
 
 class ReceiveIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     warehouse_id: int
     supplier: str = ""
     receipt_number: str = ""
@@ -713,6 +952,7 @@ class ReceiveIn(BaseModel):
 
 
 class InventoryReceiveIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     receipt_date: str = ""
     receipt_number: str = ""
     supplier: str = ""
@@ -728,6 +968,7 @@ class InventoryReceiveIn(BaseModel):
 
 
 class InventoryAdjustmentIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     warehouse_id: int
     sku: str
     quantity: float = Field(ge=0)
@@ -738,6 +979,7 @@ class InventoryAdjustmentIn(BaseModel):
 class ProductPurgeIn(BaseModel):
     actor: str = "admin"
     role: str = "Admin"
+    program: str = DEFAULT_PROGRAM
 
 
 class IssueItemIn(BaseModel):
@@ -747,6 +989,7 @@ class IssueItemIn(BaseModel):
 
 
 class IssueIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     warehouse_id: int
     technician_id: int
     created_by: str = "system"
@@ -764,6 +1007,7 @@ class MaterialRequisitionItemIn(BaseModel):
 
 
 class MaterialRequisitionIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     creation_date: str = ""
     warehouse_id: int
     entity: str = "Rollout"
@@ -793,6 +1037,7 @@ class MaterialRequisitionIn(BaseModel):
 
 
 class MaterialRequisitionSignatureIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     role: Literal["requester", "receiver"]
     name: str = ""
     title: str = ""
@@ -806,6 +1051,7 @@ class MaterialRequisitionActionIn(BaseModel):
     title: str = ""
     comment: str = ""
     signature: str = ""
+    program: str = DEFAULT_PROGRAM
 
 
 class MaterialTransferItemIn(BaseModel):
@@ -815,6 +1061,7 @@ class MaterialTransferItemIn(BaseModel):
 
 
 class MaterialTransferIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     transfer_date: str = ""
     from_warehouse_id: int
     to_warehouse_id: int
@@ -837,6 +1084,7 @@ class MaterialReturnItemIn(BaseModel):
 
 
 class MaterialReturnIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
     return_date: str = ""
     site_id: str = ""
     site_address: str = ""
@@ -848,8 +1096,9 @@ class MaterialReturnIn(BaseModel):
     items: list[MaterialReturnItemIn]
 
 
-def db_session():
-    db = SessionLocal()
+def db_session(request: Request):
+    program_key = normalize_program(getattr(request.state, "program", request.query_params.get("program", DEFAULT_PROGRAM)))
+    db = get_sessionmaker(program_key)()
     try:
         yield db
     finally:
@@ -895,49 +1144,51 @@ def log_audit(db: Session, action: str, entity_type: str, entity_id: str, actor:
     )
 
 
-def stock_balance(db: Session, warehouse_id: int, product_id: int) -> StockBalance:
+def stock_balance(db: Session, warehouse_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> StockBalance:
+    program_key = normalize_program(program)
     row = (
         db.query(StockBalance)
-        .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product_id)
+        .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product_id, StockBalance.program == program_key)
         .first()
     )
     if row is None:
-        row = StockBalance(warehouse_id=warehouse_id, product_id=product_id, quantity=0)
+        row = StockBalance(program=program_key, warehouse_id=warehouse_id, product_id=product_id, quantity=0)
         db.add(row)
         db.flush()
     return row
 
 
-def technician_balance(db: Session, technician_id: int, product_id: int) -> TechnicianBalance:
+def technician_balance(db: Session, technician_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> TechnicianBalance:
+    program_key = normalize_program(program)
     row = (
         db.query(TechnicianBalance)
-        .filter(TechnicianBalance.technician_id == technician_id, TechnicianBalance.product_id == product_id)
+        .filter(TechnicianBalance.technician_id == technician_id, TechnicianBalance.product_id == product_id, TechnicianBalance.program == program_key)
         .first()
     )
     if row is None:
-        row = TechnicianBalance(technician_id=technician_id, product_id=product_id, quantity=0)
+        row = TechnicianBalance(program=program_key, technician_id=technician_id, product_id=product_id, quantity=0)
         db.add(row)
         db.flush()
     return row
 
 
-def require_product(db: Session, product_id: int) -> Product:
+def require_product(db: Session, product_id: int, program: str = DEFAULT_PROGRAM) -> Product:
     product = db.get(Product, product_id)
-    if product is None:
+    if product is None or normalize_program(getattr(product, "program", DEFAULT_PROGRAM)) != normalize_program(program):
         raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
     return product
 
 
-def require_warehouse(db: Session, warehouse_id: int) -> Warehouse:
+def require_warehouse(db: Session, warehouse_id: int, program: str = DEFAULT_PROGRAM) -> Warehouse:
     warehouse = db.get(Warehouse, warehouse_id)
-    if warehouse is None:
+    if warehouse is None or normalize_program(getattr(warehouse, "program", DEFAULT_PROGRAM)) != normalize_program(program):
         raise HTTPException(status_code=404, detail=f"Warehouse {warehouse_id} not found")
     return warehouse
 
 
-def require_technician(db: Session, technician_id: int) -> Technician:
+def require_technician(db: Session, technician_id: int, program: str = DEFAULT_PROGRAM) -> Technician:
     technician = db.get(Technician, technician_id)
-    if technician is None:
+    if technician is None or normalize_program(getattr(technician, "program", DEFAULT_PROGRAM)) != normalize_program(program):
         raise HTTPException(status_code=404, detail=f"Technician {technician_id} not found")
     return technician
 
@@ -1279,6 +1530,7 @@ def product_display_name(product: Product | None) -> str:
 def product_to_dict(row: Product) -> dict:
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "sku": row.sku,
         "part_number": product_part_number(row.sku, row.part_number),
         "category": row.category,
@@ -1294,6 +1546,7 @@ def product_to_dict(row: Product) -> dict:
 
 def balance_to_dict(row: StockBalance) -> dict:
     return {
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
         "product_id": row.product_id,
@@ -1307,6 +1560,7 @@ def balance_to_dict(row: StockBalance) -> dict:
 
 def technician_balance_to_dict(row: TechnicianBalance) -> dict:
     return {
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "technician_id": row.technician_id,
         "technician": row.technician.name if row.technician else "",
         "product_id": row.product_id,
@@ -1321,6 +1575,7 @@ def technician_balance_to_dict(row: TechnicianBalance) -> dict:
 def movement_to_dict(row: StockMovement) -> dict:
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "type": row.movement_type,
         "reference": row.reference,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -1340,6 +1595,7 @@ def scan_log_to_dict(row: MaterialScanLog) -> dict:
     warehouse = row.warehouse
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "material_requisition_id": row.material_requisition_id,
         "mr_order": requisition.order_number if requisition else "Stock Scan",
         "mr_status": requisition.status if requisition else row.status,
@@ -1377,6 +1633,7 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
         )
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "receipt_date": row.receipt_date,
         "supplier": row.supplier,
@@ -1392,6 +1649,7 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
 def receive_order_header_to_dict(row: ReceiveOrder) -> dict:
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "receipt_date": row.receipt_date,
         "supplier": row.supplier,
@@ -1407,6 +1665,7 @@ def receive_order_header_to_dict(row: ReceiveOrder) -> dict:
 def requisition_to_dict(row: MaterialRequisition) -> dict:
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "creation_date": row.creation_date,
         "warehouse_id": row.warehouse_id,
@@ -1453,6 +1712,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
 
 
 def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "") -> str:
+    program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
     if row.status == "issued":
         raise HTTPException(status_code=400, detail="Material requisition is already issued")
     if row.status not in {"approved", "signed"}:
@@ -1461,14 +1721,15 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
         raise HTTPException(status_code=400, detail="Approver Name is required before warehouse issue")
 
     technician_name = (row.team_leader or row.requester_name or row.receiver_name).strip()
-    technician = db.query(Technician).filter(Technician.name == technician_name).first()
+    technician = db.query(Technician).filter(Technician.name == technician_name, Technician.program == program_key).first()
     if technician is None:
-        technician = Technician(name=technician_name, phone=row.receiver_tel)
+        technician = Technician(program=program_key, name=technician_name, phone=row.receiver_tel)
         db.add(technician)
         db.flush()
 
     issued_by = actor.strip() or row.created_by
     issue = IssueOrder(
+        program=program_key,
         order_number=next_number(db, IssueOrder, "MR-ISS"),
         warehouse_id=row.warehouse_id,
         technician_id=technician.id,
@@ -1481,8 +1742,8 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
     for item in row.items:
         if not item.product_id:
             raise HTTPException(status_code=400, detail=f"MR line {item.line_no} is not linked to a product")
-        product = require_product(db, item.product_id)
-        balance = stock_balance(db, row.warehouse_id, item.product_id)
+        product = require_product(db, item.product_id, program_key)
+        balance = stock_balance(db, row.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
             material_name = product_display_name(product) or product.sku or f"product {product.id}"
@@ -1494,10 +1755,11 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
                 ),
             )
         balance.quantity -= item.quantity
-        technician_balance(db, technician.id, item.product_id).quantity += item.quantity
+        technician_balance(db, technician.id, item.product_id, program_key).quantity += item.quantity
         db.add(IssueOrderItem(issue_order_id=issue.id, product_id=item.product_id, quantity=item.quantity, serial_number=""))
         db.add(
             StockMovement(
+                program=program_key,
                 movement_type="issue_to_technician",
                 product_id=item.product_id,
                 warehouse_id=row.warehouse_id,
@@ -1515,19 +1777,20 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
 
 
 def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
+    program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
     restored = 0.0
     movements = (
         db.query(StockMovement)
-        .filter(StockMovement.reference == row.order_number, StockMovement.movement_type == "issue_to_technician")
+        .filter(StockMovement.reference == row.order_number, StockMovement.movement_type == "issue_to_technician", StockMovement.program == program_key)
         .all()
     )
     for movement in movements:
         qty = abs(movement.quantity or 0)
         if movement.warehouse_id and movement.product_id:
-            stock_balance(db, movement.warehouse_id, movement.product_id).quantity += qty
+            stock_balance(db, movement.warehouse_id, movement.product_id, program_key).quantity += qty
             restored += qty
         if movement.technician_id and movement.product_id:
-            tech_balance = technician_balance(db, movement.technician_id, movement.product_id)
+            tech_balance = technician_balance(db, movement.technician_id, movement.product_id, program_key)
             tech_balance.quantity = max(0, (tech_balance.quantity or 0) - qty)
         db.delete(movement)
 
@@ -1587,13 +1850,21 @@ def warehouse_home():
 @app.post("/api/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
     key = data.username.strip().lower()
+    program_key = normalize_program(data.program)
     try:
         db_user = (
             db.query(AppUser)
             .filter(func.lower(AppUser.username) == key, AppUser.status == "active")
             .all()
         )
-        user = next((row for row in db_user if verify_password(data.password, row.password_hash)), None)
+        user = next(
+            (
+                row
+                for row in db_user
+                if app_user_matches_program(row, program_key) and verify_password(data.password, row.password_hash)
+            ),
+            None,
+        )
         if user:
             if user.password_hash and not is_bcrypt_hash(user.password_hash):
                 user.password_hash = hash_password(data.password)
@@ -1601,6 +1872,7 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             return {
                 "success": True,
                 "user": {
+                    "program": program_key,
                     "username": user.username,
                     "name": user.name or user.username,
                     "role": user.role,
@@ -1613,7 +1885,12 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             .filter(func.lower(AppUser.username) == key, AppUser.status == "inactive")
             .all()
         )
-        if any(verify_password(data.password, row.password_hash) for row in deleted_fallback):
+        if any(
+            not is_admin_role(row.role)
+            and app_user_matches_program(row, program_key)
+            and verify_password(data.password, row.password_hash)
+            for row in deleted_fallback
+        ):
             raise HTTPException(status_code=401, detail="Invalid username or password")
     except HTTPException:
         raise
@@ -1624,15 +1901,37 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
         (
             row
             for row in APP_USERS
-            if row["username"].lower() == key and verify_password(data.password, row["password_hash"])
+            if row["username"].lower() == key
+            and app_user_matches_program(row, program_key)
+            and verify_password(data.password, row["password_hash"])
         ),
         None,
     )
+    if fallback_user is None and is_single_ran(program_key):
+        matching_fallback_user = next(
+            (
+                row
+                for row in APP_USERS
+                if row["username"].lower() == key and verify_password(data.password, row["password_hash"])
+            ),
+            None,
+        )
+        matching_fallback_admin = next(
+            (
+                row
+                for row in APP_USERS
+                if row["username"].lower() == key and is_admin_role(row["role"])
+            ),
+            None,
+        )
+        if matching_fallback_user and matching_fallback_admin:
+            fallback_user = matching_fallback_admin
     if fallback_user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return {
         "success": True,
         "user": {
+            "program": program_key,
             "username": fallback_user["username"],
             "name": fallback_user["name"],
             "role": fallback_user["role"],
@@ -1644,6 +1943,7 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
 def requisition_header_to_dict(row: MaterialRequisition) -> dict:
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "creation_date": row.creation_date,
         "warehouse_id": row.warehouse_id,
@@ -1709,6 +2009,7 @@ def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
     materials = [item.description for item in row.items if str(item.description or "").strip()]
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "creation_date": row.creation_date,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -1741,10 +2042,13 @@ def requisition_history_payload(
     date_to: str = "",
     viewer: str = "",
     role: str = "",
+    program: str = DEFAULT_PROGRAM,
 ) -> dict:
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
+        .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
@@ -1814,6 +2118,7 @@ def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
         ]
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "transfer_number": row.transfer_number,
         "transfer_date": row.transfer_date,
         "from_warehouse_id": row.from_warehouse_id,
@@ -1857,6 +2162,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
         ]
     return {
         "id": row.id,
+        "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "return_number": row.return_number,
         "return_date": row.return_date,
         "site_id": row.site_id,
@@ -1874,14 +2180,20 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
 
 
 @app.get("/api/auth/users")
-def list_app_users(db: Session = Depends(db_session)):
+def list_app_users(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     try:
-        db_rows = db.query(AppUser).filter(AppUser.status == "active").order_by(AppUser.id.asc()).all()
+        db_query = db.query(AppUser).filter(AppUser.status == "active")
+        if is_single_ran(program_key):
+            db_query = db_query.filter(AppUser.program == program_key, AppUser.role != "Admin")
+        else:
+            db_query = db_query.filter(or_(AppUser.program == program_key, AppUser.role == "Admin"))
+        db_rows = db_query.order_by(AppUser.id.asc()).all()
         db_users = [serialize_app_user(row) for row in db_rows]
         seen = {app_user_key(row.username, row.role) for row in db_rows}
         deleted = {
             app_user_key(row.username, row.role)
-            for row in db.query(AppUser).filter(AppUser.status == "inactive").all()
+            for row in db.query(AppUser).filter(AppUser.status == "inactive", AppUser.program == program_key).all()
         }
     except Exception:
         db.rollback()
@@ -1891,6 +2203,8 @@ def list_app_users(db: Session = Depends(db_session)):
     fallback_users = [
         serialize_app_user(row, fallback=True)
         for row in APP_USERS
+        if not is_single_ran(program_key)
+        and app_user_matches_program(row, program_key)
         if app_user_key(row["username"], row["role"]) not in seen
         and app_user_key(row["username"], row["role"]) not in deleted
     ]
@@ -1905,15 +2219,19 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
     username = data.username.strip()
     password = data.password.strip()
     role = data.role.strip()
+    program_key = normalize_program(data.program)
     if not username:
         raise HTTPException(status_code=400, detail="User is required")
+    filters = [
+        func.lower(AppUser.username) == username.lower(),
+        AppUser.role == role,
+        AppUser.status == "active",
+    ]
+    if not is_admin_role(role):
+        filters.append(AppUser.program == program_key)
     existing = (
         db.query(AppUser)
-        .filter(
-            func.lower(AppUser.username) == username.lower(),
-            AppUser.role == role,
-            AppUser.status == "active",
-        )
+        .filter(*filters)
         .first()
     )
     if existing:
@@ -1929,6 +2247,7 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
         if not password_hash:
             raise HTTPException(status_code=400, detail="Password is required")
         user = AppUser(
+            program=DEFAULT_PROGRAM if is_admin_role(role) else program_key,
             username=username,
             name=data.name.strip() or username,
             role=role,
@@ -1950,25 +2269,26 @@ def create_app_user(data: AppUserIn, db: Session = Depends(db_session)):
 def delete_app_user(data: AppUserDeleteIn, db: Session = Depends(db_session)):
     username = data.username.strip()
     role = data.role.strip()
+    program_key = normalize_program(data.program)
     if not username or not role:
         raise HTTPException(status_code=400, detail="User and role are required")
-    user = (
-        db.query(AppUser)
-        .filter(
-            func.lower(AppUser.username) == username.lower(),
-            AppUser.role == role,
-            AppUser.status == "active",
-        )
-        .first()
-    )
+    filters = [
+        func.lower(AppUser.username) == username.lower(),
+        AppUser.role == role,
+        AppUser.status == "active",
+    ]
+    if not is_admin_role(role):
+        filters.append(AppUser.program == program_key)
+    user = db.query(AppUser).filter(*filters).first()
     if user:
         user.status = "inactive"
     else:
         fallback = fallback_user_template(username, role)
-        if not fallback:
+        if not fallback or is_single_ran(program_key):
             raise HTTPException(status_code=404, detail="User not found")
         db.add(
             AppUser(
+                program=DEFAULT_PROGRAM,
                 username=username,
                 name=fallback.get("name") or username,
                 role=role,
@@ -2004,7 +2324,9 @@ def save_record(data: dict, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/rollout-daily-progress")
-def list_rollout_daily_progress(limit: int = 500, refresh: str = "", db: Session = Depends(db_session)):
+def list_rollout_daily_progress(limit: int = 500, refresh: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    if is_single_ran(program):
+        return {"success": True, "source": "disabled", "count": 0, "records": []}
     force_refresh = str(refresh or "").strip().lower() in {"1", "true", "yes", "now"} or str(refresh or "").strip().isdigit()
     rows, source = rollout_daily_progress_records(db, force=force_refresh)
     limited = list(reversed(rows))[: min(max(limit, 1), 10000)]
@@ -2020,7 +2342,14 @@ def list_rollout_daily_progress(limit: int = 500, refresh: str = "", db: Session
 
 
 @app.get("/api/warehouse/rollout-source-check")
-def rollout_source_check():
+def rollout_source_check(program: str = DEFAULT_PROGRAM):
+    if is_single_ran(program):
+        return {
+            "success": True,
+            "checked_at": datetime.now(TRIPOLI_TZ).isoformat(),
+            "sources": [],
+            "source": "disabled",
+        }
     sources = []
     for source, url in rollout_csv_urls():
         try:
@@ -2052,47 +2381,52 @@ def rollout_source_check():
 
 
 @app.get("/api/warehouse/summary")
-def warehouse_summary(db: Session = Depends(db_session)):
+def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     return {
         "success": True,
-        "warehouses": db.query(Warehouse).count(),
-        "technicians": db.query(Technician).count(),
-        "products": db.query(Product).count(),
-        "stock_movements": db.query(StockMovement).count(),
-        "open_serials": db.query(ProductSerial).filter(ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
+        "program": program_key,
+        "warehouses": db.query(Warehouse).filter(Warehouse.program == program_key).count(),
+        "technicians": db.query(Technician).filter(Technician.program == program_key).count(),
+        "products": db.query(Product).filter(Product.program == program_key).count(),
+        "stock_movements": db.query(StockMovement).filter(StockMovement.program == program_key).count(),
+        "open_serials": db.query(ProductSerial).filter(ProductSerial.program == program_key, ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
     }
 
 
 @app.get("/api/warehouse/bootstrap")
-def warehouse_bootstrap(light: bool = False, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
-    cache_key = f"{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
+def warehouse_bootstrap(light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
     cached = WAREHOUSE_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < WAREHOUSE_CACHE_TTL:
         return {**cached[1], "cached": True}
 
-    stock = list_stock_balances(db)
-    usage = list_stock_usage(db)
-    movements = list_stock_movements(12 if light else 40, db)
+    stock = list_stock_balances(program_key, db)
+    usage = list_stock_usage(program_key, db)
+    movements = list_stock_movements(12 if light else 40, program_key, db)
     mrs = (
-        list_material_requisition_headers(80, db=db, viewer=viewer, role=role)
+        list_material_requisition_headers(80, db=db, viewer=viewer, role=role, program=program_key)
         if light
-        else list_material_requisitions(200, db=db, viewer=viewer, role=role)
+        else list_material_requisitions(200, viewer=viewer, role=role, program=program_key, db=db)
     )
-    receipts = list_receive_order_headers(12, db) if light else list_receive_orders(60, db)
+    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(60, program_key, db)
     transfers = (
-        list_material_transfer_headers(120, db=db, viewer=viewer, role=role)
+        list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
         if light
-        else list_material_transfers(200, db=db, viewer=viewer, role=role)
+        else list_material_transfers(200, viewer=viewer, role=role, program=program_key, db=db)
     )
-    returns = list_material_return_headers(120, db) if light else list_material_returns(200, db)
-    scans = list_material_scans(80 if light else 300, db)
+    returns = list_material_return_headers(120, program_key, db) if light else list_material_returns(200, program_key, db)
+    scans = list_material_scans(80 if light else 300, program_key, db)
     payload = {
         "success": True,
+        "program": program_key,
+        "programLabel": PROGRAM_LABELS[program_key],
         "partial": light,
-        "summary": warehouse_summary(db),
-        "warehouses": list_warehouses(db)["warehouses"],
-        "technicians": list_technicians(db)["technicians"],
-        "products": list_products(db)["products"],
+        "summary": warehouse_summary(program_key, db),
+        "warehouses": list_warehouses(program_key, db)["warehouses"],
+        "technicians": list_technicians(program_key, db)["technicians"],
+        "products": list_products(program_key, db)["products"],
         "stockBalances": stock["balances"],
         "stockUsage": usage["usage"],
         "movements": movements["movements"],
@@ -2103,33 +2437,42 @@ def warehouse_bootstrap(light: bool = False, viewer: str = "", role: str = "", d
         "scanLogs": scans["scans"],
     }
     if not light:
-        tech = list_technician_balances(db)
-        rollout = list_rollout_material_usage(db)
-        daily_progress = list_rollout_daily_progress(5000, db)
-        audit = list_audit_logs(40, db)
+        tech = list_technician_balances(program_key, db)
+        audit = list_audit_logs(40, program_key, db)
         payload.update(
             {
                 "technicianBalances": tech["balances"],
-                "rolloutUsage": rollout["usage"],
-                "rolloutRecords": rollout["rollout_records"],
-                "rolloutSource": rollout.get("rollout_source", ""),
-                "rolloutDailyProgress": daily_progress["records"],
                 "audit": audit["logs"],
             }
         )
+        if not is_single_ran(program_key):
+            rollout = list_rollout_material_usage(db=db)
+            daily_progress = list_rollout_daily_progress(limit=5000, db=db)
+            payload.update(
+                {
+                    "rolloutUsage": rollout["usage"],
+                    "rolloutRecords": rollout["rollout_records"],
+                    "rolloutSource": rollout.get("rollout_source", ""),
+                    "rolloutDailyProgress": daily_progress["records"],
+                }
+            )
+        else:
+            payload.update({"rolloutUsage": [], "rolloutRecords": 0, "rolloutSource": "", "rolloutDailyProgress": []})
     WAREHOUSE_CACHE[cache_key] = (time.monotonic(), payload)
     return payload
 
 
 @app.get("/api/warehouse/warehouses")
-def list_warehouses(db: Session = Depends(db_session)):
-    rows = db.query(Warehouse).order_by(Warehouse.name).all()
-    return {"success": True, "warehouses": [{"id": r.id, "name": r.name, "location": r.location, "status": r.status} for r in rows]}
+def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    rows = db.query(Warehouse).filter(Warehouse.program == program_key).order_by(Warehouse.name).all()
+    return {"success": True, "warehouses": [{"id": r.id, "program": program_key, "name": r.name, "location": r.location, "status": r.status} for r in rows]}
 
 
 @app.post("/api/warehouse/warehouses")
 def create_warehouse(data: WarehouseIn, db: Session = Depends(db_session)):
-    row = Warehouse(name=data.name.strip(), location=data.location.strip())
+    program_key = normalize_program(data.program)
+    row = Warehouse(program=program_key, name=data.name.strip(), location=data.location.strip())
     db.add(row)
     try:
         db.commit()
@@ -2138,28 +2481,31 @@ def create_warehouse(data: WarehouseIn, db: Session = Depends(db_session)):
         raise HTTPException(status_code=400, detail="Warehouse name already exists") from exc
     db.refresh(row)
     clear_warehouse_cache()
-    return {"success": True, "warehouse": {"id": row.id, "name": row.name, "location": row.location, "status": row.status}}
+    return {"success": True, "warehouse": {"id": row.id, "program": program_key, "name": row.name, "location": row.location, "status": row.status}}
 
 
 @app.get("/api/warehouse/technicians")
-def list_technicians(db: Session = Depends(db_session)):
-    rows = db.query(Technician).order_by(Technician.name).all()
-    return {"success": True, "technicians": [{"id": r.id, "name": r.name, "phone": r.phone, "status": r.status} for r in rows]}
+def list_technicians(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    rows = db.query(Technician).filter(Technician.program == program_key).order_by(Technician.name).all()
+    return {"success": True, "technicians": [{"id": r.id, "program": program_key, "name": r.name, "phone": r.phone, "status": r.status} for r in rows]}
 
 
 @app.post("/api/warehouse/technicians")
 def create_technician(data: TechnicianIn, db: Session = Depends(db_session)):
-    row = Technician(name=data.name.strip(), phone=data.phone.strip())
+    program_key = normalize_program(data.program)
+    row = Technician(program=program_key, name=data.name.strip(), phone=data.phone.strip())
     db.add(row)
     db.commit()
     db.refresh(row)
     clear_warehouse_cache()
-    return {"success": True, "technician": {"id": row.id, "name": row.name, "phone": row.phone, "status": row.status}}
+    return {"success": True, "technician": {"id": row.id, "program": program_key, "name": row.name, "phone": row.phone, "status": row.status}}
 
 
 @app.get("/api/warehouse/products")
-def list_products(db: Session = Depends(db_session)):
-    rows = db.query(Product).order_by(Product.sku).all()
+def list_products(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    rows = db.query(Product).filter(Product.program == program_key).order_by(Product.sku).all()
     return {"success": True, "products": [product_to_dict(r) for r in rows]}
 
 
@@ -2173,7 +2519,8 @@ def scan_code_candidates(scanned: str) -> list[str]:
 
 
 @app.get("/api/warehouse/scan-material")
-def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depends(db_session)):
+def scan_material(code: str, warehouse_id: int | None = None, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     scanned = code.strip()
     if not scanned:
         raise HTTPException(status_code=400, detail="Scan code is required")
@@ -2182,7 +2529,7 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
     serial_row = (
         db.query(ProductSerial)
         .options(joinedload(ProductSerial.product))
-        .filter(ProductSerial.serial_number.in_(candidates))
+        .filter(ProductSerial.program == program_key, ProductSerial.serial_number.in_(candidates))
         .first()
     )
     product = serial_row.product if serial_row else None
@@ -2192,6 +2539,7 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
         product = (
             db.query(Product)
             .filter(
+                Product.program == program_key,
                 or_(
                     Product.qr_code.in_(candidates),
                     Product.sku.in_(candidates),
@@ -2219,21 +2567,21 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
     if warehouse_id:
         balance = (
             db.query(StockBalance)
-            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id)
+            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id, StockBalance.program == program_key)
             .first()
         )
     elif serial_row and serial_row.warehouse_id:
         warehouse_id = serial_row.warehouse_id
         balance = (
             db.query(StockBalance)
-            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id)
+            .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id, StockBalance.program == program_key)
             .first()
         )
     else:
         balances = (
             db.query(StockBalance)
             .options(joinedload(StockBalance.warehouse))
-            .filter(StockBalance.product_id == product.id, StockBalance.quantity > 0)
+            .filter(StockBalance.product_id == product.id, StockBalance.program == program_key, StockBalance.quantity > 0)
             .order_by(StockBalance.quantity.desc())
             .all()
         )
@@ -2269,7 +2617,8 @@ def scan_material(code: str, warehouse_id: int | None = None, db: Session = Depe
 
 
 @app.get("/api/warehouse/material-scans")
-def list_material_scans(limit: int = 300, db: Session = Depends(db_session)):
+def list_material_scans(limit: int = 300, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialScanLog)
         .options(
@@ -2277,6 +2626,7 @@ def list_material_scans(limit: int = 300, db: Session = Depends(db_session)):
             joinedload(MaterialScanLog.product),
             joinedload(MaterialScanLog.warehouse),
         )
+        .filter(MaterialScanLog.program == program_key)
         .order_by(MaterialScanLog.id.desc())
         .limit(min(limit, 500))
         .all()
@@ -2286,11 +2636,10 @@ def list_material_scans(limit: int = 300, db: Session = Depends(db_session)):
 
 @app.post("/api/warehouse/material-scans/scan-record")
 def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_session)):
+    program_key = normalize_program(data.program)
     scanned = data.code.strip()
-    found = scan_material(scanned, None, db)
-    product = db.get(Product, found["product"]["id"])
-    if product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
+    found = scan_material(scanned, None, program_key, db)
+    product = require_product(db, found["product"]["id"], program_key)
 
     warehouse_id = found.get("warehouse_id")
     balance = float(found.get("balance") or 0)
@@ -2301,7 +2650,11 @@ def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_
     if serial_number:
         duplicate = (
             db.query(MaterialScanLog)
-            .filter(MaterialScanLog.material_requisition_id.is_(None), MaterialScanLog.serial_number == serial_number)
+            .filter(
+                MaterialScanLog.program == program_key,
+                MaterialScanLog.material_requisition_id.is_(None),
+                MaterialScanLog.serial_number == serial_number,
+            )
             .first()
         )
         if duplicate:
@@ -2309,6 +2662,7 @@ def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_
 
     log = MaterialScanLog(
         material_requisition_id=None,
+        program=program_key,
         product_id=product.id,
         warehouse_id=warehouse_id,
         scan_code=scanned,
@@ -2336,20 +2690,19 @@ def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/scan-record")
 def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session = Depends(db_session)):
+    program_key = normalize_program(data.program)
     row = (
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product), joinedload(MaterialRequisition.warehouse))
-        .filter(MaterialRequisition.id == requisition_id)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
         .first()
     )
     if row is None:
         raise HTTPException(status_code=404, detail="MR not found")
 
     scanned = data.code.strip()
-    found = scan_material(scanned, row.warehouse_id, db)
-    product = db.get(Product, found["product"]["id"])
-    if product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
+    found = scan_material(scanned, row.warehouse_id, program_key, db)
+    product = require_product(db, found["product"]["id"], program_key)
 
     requested_qty = sum((item.quantity or 0) for item in row.items if item.product_id == product.id)
     if requested_qty <= 0:
@@ -2359,7 +2712,11 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
     if serial_number:
         duplicate = (
             db.query(MaterialScanLog)
-            .filter(MaterialScanLog.material_requisition_id == row.id, MaterialScanLog.serial_number == serial_number)
+            .filter(
+                MaterialScanLog.program == program_key,
+                MaterialScanLog.material_requisition_id == row.id,
+                MaterialScanLog.serial_number == serial_number,
+            )
             .first()
         )
         if duplicate:
@@ -2367,7 +2724,12 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
 
     scanned_qty = (
         db.query(func.count(MaterialScanLog.id))
-        .filter(MaterialScanLog.material_requisition_id == row.id, MaterialScanLog.product_id == product.id, MaterialScanLog.status == "matched")
+        .filter(
+            MaterialScanLog.program == program_key,
+            MaterialScanLog.material_requisition_id == row.id,
+            MaterialScanLog.product_id == product.id,
+            MaterialScanLog.status == "matched",
+        )
         .scalar()
         or 0
     )
@@ -2376,6 +2738,7 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
 
     log = MaterialScanLog(
         material_requisition_id=row.id,
+        program=program_key,
         product_id=product.id,
         warehouse_id=row.warehouse_id,
         scan_code=scanned,
@@ -2404,9 +2767,11 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
 
 @app.post("/api/warehouse/products")
 def create_product(data: ProductIn, db: Session = Depends(db_session)):
+    program_key = normalize_program(data.program)
     sku = data.sku.strip()
     name = material_display_name(data.name.strip(), sku)
     row = Product(
+        program=program_key,
         sku=sku,
         part_number=product_part_number(sku, data.part_number),
         category=data.category.strip(),
@@ -2433,7 +2798,8 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
     if data.role.strip().lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     product = db.get(Product, product_id)
-    if product is None:
+    program_key = normalize_program(data.program)
+    if product is None or normalize_program(getattr(product, "program", DEFAULT_PROGRAM)) != program_key:
         raise HTTPException(status_code=404, detail="Product not found")
 
     receive_order_ids = [row[0] for row in db.query(ReceiveOrderItem.receive_order_id).filter(ReceiveOrderItem.product_id == product.id).distinct().all()]
@@ -2442,11 +2808,11 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
     transfer_order_ids = [row[0] for row in db.query(MaterialTransferItem.transfer_id).filter(MaterialTransferItem.product_id == product.id).distinct().all()]
     snapshot = product_to_dict(product)
 
-    db.query(ProductSerial).filter(ProductSerial.product_id == product.id).delete(synchronize_session=False)
-    db.query(StockBalance).filter(StockBalance.product_id == product.id).delete(synchronize_session=False)
-    db.query(TechnicianBalance).filter(TechnicianBalance.product_id == product.id).delete(synchronize_session=False)
-    db.query(StockMovement).filter(StockMovement.product_id == product.id).delete(synchronize_session=False)
-    db.query(MaterialScanLog).filter(MaterialScanLog.product_id == product.id).delete(synchronize_session=False)
+    db.query(ProductSerial).filter(ProductSerial.product_id == product.id, ProductSerial.program == program_key).delete(synchronize_session=False)
+    db.query(StockBalance).filter(StockBalance.product_id == product.id, StockBalance.program == program_key).delete(synchronize_session=False)
+    db.query(TechnicianBalance).filter(TechnicianBalance.product_id == product.id, TechnicianBalance.program == program_key).delete(synchronize_session=False)
+    db.query(StockMovement).filter(StockMovement.product_id == product.id, StockMovement.program == program_key).delete(synchronize_session=False)
+    db.query(MaterialScanLog).filter(MaterialScanLog.product_id == product.id, MaterialScanLog.program == program_key).delete(synchronize_session=False)
     db.query(ReceiveOrderItem).filter(ReceiveOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(IssueOrderItem).filter(IssueOrderItem.product_id == product.id).delete(synchronize_session=False)
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.product_id == product.id).delete(synchronize_session=False)
@@ -2477,10 +2843,12 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
 
 
 @app.get("/api/warehouse/stock-balances")
-def list_stock_balances(db: Session = Depends(db_session)):
+def list_stock_balances(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
+        .filter(StockBalance.program == program_key)
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
         .all()
     )
@@ -2488,10 +2856,12 @@ def list_stock_balances(db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/stock-usage")
-def list_stock_usage(db: Session = Depends(db_session)):
+def list_stock_usage(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     balances = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
+        .filter(StockBalance.program == program_key)
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
         .all()
     )
@@ -2499,7 +2869,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
             db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(StockMovement.quantity))
-            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["receive", "return_in", "transfer_in"]))
+            .filter(StockMovement.program == program_key, StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["receive", "return_in", "transfer_in"]))
             .group_by(StockMovement.warehouse_id, StockMovement.product_id)
             .all()
         )
@@ -2508,6 +2878,7 @@ def list_stock_usage(db: Session = Depends(db_session)):
         db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
         .filter(
             StockMovement.warehouse_id.isnot(None),
+            StockMovement.program == program_key,
             StockMovement.movement_type == "issue_to_technician",
         )
     )
@@ -2519,12 +2890,12 @@ def list_stock_usage(db: Session = Depends(db_session)):
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
             db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(StockMovement.quantity))
-            .filter(StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "adjustment")
+            .filter(StockMovement.program == program_key, StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "adjustment")
             .group_by(StockMovement.warehouse_id, StockMovement.product_id)
             .all()
         )
     }
-    rollout_rows, _ = rollout_daily_progress_records(db)
+    rollout_rows, _ = (rollout_daily_progress_records(db) if not is_single_ran(program_key) else ([], "disabled"))
     rollout_consumed_by_warehouse_material: dict[tuple[str, str], float] = {}
     for record in rollout_rows:
         material = str(record.get("material type") or record.get("item") or "").strip()
@@ -2580,10 +2951,12 @@ def list_stock_usage(db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/technician-balances")
-def list_technician_balances(db: Session = Depends(db_session)):
+def list_technician_balances(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(TechnicianBalance)
         .options(joinedload(TechnicianBalance.technician), joinedload(TechnicianBalance.product))
+        .filter(TechnicianBalance.program == program_key)
         .order_by(TechnicianBalance.technician_id, TechnicianBalance.product_id)
         .all()
     )
@@ -2591,11 +2964,13 @@ def list_technician_balances(db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/technician-material-usage")
-def list_technician_material_usage(db: Session = Depends(db_session)):
+def list_technician_material_usage(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows: dict[tuple[str, int], dict] = {}
     requisitions = (
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product))
+        .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.asc())
         .all()
     )
@@ -2629,7 +3004,7 @@ def list_technician_material_usage(db: Session = Depends(db_session)):
             current["mr_issued_qty"] += item.quantity or 0
             current["last_mr"] = requisition.order_number
 
-    balances = db.query(TechnicianBalance).all()
+    balances = db.query(TechnicianBalance).filter(TechnicianBalance.program == program_key).all()
     for balance in balances:
         technician_name = balance.technician.name if balance.technician else ""
         if not technician_name:
@@ -2990,7 +3365,9 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
 
 
 @app.get("/api/warehouse/rollout-material-usage")
-def list_rollout_material_usage(db: Session = Depends(db_session), force: bool = False):
+def list_rollout_material_usage(db: Session = Depends(db_session), force: bool = False, program: str = DEFAULT_PROGRAM):
+    if is_single_ran(program):
+        return {"success": True, "usage": [], "rollout_records": 0, "rollout_source": "disabled"}
     rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
     rollout_area_usage: dict[tuple[str, str], float] = {}
     rollout_material_usage: dict[str, float] = {}
@@ -3005,7 +3382,7 @@ def list_rollout_material_usage(db: Session = Depends(db_session), force: bool =
         rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
         rollout_material_usage[material_key] = rollout_material_usage.get(material_key, 0) + actual
 
-    mr_usage = list_technician_material_usage(db)["usage"]
+    mr_usage = list_technician_material_usage(DEFAULT_PROGRAM, db)["usage"]
     rows = []
     for row in mr_usage:
         material = row["material"]
@@ -3042,7 +3419,8 @@ def list_rollout_material_usage(db: Session = Depends(db_session), force: bool =
 
 
 @app.get("/api/warehouse/movements")
-def list_stock_movements(limit: int = 50, db: Session = Depends(db_session)):
+def list_stock_movements(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(StockMovement)
         .options(
@@ -3050,6 +3428,7 @@ def list_stock_movements(limit: int = 50, db: Session = Depends(db_session)):
             joinedload(StockMovement.technician),
             joinedload(StockMovement.product),
         )
+        .filter(StockMovement.program == program_key)
         .order_by(StockMovement.id.desc())
         .limit(min(limit, 200))
         .all()
@@ -3058,8 +3437,20 @@ def list_stock_movements(limit: int = 50, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/audit-logs")
-def list_audit_logs(limit: int = 50, db: Session = Depends(db_session)):
-    rows = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 200)).all()
+def list_audit_logs(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    program_token = f'"program": "{program_key}"'
+    if program_key == DEFAULT_PROGRAM:
+        audit_filter = or_(AuditLog.details.contains(program_token), ~AuditLog.details.contains('"program"'))
+    else:
+        audit_filter = AuditLog.details.contains(program_token)
+    rows = (
+        db.query(AuditLog)
+        .filter(audit_filter)
+        .order_by(AuditLog.id.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
     return {
         "success": True,
         "logs": [
@@ -3078,10 +3469,12 @@ def list_audit_logs(limit: int = 50, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/material-requisitions")
-def list_material_requisitions(limit: int = 50, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
+def list_material_requisitions(limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
+        .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
@@ -3089,10 +3482,12 @@ def list_material_requisitions(limit: int = 50, viewer: str = "", role: str = ""
     return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
-def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = ""):
+def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse))
+        .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
@@ -3101,14 +3496,15 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
-def get_material_requisition(requisition_id: int, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
+def get_material_requisition(requisition_id: int, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     row = (
         db.query(MaterialRequisition)
         .options(
             joinedload(MaterialRequisition.warehouse),
             selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product),
         )
-        .filter(MaterialRequisition.id == requisition_id)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
         .first()
     )
     if row is None:
@@ -3129,6 +3525,7 @@ def list_material_requisition_history(
     date_to: str = "",
     viewer: str = "",
     role: str = "",
+    program: str = DEFAULT_PROGRAM,
     db: Session = Depends(db_session),
 ):
     payload = requisition_history_payload(
@@ -3142,6 +3539,7 @@ def list_material_requisition_history(
         date_to=date_to,
         viewer=viewer,
         role=role,
+        program=program,
     )
     return {"success": True, **payload}
 
@@ -3157,6 +3555,7 @@ def export_material_requisition_history(
     date_to: str = "",
     viewer: str = "",
     role: str = "",
+    program: str = DEFAULT_PROGRAM,
     db: Session = Depends(db_session),
 ):
     payload = requisition_history_payload(
@@ -3170,6 +3569,7 @@ def export_material_requisition_history(
         date_to=date_to,
         viewer=viewer,
         role=role,
+        program=program,
     )
     workbook = Workbook()
     sheet = workbook.active
@@ -3258,10 +3658,11 @@ def find_sheet_value(grid: list[list[str]], *labels: str) -> str:
     return ""
 
 
-def product_lookup_maps(db: Session) -> tuple[dict[str, Product], dict[str, Product]]:
+def product_lookup_maps(db: Session, program: str = DEFAULT_PROGRAM) -> tuple[dict[str, Product], dict[str, Product]]:
+    program_key = normalize_program(program)
     exact: dict[str, Product] = {}
     material_keys: dict[str, Product] = {}
-    for product in db.query(Product).filter(Product.status == "active").all():
+    for product in db.query(Product).filter(Product.program == program_key, Product.status == "active").all():
         for value in (product.sku, product.part_number, product_display_name(product), product.name):
             key = excel_key(value)
             if key:
@@ -3303,7 +3704,7 @@ def find_import_header(row: list[str]) -> dict[str, int]:
     return mapping
 
 
-def parse_import_items(db: Session, grid: list[list[str]]) -> list[MaterialRequisitionItemIn]:
+def parse_import_items(db: Session, grid: list[list[str]], program: str = DEFAULT_PROGRAM) -> list[MaterialRequisitionItemIn]:
     header_row = -1
     header: dict[str, int] = {}
     for index, row in enumerate(grid):
@@ -3315,7 +3716,7 @@ def parse_import_items(db: Session, grid: list[list[str]]) -> list[MaterialRequi
     if header_row < 0:
         raise ValueError("Items table was not found")
 
-    exact, material_keys = product_lookup_maps(db)
+    exact, material_keys = product_lookup_maps(db, program)
     items: list[MaterialRequisitionItemIn] = []
     empty_count = 0
     for row in grid[header_row + 1 :]:
@@ -3352,24 +3753,26 @@ def parse_import_items(db: Session, grid: list[list[str]]) -> list[MaterialRequi
     return items
 
 
-def find_warehouse_for_import(db: Session, grid: list[list[str]], default_warehouse_id: int = 0) -> Warehouse:
+def find_warehouse_for_import(db: Session, grid: list[list[str]], default_warehouse_id: int = 0, program: str = DEFAULT_PROGRAM) -> Warehouse:
+    program_key = normalize_program(program)
     name = find_sheet_value(grid, "Warehouse name", "Warehouse")
     row = None
     if name:
-        row = db.query(Warehouse).filter(func.lower(Warehouse.name) == name.lower()).first()
+        row = db.query(Warehouse).filter(Warehouse.program == program_key, func.lower(Warehouse.name) == name.lower()).first()
         if row is None:
             key = normalize_usage_key(name)
-            row = next((w for w in db.query(Warehouse).all() if normalize_usage_key(w.name) == key), None)
+            row = next((w for w in db.query(Warehouse).filter(Warehouse.program == program_key).all() if normalize_usage_key(w.name) == key), None)
     if row is None and default_warehouse_id:
-        row = db.get(Warehouse, default_warehouse_id)
+        row = db.query(Warehouse).filter(Warehouse.id == default_warehouse_id, Warehouse.program == program_key).first()
     if row is None:
         raise ValueError("Warehouse was not found in the sheet")
     return row
 
 
-def next_import_order_number(db: Session) -> str:
+def next_import_order_number(db: Session, program: str = DEFAULT_PROGRAM) -> str:
     """Return the next unused numeric MR number for sheets without an Order No."""
-    values = db.query(MaterialRequisition.order_number).all()
+    program_key = normalize_program(program)
+    values = db.query(MaterialRequisition.order_number).filter(MaterialRequisition.program == program_key).all()
     numbers = []
     for (value,) in values:
         try:
@@ -3377,27 +3780,37 @@ def next_import_order_number(db: Session) -> str:
         except (TypeError, ValueError):
             continue
     candidate = max(numbers, default=0) + 1
-    while db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == str(candidate)).first():
+    while (
+        db.query(MaterialRequisition.id)
+        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == str(candidate))
+        .first()
+    ):
         candidate += 1
     return str(candidate)
 
 
-def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str) -> MaterialRequisition:
+def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
+    program_key = normalize_program(program)
     grid = sheet_grid(sheet)
-    warehouse = find_warehouse_for_import(db, grid, default_warehouse_id)
-    items = parse_import_items(db, grid)
+    warehouse = find_warehouse_for_import(db, grid, default_warehouse_id, program_key)
+    items = parse_import_items(db, grid, program_key)
     today = local_today()
     order_number = find_sheet_value(grid, "Order No", "Order Number", "MR No", "MR Number").strip()
     if not order_number:
-        order_number = next_import_order_number(db)
-    elif db.query(MaterialRequisition.id).filter(MaterialRequisition.order_number == order_number).first():
+        order_number = next_import_order_number(db, program_key)
+    elif (
+        db.query(MaterialRequisition.id)
+        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == order_number)
+        .first()
+    ):
         raise ValueError(f"Order No {order_number} already exists")
     row = MaterialRequisition(
+        program=program_key,
         order_number=order_number,
         creation_date=find_sheet_value(grid, "Creation Date", "Date") or today,
         warehouse_id=warehouse.id,
         entity=find_sheet_value(grid, "Entity") or "Rollout",
-        project_name=find_sheet_value(grid, "Project Name") or "FTTH",
+        project_name=find_sheet_value(grid, "Project Name") or PROGRAM_LABELS[program_key],
         site_id=find_sheet_value(grid, "Site ID", "Area Name") or sheet.title,
         site_address=find_sheet_value(grid, "Site Address", "Site Adress") or "",
         wo_no=find_sheet_value(grid, "WO No") or "",
@@ -3443,8 +3856,10 @@ async def import_material_requisition_excels(
     files: list[UploadFile] = File(...),
     default_warehouse_id: int = Form(0),
     actor: str = Form("Import"),
+    program: str = Form(DEFAULT_PROGRAM),
     db: Session = Depends(db_session),
 ):
+    program_key = normalize_program(program)
     results = []
     imported_rows: list[MaterialRequisition] = []
     for upload in files:
@@ -3458,7 +3873,7 @@ async def import_material_requisition_excels(
             if sheet.sheet_state != "visible":
                 continue
             try:
-                row = import_mr_sheet(db, sheet, upload.filename or "MR.xlsx", default_warehouse_id, actor)
+                row = import_mr_sheet(db, sheet, upload.filename or "MR.xlsx", default_warehouse_id, actor, program_key)
                 db.commit()
                 db.refresh(row)
                 imported_rows.append(row)
@@ -3477,10 +3892,12 @@ async def import_material_requisition_excels(
     }
 
 
-def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = ""):
+def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialTransfer)
         .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
+        .filter(MaterialTransfer.program == program_key)
         .order_by(MaterialTransfer.id.desc())
         .all()
     )
@@ -3489,7 +3906,8 @@ def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_ses
 
 
 @app.get("/api/warehouse/material-transfers")
-def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
+def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialTransfer)
         .options(
@@ -3497,6 +3915,7 @@ def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", d
             joinedload(MaterialTransfer.to_warehouse),
             selectinload(MaterialTransfer.items).joinedload(MaterialTransferItem.product),
         )
+        .filter(MaterialTransfer.program == program_key)
         .order_by(MaterialTransfer.id.desc())
         .all()
     )
@@ -3505,8 +3924,9 @@ def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", d
 
 
 @app.get("/api/warehouse/material-transfers/{transfer_id}")
-def get_material_transfer(transfer_id: int, viewer: str = "", role: str = "", db: Session = Depends(db_session)):
-    row = db.get(MaterialTransfer, transfer_id)
+def get_material_transfer(transfer_id: int, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if not user_can_view_transfer(row, viewer, role):
@@ -3514,10 +3934,12 @@ def get_material_transfer(transfer_id: int, viewer: str = "", role: str = "", db
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
-def list_material_return_headers(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_return_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialReturn)
         .options(joinedload(MaterialReturn.warehouse))
+        .filter(MaterialReturn.program == program_key)
         .order_by(MaterialReturn.id.desc())
         .limit(min(limit, 200))
         .all()
@@ -3526,13 +3948,15 @@ def list_material_return_headers(limit: int = 50, db: Session = Depends(db_sessi
 
 
 @app.get("/api/warehouse/material-returns")
-def list_material_returns(limit: int = 50, db: Session = Depends(db_session)):
+def list_material_returns(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(MaterialReturn)
         .options(
             joinedload(MaterialReturn.warehouse),
             selectinload(MaterialReturn.items).joinedload(MaterialReturnItem.product),
         )
+        .filter(MaterialReturn.program == program_key)
         .order_by(MaterialReturn.id.desc())
         .limit(min(limit, 200))
         .all()
@@ -3541,20 +3965,22 @@ def list_material_returns(limit: int = 50, db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/material-returns/{return_id}")
-def get_material_return(return_id: int, db: Session = Depends(db_session)):
-    row = db.get(MaterialReturn, return_id)
+def get_material_return(return_id: int, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    row = db.query(MaterialReturn).filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material return not found")
     return {"success": True, "return": material_return_to_dict(row)}
 
 
 @app.get("/api/warehouse/notifications")
-def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
-    pending = db.query(MaterialRequisition).filter(MaterialRequisition.status == "pending_approval").all()
+def warehouse_notifications(user: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    pending = db.query(MaterialRequisition).filter(MaterialRequisition.program == program_key, MaterialRequisition.status == "pending_approval").all()
     pending_transfers = (
         db.query(MaterialTransfer)
         .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
-        .filter(MaterialTransfer.status == "pending_approval")
+        .filter(MaterialTransfer.program == program_key, MaterialTransfer.status == "pending_approval")
         .all()
     )
     user_key = normalize_usage_key(user)
@@ -3565,13 +3991,13 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
     approved_rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse))
-        .filter(MaterialRequisition.status == "approved")
+        .filter(MaterialRequisition.program == program_key, MaterialRequisition.status == "approved")
         .all()
     )
     approved_transfer_rows = (
         db.query(MaterialTransfer)
         .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
-        .filter(MaterialTransfer.status == "approved")
+        .filter(MaterialTransfer.program == program_key, MaterialTransfer.status == "approved")
         .all()
     )
     approved_count = len(approved_rows) if not user_key else sum(
@@ -3591,10 +4017,12 @@ def warehouse_notifications(user: str = "", db: Session = Depends(db_session)):
 
 
 @app.get("/api/warehouse/receive-orders")
-def list_receive_orders(limit: int = 50, db: Session = Depends(db_session)):
+def list_receive_orders(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(ReceiveOrder)
         .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items).joinedload(ReceiveOrderItem.product))
+        .filter(ReceiveOrder.program == program_key)
         .order_by(ReceiveOrder.id.desc())
         .limit(min(limit, 200))
         .all()
@@ -3602,10 +4030,12 @@ def list_receive_orders(limit: int = 50, db: Session = Depends(db_session)):
     return {"success": True, "receipts": [receive_order_to_dict(r) for r in rows]}
 
 
-def list_receive_order_headers(limit: int = 50, db: Session = Depends(db_session)):
+def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
     rows = (
         db.query(ReceiveOrder)
         .options(joinedload(ReceiveOrder.warehouse))
+        .filter(ReceiveOrder.program == program_key)
         .order_by(ReceiveOrder.id.desc())
         .limit(min(limit, 200))
         .all()
@@ -3615,12 +4045,14 @@ def list_receive_order_headers(limit: int = 50, db: Session = Depends(db_session
 
 @app.post("/api/warehouse/material-requisitions")
 def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
-    order_number = next_import_order_number(db)
+    order_number = next_import_order_number(db, program_key)
     row = MaterialRequisition(
+        program=program_key,
         order_number=order_number,
         creation_date=data.creation_date,
         warehouse_id=data.warehouse_id,
@@ -3652,7 +4084,7 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
-        product = db.get(Product, item.product_id) if item.product_id else None
+        product = require_product(db, item.product_id, program_key) if item.product_id else None
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -3688,12 +4120,13 @@ def create_material_requisition(data: MaterialRequisitionIn, db: Session = Depen
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/resubmit")
 def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status != "returned_for_edit":
         raise HTTPException(status_code=400, detail=f"MR cannot be edited from status {row.status}")
-    require_warehouse(db, data.warehouse_id)
+    require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
@@ -3724,7 +4157,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
 
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
     for index, item in enumerate(data.items, start=1):
-        product = db.get(Product, item.product_id) if item.product_id else None
+        product = require_product(db, item.product_id, program_key) if item.product_id else None
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -3751,14 +4184,16 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
 
 @app.post("/api/warehouse/material-transfers")
 def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.from_warehouse_id)
-    require_warehouse(db, data.to_warehouse_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.from_warehouse_id, program_key)
+    require_warehouse(db, data.to_warehouse_id, program_key)
     if data.from_warehouse_id == data.to_warehouse_id:
         raise HTTPException(status_code=400, detail="From and To warehouse must be different")
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
     row = MaterialTransfer(
+        program=program_key,
         transfer_number=next_number(db, MaterialTransfer, "TR"),
         transfer_date=data.transfer_date or local_today(),
         from_warehouse_id=data.from_warehouse_id,
@@ -3777,8 +4212,8 @@ def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id)
-        available = stock_balance(db, data.from_warehouse_id, item.product_id).quantity or 0
+        product = require_product(db, item.product_id, program_key)
+        available = stock_balance(db, data.from_warehouse_id, item.product_id, program_key).quantity or 0
         if available < item.quantity:
             raise HTTPException(
                 status_code=400,
@@ -3806,7 +4241,8 @@ def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
 def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialTransfer, transfer_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
@@ -3827,7 +4263,8 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/reject")
 def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialTransfer, transfer_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
@@ -3848,7 +4285,8 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/confirm")
 def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
-    row = db.get(MaterialTransfer, transfer_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "approved":
@@ -3856,8 +4294,8 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
     actor = data.actor.strip() or row.receiver_name or "warehouse"
 
     for item in row.items:
-        product = require_product(db, item.product_id)
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id)
+        product = require_product(db, item.product_id, program_key)
+        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
         if from_balance.quantity < item.quantity:
             raise HTTPException(
                 status_code=400,
@@ -3865,12 +4303,13 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
             )
 
     for item in row.items:
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id)
-        to_balance = stock_balance(db, row.to_warehouse_id, item.product_id)
+        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
+        to_balance = stock_balance(db, row.to_warehouse_id, item.product_id, program_key)
         from_balance.quantity -= item.quantity
         to_balance.quantity += item.quantity
         db.add(
             StockMovement(
+                program=program_key,
                 movement_type="transfer_out",
                 product_id=item.product_id,
                 warehouse_id=row.from_warehouse_id,
@@ -3882,6 +4321,7 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
         )
         db.add(
             StockMovement(
+                program=program_key,
                 movement_type="transfer_in",
                 product_id=item.product_id,
                 warehouse_id=row.to_warehouse_id,
@@ -3904,11 +4344,13 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
 
 @app.post("/api/warehouse/material-returns")
 def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
     row = MaterialReturn(
+        program=program_key,
         return_number=next_number(db, MaterialReturn, "RET"),
         return_date=data.return_date or local_today(),
         site_id=data.site_id.strip(),
@@ -3924,8 +4366,8 @@ def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_sess
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id)
-        stock_balance(db, data.warehouse_id, item.product_id).quantity += item.quantity
+        product = require_product(db, item.product_id, program_key)
+        stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
         db.add(
             MaterialReturnItem(
                 return_id=row.id,
@@ -3941,6 +4383,7 @@ def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_sess
         )
         db.add(
             StockMovement(
+                program=program_key,
                 movement_type="return_in",
                 product_id=item.product_id,
                 warehouse_id=data.warehouse_id,
@@ -3959,7 +4402,8 @@ def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_sess
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/signature")
 def sign_material_requisition(requisition_id: int, data: MaterialRequisitionSignatureIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if data.role == "requester":
@@ -3984,7 +4428,8 @@ def sign_material_requisition(requisition_id: int, data: MaterialRequisitionSign
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/approve")
 def approve_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft", "rejected"}:
@@ -4008,7 +4453,8 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/reject")
 def reject_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft"}:
@@ -4030,7 +4476,8 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
 def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status != "approved":
@@ -4050,7 +4497,8 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/issue")
 def issue_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
-    row = db.get(MaterialRequisition, requisition_id)
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if not is_workflow_role(data.title) and not is_requisition_warehouse_manager(data.actor.strip(), row, db):
@@ -4069,7 +4517,7 @@ def delete_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     row = (
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items), joinedload(MaterialRequisition.warehouse))
-        .filter(MaterialRequisition.id == requisition_id)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == normalize_program(data.program))
         .first()
     )
     if row is None:
@@ -4085,11 +4533,13 @@ def delete_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 @app.post("/api/warehouse/receive")
 def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
     order = ReceiveOrder(
+        program=program_key,
         order_number=data.receipt_number.strip() or next_number(db, ReceiveOrder, "GRN"),
         supplier=data.supplier.strip(),
         receipt_date=data.receipt_date,
@@ -4100,18 +4550,23 @@ def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
     db.flush()
 
     for item in data.items:
-        product = require_product(db, item.product_id)
+        product = require_product(db, item.product_id, program_key)
         validate_serial_count(product, item.quantity, item.serial_numbers)
-        stock_balance(db, data.warehouse_id, item.product_id).quantity += item.quantity
+        stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
 
         serials = item.serial_numbers if product.tracking_type == "serialized" else [""]
         for serial in serials:
             if serial:
-                exists = db.query(ProductSerial).filter(ProductSerial.serial_number == serial).first()
+                exists = (
+                    db.query(ProductSerial)
+                    .filter(ProductSerial.program == program_key, ProductSerial.serial_number == serial)
+                    .first()
+                )
                 if exists:
                     raise HTTPException(status_code=400, detail=f"Serial already exists: {serial}")
                 db.add(
                     ProductSerial(
+                        program=program_key,
                         product_id=item.product_id,
                         serial_number=serial,
                         status="in_warehouse",
@@ -4121,6 +4576,7 @@ def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
             db.add(ReceiveOrderItem(receive_order_id=order.id, product_id=item.product_id, quantity=1 if serial else item.quantity, serial_number=serial))
             db.add(
                 StockMovement(
+                    program=program_key,
                     movement_type="receive",
                     product_id=item.product_id,
                     warehouse_id=data.warehouse_id,
@@ -4142,7 +4598,8 @@ def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
 
 @app.post("/api/warehouse/receive-inventory")
 def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
     sku = data.sku.strip()
     name = material_display_name(data.name.strip(), sku)
     if not sku:
@@ -4150,9 +4607,10 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
     if not name:
         raise HTTPException(status_code=400, detail="Material name is required")
 
-    product = db.query(Product).filter(Product.sku == sku).first()
+    product = db.query(Product).filter(Product.program == program_key, Product.sku == sku).first()
     if product is None:
         product = Product(
+            program=program_key,
             sku=sku,
             part_number=product_part_number(sku, data.part_number),
             category=data.category.strip(),
@@ -4174,6 +4632,7 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
         product.category = data.category.strip() or product.category
 
     order = ReceiveOrder(
+        program=program_key,
         order_number=data.receipt_number.strip() or next_number(db, ReceiveOrder, "GRN"),
         supplier=data.supplier.strip(),
         receipt_date=data.receipt_date,
@@ -4183,10 +4642,11 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
     db.add(order)
     db.flush()
 
-    stock_balance(db, data.warehouse_id, product.id).quantity += data.quantity
+    stock_balance(db, data.warehouse_id, product.id, program_key).quantity += data.quantity
     db.add(ReceiveOrderItem(receive_order_id=order.id, product_id=product.id, quantity=data.quantity, serial_number=""))
     db.add(
         StockMovement(
+            program=program_key,
             movement_type="receive",
             product_id=product.id,
             warehouse_id=data.warehouse_id,
@@ -4205,7 +4665,7 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
         raise HTTPException(status_code=400, detail="Receipt number already exists or receive failed") from exc
     db.refresh(order)
     db.refresh(product)
-    balance = stock_balance(db, data.warehouse_id, product.id)
+    balance = stock_balance(db, data.warehouse_id, product.id, program_key)
     return {
         "success": True,
         "order_number": order.order_number,
@@ -4217,12 +4677,13 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
 
 @app.post("/api/warehouse/adjust-inventory")
 def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
-    product = db.query(Product).filter(Product.sku == data.sku.strip()).first()
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
+    product = db.query(Product).filter(Product.program == program_key, Product.sku == data.sku.strip()).first()
     if product is None:
         raise HTTPException(status_code=404, detail="SKU not found")
 
-    balance = stock_balance(db, data.warehouse_id, product.id)
+    balance = stock_balance(db, data.warehouse_id, product.id, program_key)
     old_quantity = balance.quantity or 0
     delta = data.quantity - old_quantity
     balance.quantity = data.quantity
@@ -4230,6 +4691,7 @@ def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_sessi
     if delta:
         db.add(
             StockMovement(
+                program=program_key,
                 movement_type="adjustment",
                 product_id=product.id,
                 warehouse_id=data.warehouse_id,
@@ -4261,12 +4723,14 @@ def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_sessi
 
 @app.post("/api/warehouse/issue")
 def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
-    require_warehouse(db, data.warehouse_id)
-    require_technician(db, data.technician_id)
+    program_key = normalize_program(data.program)
+    require_warehouse(db, data.warehouse_id, program_key)
+    require_technician(db, data.technician_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
     order = IssueOrder(
+        program=program_key,
         order_number=next_number(db, IssueOrder, "ISS"),
         warehouse_id=data.warehouse_id,
         technician_id=data.technician_id,
@@ -4276,9 +4740,9 @@ def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
     db.flush()
 
     for item in data.items:
-        product = require_product(db, item.product_id)
+        product = require_product(db, item.product_id, program_key)
         validate_serial_count(product, item.quantity, item.serial_numbers)
-        balance = stock_balance(db, data.warehouse_id, item.product_id)
+        balance = stock_balance(db, data.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse = db.get(Warehouse, data.warehouse_id)
             warehouse_name = warehouse.name if warehouse else str(data.warehouse_id)
@@ -4291,7 +4755,7 @@ def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
                 ),
             )
         balance.quantity -= item.quantity
-        technician_balance(db, data.technician_id, item.product_id).quantity += item.quantity
+        technician_balance(db, data.technician_id, item.product_id, program_key).quantity += item.quantity
 
         serials = item.serial_numbers if product.tracking_type == "serialized" else [""]
         for serial in serials:
@@ -4300,6 +4764,7 @@ def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
                     db.query(ProductSerial)
                     .filter(
                         ProductSerial.product_id == item.product_id,
+                        ProductSerial.program == program_key,
                         ProductSerial.serial_number == serial,
                         ProductSerial.status == "in_warehouse",
                         ProductSerial.warehouse_id == data.warehouse_id,
@@ -4315,6 +4780,7 @@ def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
             db.add(IssueOrderItem(issue_order_id=order.id, product_id=item.product_id, quantity=1 if serial else item.quantity, serial_number=serial))
             db.add(
                 StockMovement(
+                    program=program_key,
                     movement_type="issue_to_technician",
                     product_id=item.product_id,
                     warehouse_id=data.warehouse_id,

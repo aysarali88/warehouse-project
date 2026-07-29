@@ -38,9 +38,11 @@ class RolloutRecord(Base):
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
+    __table_args__ = (UniqueConstraint("program", "name", name="uq_warehouse_program_name"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
     location = Column(String, default="")
     status = Column(String, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -52,6 +54,7 @@ class AppUser(Base):
     __tablename__ = "app_users"
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     username = Column(String, nullable=False, index=True)
     name = Column(String, default="")
     role = Column(String, nullable=False, index=True)
@@ -66,6 +69,7 @@ class Technician(Base):
     __tablename__ = "technicians"
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     name = Column(String, nullable=False, index=True)
     phone = Column(String, default="")
     status = Column(String, default="active")
@@ -76,9 +80,11 @@ class Technician(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("program", "sku", name="uq_product_program_sku"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    sku = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    sku = Column(String, nullable=False, index=True)
     part_number = Column(String, default="")
     category = Column(String, default="")
     name = Column(String, nullable=False, index=True)
@@ -95,10 +101,12 @@ class Product(Base):
 
 class ProductSerial(Base):
     __tablename__ = "product_serials"
+    __table_args__ = (UniqueConstraint("program", "serial_number", name="uq_product_serial_program_serial"),)
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
-    serial_number = Column(String, unique=True, nullable=False, index=True)
+    serial_number = Column(String, nullable=False, index=True)
     status = Column(String, default="in_warehouse", index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True, index=True)
     technician_id = Column(Integer, ForeignKey("technicians.id"), nullable=True, index=True)
@@ -112,6 +120,7 @@ class StockBalance(Base):
     __table_args__ = (UniqueConstraint("warehouse_id", "product_id", name="uq_stock_balance"),)
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     quantity = Column(Float, default=0)
@@ -126,6 +135,7 @@ class TechnicianBalance(Base):
     __table_args__ = (UniqueConstraint("technician_id", "product_id", name="uq_technician_balance"),)
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     technician_id = Column(Integer, ForeignKey("technicians.id"), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     quantity = Column(Float, default=0)
@@ -139,6 +149,7 @@ class StockMovement(Base):
     __tablename__ = "stock_movements"
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     movement_type = Column(String, nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True, index=True)
@@ -157,9 +168,11 @@ class StockMovement(Base):
 
 class ReceiveOrder(Base):
     __tablename__ = "receive_orders"
+    __table_args__ = (UniqueConstraint("program", "order_number", name="uq_receive_order_program_number"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    order_number = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    order_number = Column(String, nullable=False, index=True)
     supplier = Column(String, default="")
     receipt_date = Column(String, default="")
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
@@ -186,9 +199,11 @@ class ReceiveOrderItem(Base):
 
 class IssueOrder(Base):
     __tablename__ = "issue_orders"
+    __table_args__ = (UniqueConstraint("program", "order_number", name="uq_issue_order_program_number"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    order_number = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    order_number = Column(String, nullable=False, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     technician_id = Column(Integer, ForeignKey("technicians.id"), nullable=False, index=True)
     status = Column(String, default="confirmed")
@@ -215,9 +230,11 @@ class IssueOrderItem(Base):
 
 class MaterialRequisition(Base):
     __tablename__ = "material_requisitions"
+    __table_args__ = (UniqueConstraint("program", "order_number", name="uq_material_requisition_program_number"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    order_number = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    order_number = Column(String, nullable=False, index=True)
     creation_date = Column(String, default="")
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     entity = Column(String, default="Rollout")
@@ -269,9 +286,11 @@ class MaterialRequisitionItem(Base):
 
 class MaterialTransfer(Base):
     __tablename__ = "material_transfers"
+    __table_args__ = (UniqueConstraint("program", "transfer_number", name="uq_material_transfer_program_number"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    transfer_number = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    transfer_number = Column(String, nullable=False, index=True)
     transfer_date = Column(String, default="")
     from_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     to_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
@@ -314,9 +333,11 @@ class MaterialTransferItem(Base):
 
 class MaterialReturn(Base):
     __tablename__ = "material_returns"
+    __table_args__ = (UniqueConstraint("program", "return_number", name="uq_material_return_program_number"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    return_number = Column(String, unique=True, nullable=False, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    return_number = Column(String, nullable=False, index=True)
     return_date = Column(String, default="")
     site_id = Column(String, default="")
     site_address = Column(String, default="")
@@ -354,6 +375,7 @@ class MaterialScanLog(Base):
     __tablename__ = "material_scan_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
     material_requisition_id = Column(Integer, ForeignKey("material_requisitions.id"), nullable=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
