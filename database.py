@@ -16,6 +16,9 @@ def normalize_program(value: str = "") -> str:
 
 
 def normalize_database_url(value: str) -> str:
+    value = str(value or "").strip()
+    if value and "://" not in value and "@" in value:
+        value = f"postgresql://{value}"
     if value.startswith("postgresql://"):
         return value.replace("postgresql://", "postgresql+psycopg://", 1)
     return value
