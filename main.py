@@ -2545,7 +2545,9 @@ def rollout_entry_reference(
         "success": True,
         "source": source,
         "next_id": next_rollout_entry_id(db),
-        "summary": rollout_entry_summary(filtered_records),
+        # The entry form is scoped to an Area/XBOX, but its headline cards are
+        # a project-wide installation total and must not change with that scope.
+        "summary": rollout_entry_summary(records),
         "areas": sorted(areas_map.values(), key=lambda r: (r.get("city") or "", r.get("area") or "")),
         "xboxes_by_area": {areas_map[k]["area"]: sorted(v) for k, v in xboxes_map.items()},
         "codes": scoped_refs,
