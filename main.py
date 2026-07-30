@@ -65,6 +65,7 @@ ROLLOUT_DAILY_PROGRESS_SHEET_ID = "1ZT9e9acJ9Y60J4f_DIFZiYyHa8GvNZdlTvpucHju7Ec"
 ROLLOUT_DAILY_PROGRESS_GID = "440090582"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsheets/d/{ROLLOUT_DAILY_PROGRESS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ROLLOUT_DAILY_PROGRESS_GID}"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
+FIBER_MAP_REFERENCE_PATH = "static/assets/fiber-map-data.json"
 logger = logging.getLogger(__name__)
 
 for program_key, db_engine in all_engines():
@@ -1389,7 +1390,6 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
             return db_rollout_records(db), "database"
 
         source_ids = [stable_rollout_record_id(row) for row in rows]
-        source_id_set = set(source_ids)
         existing = {
             row.record_id: row
             for row in db.query(RolloutRecord).filter(RolloutRecord.record_id.in_(source_ids)).all()
@@ -1397,10 +1397,6 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
         try:
             for row in rows:
                 upsert_rollout_record(row, db, existing)
-            # The Google Sheet is authoritative: discard records removed from it.
-            for record in db.query(RolloutRecord).all():
-                if record.record_id not in source_id_set:
-                    db.delete(record)
             db.commit()
             ROLLOUT_LAST_SYNC_AT = time.monotonic()
             clear_rollout_db_cache()
@@ -1413,6 +1409,171 @@ def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[
 
 def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
     return sync_rollout_daily_progress(db, force=force)
+
+
+def rollout_norm(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def rollout_xbox_key(value) -> str:
+    text_value = str(value or "").upper()
+    match = re.search(r"X\s*-?\s*BOX\s*0*(\d+)|X\s*0*(\d+)", text_value)
+    if match:
+        return f"X{int(match.group(1) or match.group(2))}"
+    return re.sub(r"[^A-Z0-9]+", "", text_value)
+
+
+def rollout_code_key(value) -> str:
+    text_value = str(value or "").upper().strip()
+    text_value = re.sub(r"\bH0+(\d+)", r"H\1", text_value)
+    text_value = re.sub(r"\bL0+(\d+)", r"L\1", text_value)
+    text_value = re.sub(r"\bS0+(\d+)", r"S\1", text_value)
+    text_value = re.sub(r"\bX0+(\d+)", r"X\1", text_value)
+    return re.sub(r"[^A-Z0-9]+", "", text_value)
+
+
+def rollout_entry_mode(data: dict) -> str:
+    text_value = " ".join(
+        str(first_value(data, "code_type", "type", "item", "Item", "material type", "Material Type", "material_type", default="") or "")
+        for _ in [0]
+    )
+    norm = rollout_norm(text_value)
+    if "cable" in norm:
+        return "cable"
+    if any(token in norm for token in ["box", "xbox", "hub", "sub", "end"]):
+        return "box"
+    if str(first_value(data, "cable code", "Cable Code", "cable_code", default="") or "").strip():
+        return "cable"
+    if str(first_value(data, "box code", "Box Code", "box_code", default="") or "").strip():
+        return "box"
+    return ""
+
+
+def load_fiber_map_reference() -> dict:
+    try:
+        with open(FIBER_MAP_REFERENCE_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            if isinstance(data, dict):
+                return data
+    except FileNotFoundError:
+        logger.warning("Fiber map reference not found: %s", FIBER_MAP_REFERENCE_PATH)
+    except Exception:
+        logger.exception("Could not read fiber map reference")
+    return {"boxes": [], "routes": []}
+
+
+def rollout_code_reference_rows() -> list[dict]:
+    ref = load_fiber_map_reference()
+    rows: list[dict] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    def add(row: dict, code: str, code_type: str, source: str):
+        if not code:
+            return
+        area = str(first_value(row, "Area", "area", "Zone", "zone", default="") or "").strip()
+        city = str(first_value(row, "City", "city", default="") or "").strip()
+        xbox = str(first_value(row, "Related to XBOX", "related to xbox", "XBOX", "xbox", default="") or "").strip()
+        key = (rollout_norm(area), rollout_xbox_key(xbox), rollout_code_key(code), code_type)
+        if key in seen:
+            return
+        seen.add(key)
+        material = str(first_value(row, "Material type", "material type", "Item", "item", default="") or "").strip()
+        box_type = str(first_value(row, "Box type", "box type", default="") or "").strip()
+        rows.append(
+            {
+                "city": city,
+                "area": area,
+                "xbox": rollout_xbox_key(xbox) or xbox,
+                "xbox_label": xbox,
+                "code": str(code).strip(),
+                "type": code_type,
+                "source": source,
+                "material_type": material,
+                "box_type": box_type,
+                "cable_length_m": safe_float(first_value(row, "Cable length m", "Real length m", "Used length m", default=0)),
+                "cable_route": str(first_value(row, "Cable route", "Route", "Route type", default="") or "").strip(),
+            }
+        )
+
+    for row in ref.get("boxes") or []:
+        code = str(first_value(row, "Box code", "box code", default="") or "").strip()
+        add(row, code, "box", "box")
+        add(row, code, "cable", "drop")
+    for row in ref.get("routes") or []:
+        code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
+        add(row, code, "cable", "route")
+    return rows
+
+
+def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str) -> list[dict]:
+    area_key = rollout_norm(area)
+    xbox_key = rollout_xbox_key(xbox)
+    code_key = rollout_code_key(code)
+    return [
+        row
+        for row in rollout_code_reference_rows()
+        if row["type"] == code_type
+        and rollout_norm(row.get("area")) == area_key
+        and rollout_xbox_key(row.get("xbox")) == xbox_key
+        and rollout_code_key(row.get("code")) == code_key
+    ]
+
+
+def rollout_record_code_type(row: RolloutRecord) -> str:
+    if str(row.cable_code or "").strip():
+        return "cable"
+    if str(row.box_code or "").strip():
+        return "box"
+    return rollout_entry_mode({"item": row.item, "material type": row.material_type})
+
+
+def next_rollout_entry_id(db: Session) -> str:
+    highest = 0
+    for (record_id,) in db.query(RolloutRecord.record_id).filter(RolloutRecord.record_id.like("RDP-%")).all():
+        match = re.match(r"^RDP-(\d+)$", str(record_id or "").strip(), flags=re.I)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"RDP-{highest + 1}"
+
+
+def rollout_entry_summary(rows: list[dict]) -> dict:
+    summary = {"cable": 0, "end_box": 0, "sub_box": 0, "hub_box": 0, "xbox": 0}
+    for row in rows:
+        status = rollout_norm(first_value(row, "staus", "status", default=""))
+        if status and status != "done":
+            continue
+        qty = safe_float(first_value(row, "actual", default=0)) or 0
+        if qty <= 0:
+            qty = 1
+        text_value = rollout_norm(f"{first_value(row, 'item', default='')} {first_value(row, 'material type', default='')}")
+        if "cable" in text_value:
+            summary["cable"] += qty
+        elif "xbox" in text_value:
+            summary["xbox"] += qty
+        elif "hubbox" in text_value or text_value == "hub":
+            summary["hub_box"] += qty
+        elif "endbox" in text_value or text_value.startswith("end"):
+            summary["end_box"] += qty
+        elif "subbox" in text_value or text_value.startswith("sub"):
+            summary["sub_box"] += qty
+    return summary
+
+
+def rollout_duplicate_details(row: RolloutRecord) -> dict:
+    return {
+        "ID": row.record_id,
+        "Date": row.date,
+        "entry time": row.entry_time,
+        "Supervisor Name": row.supervisor_name,
+        "team leader": row.team_leader,
+        "Area": row.area,
+        "Related to XBOX": row.related_to_xbox,
+        "item": row.item,
+        "material type": row.material_type,
+        "staus": row.status,
+        "cable code": row.cable_code,
+        "box code": row.box_code,
+    }
 
 
 def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, RolloutRecord] | None = None) -> tuple[RolloutRecord, bool]:
@@ -2338,6 +2499,150 @@ def list_rollout_daily_progress(limit: int = 500, refresh: str = "", program: st
         "count": len(rows),
         "fetched_at": datetime.now(TRIPOLI_TZ).isoformat(),
         "records": limited,
+    }
+
+
+@app.get("/api/warehouse/rollout-entry-reference")
+def rollout_entry_reference(
+    area: str = "",
+    xbox: str = "",
+    query: str = "",
+    limit: int = 50,
+    db: Session = Depends(db_session),
+):
+    records, source = rollout_daily_progress_records(db, force=False)
+    filtered_records = records
+    if area:
+        filtered_records = [r for r in filtered_records if rollout_norm(r.get("Area")) == rollout_norm(area)]
+    if xbox:
+        filtered_records = [r for r in filtered_records if rollout_xbox_key(r.get("Related to XBOX")) == rollout_xbox_key(xbox)]
+    if query:
+        needle = rollout_norm(query)
+        filtered_records = [
+            r
+            for r in filtered_records
+            if needle in rollout_norm(" ".join(str(v or "") for v in r.values()))
+        ]
+    latest = list(reversed(filtered_records))[: min(max(limit, 1), 200)]
+
+    refs = rollout_code_reference_rows()
+    areas_map: dict[str, dict] = {}
+    xboxes_map: dict[str, set[str]] = {}
+    for row in refs:
+        area_name = row.get("area") or ""
+        if not area_name:
+            continue
+        area_key = rollout_norm(area_name)
+        areas_map.setdefault(area_key, {"area": area_name, "city": row.get("city") or ""})
+        xboxes_map.setdefault(area_key, set()).add(row.get("xbox") or "")
+    scoped_refs = refs
+    if area:
+        scoped_refs = [r for r in scoped_refs if rollout_norm(r.get("area")) == rollout_norm(area)]
+    if xbox:
+        scoped_refs = [r for r in scoped_refs if rollout_xbox_key(r.get("xbox")) == rollout_xbox_key(xbox)]
+
+    return {
+        "success": True,
+        "source": source,
+        "next_id": next_rollout_entry_id(db),
+        "summary": rollout_entry_summary(filtered_records),
+        "areas": sorted(areas_map.values(), key=lambda r: (r.get("city") or "", r.get("area") or "")),
+        "xboxes_by_area": {areas_map[k]["area"]: sorted(v) for k, v in xboxes_map.items()},
+        "codes": scoped_refs,
+        "latest": latest,
+        "count": len(filtered_records),
+    }
+
+
+@app.post("/api/warehouse/rollout-field-entry")
+def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
+    if rollout_norm(first_value(data, "role", default="")) != "admin":
+        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+
+    area = str(first_value(data, "Area", "area", default="") or "").strip()
+    xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default="") or "").strip()
+    code_type = rollout_entry_mode(data)
+    raw_code = str(first_value(data, "code", "Cable Code", "cable code", "cable_code", "Box Code", "box code", "box_code", default="") or "").strip()
+    if not area or not xbox:
+        raise HTTPException(status_code=400, detail="Select Area and Related to XBOX")
+    if not code_type:
+        raise HTTPException(status_code=400, detail="Select Cable or Box material type")
+    if not raw_code:
+        raise HTTPException(status_code=400, detail="Select a code from the list")
+    if safe_float(first_value(data, "actual", "Actual", default=0)) <= 0:
+        raise HTTPException(status_code=400, detail="Actual quantity must be greater than zero")
+
+    matches = rollout_reference_matches(area, xbox, raw_code, code_type)
+    if not matches:
+        raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
+
+    code_attr = RolloutRecord.cable_code if code_type == "cable" else RolloutRecord.box_code
+    existing_candidates = db.query(RolloutRecord).filter(code_attr != "").all()
+    duplicates: list[RolloutRecord] = []
+    for row in existing_candidates:
+        if rollout_record_code_type(row) != code_type:
+            continue
+        if rollout_norm(row.area) != rollout_norm(area):
+            continue
+        if rollout_xbox_key(row.related_to_xbox) != rollout_xbox_key(xbox):
+            continue
+        saved_code = row.cable_code if code_type == "cable" else row.box_code
+        if rollout_code_key(saved_code) == rollout_code_key(raw_code):
+            duplicates.append(row)
+
+    done_duplicate = next((row for row in duplicates if rollout_norm(row.status) == "done"), None)
+    if done_duplicate:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Code already saved as Done in {done_duplicate.record_id}",
+        )
+
+    warnings: list[dict] = []
+    in_progress = next((row for row in duplicates if rollout_norm(row.status) in {"inprogress", "planned", "blocked"}), None)
+    if in_progress:
+        warnings.append({"type": "duplicate_in_progress", "message": "Code exists in another non-Done record", "record": rollout_duplicate_details(in_progress)})
+
+    material_type = str(first_value(data, "material type", "Material Type", "material_type", default="") or "").strip()
+    material_norm = rollout_norm(material_type)
+    ref = matches[0]
+    expected_len = int(ref.get("cable_length_m") or 0)
+    if code_type == "cable" and expected_len:
+        length_match = re.search(r"(\d+)\s*m", material_type, flags=re.I)
+        entered_len = int(length_match.group(1)) if length_match else 0
+        if entered_len and entered_len != expected_len:
+            warnings.append({"type": "cable_length_mismatch", "message": f"Planned length is {expected_len}m, selected material looks {entered_len}m"})
+    if code_type == "box":
+        expected_box = rollout_norm(ref.get("box_type") or "")
+        if expected_box:
+            if "end" in expected_box and "end" not in material_norm:
+                warnings.append({"type": "box_type_mismatch", "message": "Map reference is END BOX, selected material is different"})
+            if "sub" in expected_box and "sub" not in material_norm:
+                warnings.append({"type": "box_type_mismatch", "message": "Map reference is SUB BOX, selected material is different"})
+
+    if warnings and not first_value(data, "confirm_warnings", "confirmed", default=False):
+        return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
+
+    with ROLLOUT_SYNC_LOCK:
+        record_id = next_rollout_entry_id(db)
+        payload = normalize_rollout_row(data)
+        payload["ID"] = record_id
+        payload["Related to XBOX"] = rollout_xbox_key(xbox)
+        payload["entry time"] = datetime.now(TRIPOLI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        payload["cable code"] = raw_code if code_type == "cable" else ""
+        payload["box code"] = raw_code if code_type == "box" else ""
+        payload["staus"] = payload["staus"] or "Done"
+        row, _ = upsert_rollout_record(payload, db)
+        db.commit()
+        clear_warehouse_cache()
+        clear_rollout_db_cache()
+        db.refresh(row)
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {
+        "success": True,
+        "message": "Field entry saved",
+        "record": row_to_record(row),
+        "summary": rollout_entry_summary(records),
+        "warnings": warnings,
     }
 
 
