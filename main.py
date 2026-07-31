@@ -307,6 +307,20 @@ async def require_program_scope(request: Request, call_next):
     return await call_next(request)
 
 
+def request_arrived_over_https(request: Request) -> bool:
+    """Recognize HTTPS when Render terminates TLS before forwarding the request."""
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+@app.middleware("http")
+async def add_hsts_header(request: Request, call_next):
+    response = await call_next(request)
+    if request_arrived_over_https(request):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
 def is_admin_role(role: str = "") -> bool:
     return str(role or "").strip().lower() == "admin"
 
