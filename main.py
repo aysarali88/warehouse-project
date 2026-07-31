@@ -3201,7 +3201,9 @@ def list_material_scans(limit: int = 300, program: str = DEFAULT_PROGRAM, db: Se
 
 
 @app.post("/api/warehouse/material-scans/scan-record")
-def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_session)):
+def record_general_material_scan(data: MaterialScanIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    data.actor = request_actor(request)
     program_key = normalize_program(data.program)
     scanned = data.code.strip()
     found = scan_material(scanned, None, program_key, db)
@@ -3211,6 +3213,7 @@ def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_
     balance = float(found.get("balance") or 0)
     if not warehouse_id or balance <= 0:
         raise HTTPException(status_code=404, detail=f"Material found but not available in warehouse stock: {product.sku}")
+    require_warehouse_access(request, db, warehouse_id, program_key)
 
     serial_number = found["serial"]["serial_number"] if found.get("serial") else ""
     if serial_number:
@@ -3255,7 +3258,9 @@ def record_general_material_scan(data: MaterialScanIn, db: Session = Depends(db_
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/scan-record")
-def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session = Depends(db_session)):
+def record_material_scan(requisition_id: int, data: MaterialScanIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    data.actor = request_actor(request)
     program_key = normalize_program(data.program)
     row = (
         db.query(MaterialRequisition)
@@ -3265,6 +3270,7 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
     )
     if row is None:
         raise HTTPException(status_code=404, detail="MR not found")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
 
     scanned = data.code.strip()
     found = scan_material(scanned, row.warehouse_id, program_key, db)
@@ -3332,7 +3338,8 @@ def record_material_scan(requisition_id: int, data: MaterialScanIn, db: Session 
 
 
 @app.post("/api/warehouse/products")
-def create_product(data: ProductIn, db: Session = Depends(db_session)):
+def create_product(data: ProductIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
     sku = data.sku.strip()
     name = material_display_name(data.name.strip(), sku)
@@ -3360,9 +3367,9 @@ def create_product(data: ProductIn, db: Session = Depends(db_session)):
 
 
 @app.post("/api/warehouse/products/{product_id}/purge")
-def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(db_session)):
-    if data.role.strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+def purge_product(product_id: int, data: ProductPurgeIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
+    actor = request_actor(request)
     product = db.get(Product, product_id)
     program_key = normalize_program(data.program)
     if product is None or normalize_program(getattr(product, "program", DEFAULT_PROGRAM)) != program_key:
@@ -3403,7 +3410,7 @@ def purge_product(product_id: int, data: ProductPurgeIn, db: Session = Depends(d
             db.query(MaterialTransfer).filter(MaterialTransfer.id == order_id).delete(synchronize_session=False)
 
     db.delete(product)
-    log_audit(db, "purge_product", "product", snapshot["sku"], data.actor, snapshot)
+    log_audit(db, "purge_product", "product", snapshot["sku"], actor, snapshot)
     db.commit()
     return {"success": True, "deleted": snapshot}
 
@@ -4755,9 +4762,13 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
 
 
 @app.post("/api/warehouse/material-transfers")
-def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_session)):
+def create_material_transfer(data: MaterialTransferIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.from_warehouse_id, program_key)
+    if user.role.strip().lower() == "requester":
+        require_warehouse(db, data.from_warehouse_id, program_key)
+    else:
+        require_warehouse_access(request, db, data.from_warehouse_id, program_key)
     require_warehouse(db, data.to_warehouse_id, program_key)
     if data.from_warehouse_id == data.to_warehouse_id:
         raise HTTPException(status_code=400, detail="From and To warehouse must be different")
@@ -4772,13 +4783,13 @@ def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_
         to_warehouse_id=data.to_warehouse_id,
         reference_no=data.reference_no.strip(),
         reason=data.reason.strip(),
-        requester_name=data.requester_name.strip(),
+        requester_name=request_actor(request),
         requester_title=data.requester_title.strip(),
         approver_name=data.approver_name.strip(),
         approver_title=data.approver_title.strip(),
         receiver_name=data.receiver_name.strip(),
         status="pending_approval",
-        created_by=data.created_by.strip() or data.requester_name.strip() or "manager",
+        created_by=request_actor(request),
     )
     db.add(row)
     db.flush()
@@ -4812,15 +4823,16 @@ def create_material_transfer(data: MaterialTransferIn, db: Session = Depends(db_
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
-def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be approved from status {row.status}")
-    actor = data.actor.strip()
-    if actor and not is_workflow_role(data.title) and not is_source_warehouse_manager(actor, row, db):
+    actor = request_actor(request)
+    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
         raise HTTPException(status_code=403, detail="Only the source warehouse manager can approve this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
@@ -4834,15 +4846,16 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/reject")
-def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be rejected from status {row.status}")
-    actor = data.actor.strip()
-    if actor and not is_workflow_role(data.title) and not is_source_warehouse_manager(actor, row, db):
+    actor = request_actor(request)
+    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
         raise HTTPException(status_code=403, detail="Only the source warehouse manager can reject this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
@@ -4856,14 +4869,16 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/confirm")
-def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
+def confirm_material_transfer(transfer_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "approved":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be confirmed from status {row.status}")
-    actor = data.actor.strip() or row.receiver_name or "warehouse"
+    require_warehouse_access(request, db, row.to_warehouse_id, program_key)
+    actor = request_actor(request)
 
     for item in row.items:
         product = require_product(db, item.product_id, program_key)
@@ -4915,9 +4930,12 @@ def confirm_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
 
 
 @app.post("/api/warehouse/material-returns")
-def create_material_return(data: MaterialReturnIn, db: Session = Depends(db_session)):
+def create_material_return(data: MaterialReturnIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    data.created_by = request_actor(request)
+    data.received_by = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
@@ -5106,9 +5124,11 @@ def delete_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 
 @app.post("/api/warehouse/receive")
-def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
+def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    data.created_by = request_actor(request)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
@@ -5171,9 +5191,11 @@ def receive_stock(data: ReceiveIn, db: Session = Depends(db_session)):
 
 
 @app.post("/api/warehouse/receive-inventory")
-def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session)):
+def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    data.created_by = request_actor(request)
     sku = data.sku.strip()
     name = material_display_name(data.name.strip(), sku)
     if not sku:
@@ -5250,9 +5272,11 @@ def receive_inventory(data: InventoryReceiveIn, db: Session = Depends(db_session
 
 
 @app.post("/api/warehouse/adjust-inventory")
-def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_session)):
+def adjust_inventory(data: InventoryAdjustmentIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    data.created_by = request_actor(request)
     product = db.query(Product).filter(Product.program == program_key, Product.sku == data.sku.strip()).first()
     if product is None:
         raise HTTPException(status_code=404, detail="SKU not found")
@@ -5296,9 +5320,11 @@ def adjust_inventory(data: InventoryAdjustmentIn, db: Session = Depends(db_sessi
 
 
 @app.post("/api/warehouse/issue")
-def issue_to_technician(data: IssueIn, db: Session = Depends(db_session)):
+def issue_to_technician(data: IssueIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    data.created_by = request_actor(request)
     require_technician(db, data.technician_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
