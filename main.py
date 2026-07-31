@@ -2504,6 +2504,40 @@ def list_rollout_daily_progress(limit: int = 500, refresh: str = "", program: st
     }
 
 
+@app.get("/api/warehouse/rollout-daily-progress/export")
+def export_rollout_daily_progress(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    if is_single_ran(program):
+        rows: list[dict] = []
+    else:
+        rows, _source = rollout_daily_progress_records(db, force=False)
+
+    headers = [
+        "ID", "Date", "entry time", "Supervisor Name", "team leader", "city", "Area", "Activity",
+        "Related to XBOX", "item", "material type", "mount type", "Cable route", "cable code", "box code",
+        "item serial", "planed quantity", "actual", "stock remaining", "staus", "laser", "acceptance", "scan", "labeling", "Notes",
+    ]
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Rollout Progress"
+    sheet.append(headers)
+    for row in rows:
+        sheet.append([row.get(header, "") for header in headers])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for index, header in enumerate(headers, start=1):
+        values = [header] + [str(row.get(header, "") or "") for row in rows[:250]]
+        sheet.column_dimensions[chr(64 + index) if index <= 26 else "A"].width = min(42, max(12, max(len(value) for value in values) + 2))
+    stream = io.BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = f"rollout-progress-{datetime.now(TRIPOLI_TZ).strftime('%Y%m%d-%H%M%S')}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/warehouse/rollout-entry-reference")
 def rollout_entry_reference(
     area: str = "",
