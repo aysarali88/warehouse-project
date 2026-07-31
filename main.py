@@ -2750,6 +2750,32 @@ def edit_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(d
     return {"success": True, "message": "Field Entry updated", "record": row_to_record(row), "summary": rollout_entry_summary(records), "warnings": warnings}
 
 
+@app.delete("/api/warehouse/rollout-field-entry/{record_id}")
+def delete_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(db_session)):
+    if rollout_norm(first_value(data, "role", default="")) != "admin":
+        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Field Entry record was not found")
+
+    deleted = row_to_record(row)
+    log_audit(
+        db,
+        "delete_rollout_field_entry",
+        "rollout_record",
+        row.record_id,
+        str(first_value(data, "actor", default="") or ""),
+        {"program": DEFAULT_PROGRAM, "deleted": deleted},
+    )
+    db.delete(row)
+    db.commit()
+    clear_warehouse_cache()
+    clear_rollout_db_cache()
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {"success": True, "message": "Field Entry deleted", "record_id": str(record_id).strip(), "summary": rollout_entry_summary(records)}
+
+
 @app.get("/api/warehouse/rollout-source-check")
 def rollout_source_check(program: str = DEFAULT_PROGRAM):
     if is_single_ran(program):
