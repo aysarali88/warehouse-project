@@ -2984,14 +2984,14 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         if light
         else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
-    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(60, program_key, db)
+    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(request, 60, program_key, db)
     transfers = (
         list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
         if light
         else list_material_transfers(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
     returns = list_material_return_headers(120, program_key, db) if light else list_material_returns(request, 200, program_key, db)
-    scans = list_material_scans(80 if light else 300, program_key, db)
+    scans = list_material_scans(request, 80 if light else 300, program_key, db)
     payload = {
         "success": True,
         "program": program_key,
@@ -3191,9 +3191,9 @@ def scan_material(code: str, warehouse_id: int | None = None, program: str = DEF
 
 
 @app.get("/api/warehouse/material-scans")
-def list_material_scans(limit: int = 300, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_material_scans(request: Request, limit: int = 300, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(MaterialScanLog)
         .options(
             joinedload(MaterialScanLog.requisition),
@@ -3202,9 +3202,11 @@ def list_material_scans(limit: int = 300, program: str = DEFAULT_PROGRAM, db: Se
         )
         .filter(MaterialScanLog.program == program_key)
         .order_by(MaterialScanLog.id.desc())
-        .limit(min(limit, 500))
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        query = query.filter(MaterialScanLog.warehouse_id.in_(allowed))
+    rows = query.limit(min(limit, 500)).all()
     return {"success": True, "scans": [scan_log_to_dict(r) for r in rows]}
 
 
@@ -4619,16 +4621,18 @@ def warehouse_notifications(user: str = "", program: str = DEFAULT_PROGRAM, db: 
 
 
 @app.get("/api/warehouse/receive-orders")
-def list_receive_orders(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_receive_orders(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(ReceiveOrder)
         .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items).joinedload(ReceiveOrderItem.product))
         .filter(ReceiveOrder.program == program_key)
         .order_by(ReceiveOrder.id.desc())
-        .limit(min(limit, 200))
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        query = query.filter(ReceiveOrder.warehouse_id.in_(allowed))
+    rows = query.limit(min(limit, 200)).all()
     return {"success": True, "receipts": [receive_order_to_dict(r) for r in rows]}
 
 
