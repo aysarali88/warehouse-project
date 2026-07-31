@@ -1228,6 +1228,15 @@ def require_warehouse_access(request: Request, db: Session, warehouse_id: int, p
     return warehouse
 
 
+def allowed_warehouse_ids(request: Request, db: Session, program: str) -> list[int] | None:
+    user = current_user(request)
+    if user.role.strip().lower() in {"admin", "management", "approval", "requester"}:
+        return None
+    if user.role.strip().lower() != "warehouse manager":
+        return []
+    return [row.id for row in db.query(Warehouse.id).filter(Warehouse.program == normalize_program(program), func.lower(Warehouse.name) == (user.warehouse_name or "").strip().lower()).all()]
+
+
 def require_program_record(row, program: str, label: str):
     if row is None or normalize_program(getattr(row, "program", DEFAULT_PROGRAM)) != normalize_program(program):
         raise HTTPException(status_code=404, detail=f"{label} not found")
@@ -2961,16 +2970,18 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
 
 
 @app.get("/api/warehouse/bootstrap")
-def warehouse_bootstrap(light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer = request_actor(request)
+    role = current_user(request).role
     cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
     cached = WAREHOUSE_CACHE.get(cache_key)
     if cached and time.monotonic() - cached[0] < WAREHOUSE_CACHE_TTL:
         return {**cached[1], "cached": True}
 
-    stock = list_stock_balances(program_key, db)
-    usage = list_stock_usage(program_key, db)
-    movements = list_stock_movements(12 if light else 40, program_key, db)
+    stock = list_stock_balances(request, program_key, db)
+    usage = list_stock_usage(request, program_key, db)
+    movements = list_stock_movements(request, 12 if light else 40, program_key, db)
     mrs = (
         list_material_requisition_headers(80, db=db, viewer=viewer, role=role, program=program_key)
         if light
@@ -3416,28 +3427,34 @@ def purge_product(product_id: int, data: ProductPurgeIn, request: Request, db: S
 
 
 @app.get("/api/warehouse/stock-balances")
-def list_stock_balances(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
         .filter(StockBalance.program == program_key)
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        query = query.filter(StockBalance.warehouse_id.in_(allowed))
+    rows = query.all()
     return {"success": True, "balances": [balance_to_dict(r) for r in rows]}
 
 
 @app.get("/api/warehouse/stock-usage")
-def list_stock_usage(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    balances = (
+    balances_query = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
         .filter(StockBalance.program == program_key)
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
+    balances = balances_query.all()
     received_totals = {
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
@@ -3992,9 +4009,9 @@ def list_rollout_material_usage(db: Session = Depends(db_session), force: bool =
 
 
 @app.get("/api/warehouse/movements")
-def list_stock_movements(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_stock_movements(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(StockMovement)
         .options(
             joinedload(StockMovement.warehouse),
@@ -4003,9 +4020,11 @@ def list_stock_movements(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Se
         )
         .filter(StockMovement.program == program_key)
         .order_by(StockMovement.id.desc())
-        .limit(min(limit, 200))
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        query = query.filter(StockMovement.warehouse_id.in_(allowed))
+    rows = query.limit(min(limit, 200)).all()
     return {"success": True, "movements": [movement_to_dict(r) for r in rows]}
 
 
