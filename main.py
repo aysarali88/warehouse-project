@@ -3824,14 +3824,16 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
     stock_by_warehouse = [balance_to_dict(row) for row in balances]
     summary["current_stock"] = sum(float(row.quantity or 0) for row in balances)
 
-    receipts = (
+    receipts_query = (
         db.query(ReceiveOrder)
         .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items))
         .join(ReceiveOrderItem, ReceiveOrderItem.receive_order_id == ReceiveOrder.id)
-        .filter(ReceiveOrderItem.product_id == selected.id)
+        .filter(ReceiveOrderItem.product_id == selected.id, ReceiveOrder.program == program_key)
         .order_by(ReceiveOrder.id.asc())
-        .all()
     )
+    if allowed is not None:
+        receipts_query = receipts_query.filter(ReceiveOrder.warehouse_id.in_(allowed))
+    receipts = receipts_query.all()
     for receipt in receipts:
         qty = sum(float(item.quantity or 0) for item in receipt.items if item.product_id == selected.id)
         if receipt.status == "confirmed":
@@ -3849,14 +3851,16 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
             )
         )
 
-    requisitions = (
+    requisitions_query = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
         .join(MaterialRequisitionItem, MaterialRequisitionItem.requisition_id == MaterialRequisition.id)
-        .filter(MaterialRequisitionItem.product_id == selected.id)
+        .filter(MaterialRequisitionItem.product_id == selected.id, MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.asc())
-        .all()
     )
+    if allowed is not None:
+        requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    requisitions = requisitions_query.all()
     for requisition in requisitions:
         qty = sum(float(item.quantity or 0) for item in requisition.items if item.product_id == selected.id)
         if requisition.status in {"issued", "signed"}:
@@ -3875,7 +3879,7 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
             )
         )
 
-    transfers = (
+    transfers_query = (
         db.query(MaterialTransfer)
         .options(
             joinedload(MaterialTransfer.from_warehouse),
@@ -3883,10 +3887,12 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
             selectinload(MaterialTransfer.items),
         )
         .join(MaterialTransferItem, MaterialTransferItem.transfer_id == MaterialTransfer.id)
-        .filter(MaterialTransferItem.product_id == selected.id)
+        .filter(MaterialTransferItem.product_id == selected.id, MaterialTransfer.program == program_key)
         .order_by(MaterialTransfer.id.asc())
-        .all()
     )
+    if allowed is not None:
+        transfers_query = transfers_query.filter(or_(MaterialTransfer.from_warehouse_id.in_(allowed), MaterialTransfer.to_warehouse_id.in_(allowed)))
+    transfers = transfers_query.all()
     for transfer in transfers:
         qty = sum(float(item.quantity or 0) for item in transfer.items if item.product_id == selected.id)
         if transfer.status == "transferred":
@@ -3906,14 +3912,16 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         events.append(material_ledger_event(event_type="TR Out", warehouse=common["from_wh"], **common))
         events.append(material_ledger_event(event_type="TR In", warehouse=common["to_wh"], **common))
 
-    returns = (
+    returns_query = (
         db.query(MaterialReturn)
         .options(joinedload(MaterialReturn.warehouse), selectinload(MaterialReturn.items))
         .join(MaterialReturnItem, MaterialReturnItem.return_id == MaterialReturn.id)
-        .filter(MaterialReturnItem.product_id == selected.id)
+        .filter(MaterialReturnItem.product_id == selected.id, MaterialReturn.program == program_key)
         .order_by(MaterialReturn.id.asc())
-        .all()
     )
+    if allowed is not None:
+        returns_query = returns_query.filter(MaterialReturn.warehouse_id.in_(allowed))
+    returns = returns_query.all()
     for returned in returns:
         qty = sum(float(item.quantity or 0) for item in returned.items if item.product_id == selected.id)
         if returned.status == "confirmed":
