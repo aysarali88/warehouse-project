@@ -1438,6 +1438,8 @@ def rollout_entry_mode(data: dict) -> str:
         for _ in [0]
     )
     norm = rollout_norm(text_value)
+    if "accessor" in norm:
+        return "accessory"
     if "cable" in norm:
         return "cable"
     if any(token in norm for token in ["box", "xbox", "hub", "sub", "end"]):
@@ -2567,37 +2569,39 @@ def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
     raw_code = str(first_value(data, "code", "Cable Code", "cable code", "cable_code", "Box Code", "box code", "box_code", default="") or "").strip()
     if not area or not xbox:
         raise HTTPException(status_code=400, detail="Select Area and Related to XBOX")
-    if not code_type:
-        raise HTTPException(status_code=400, detail="Select Cable or Box material type")
-    if not raw_code:
-        raise HTTPException(status_code=400, detail="Select a code from the list")
+    if code_type not in {"cable", "box", "accessory"}:
+        raise HTTPException(status_code=400, detail="Select a material type")
     if safe_float(first_value(data, "actual", "Actual", default=0)) <= 0:
         raise HTTPException(status_code=400, detail="Actual quantity must be greater than zero")
 
-    matches = rollout_reference_matches(area, xbox, raw_code, code_type)
-    if not matches:
-        raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
-
-    code_attr = RolloutRecord.cable_code if code_type == "cable" else RolloutRecord.box_code
-    existing_candidates = db.query(RolloutRecord).filter(code_attr != "").all()
+    matches: list[dict] = []
     duplicates: list[RolloutRecord] = []
-    for row in existing_candidates:
-        if rollout_record_code_type(row) != code_type:
-            continue
-        if rollout_norm(row.area) != rollout_norm(area):
-            continue
-        if rollout_xbox_key(row.related_to_xbox) != rollout_xbox_key(xbox):
-            continue
-        saved_code = row.cable_code if code_type == "cable" else row.box_code
-        if rollout_code_key(saved_code) == rollout_code_key(raw_code):
-            duplicates.append(row)
+    if code_type in {"cable", "box"}:
+        if not raw_code:
+            raise HTTPException(status_code=400, detail="Select a code from the list")
+        matches = rollout_reference_matches(area, xbox, raw_code, code_type)
+        if not matches:
+            raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
 
-    done_duplicate = next((row for row in duplicates if rollout_norm(row.status) == "done"), None)
-    if done_duplicate:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Code already saved as Done in {done_duplicate.record_id}",
-        )
+        code_attr = RolloutRecord.cable_code if code_type == "cable" else RolloutRecord.box_code
+        existing_candidates = db.query(RolloutRecord).filter(code_attr != "").all()
+        for row in existing_candidates:
+            if rollout_record_code_type(row) != code_type:
+                continue
+            if rollout_norm(row.area) != rollout_norm(area):
+                continue
+            if rollout_xbox_key(row.related_to_xbox) != rollout_xbox_key(xbox):
+                continue
+            saved_code = row.cable_code if code_type == "cable" else row.box_code
+            if rollout_code_key(saved_code) == rollout_code_key(raw_code):
+                duplicates.append(row)
+
+        done_duplicate = next((row for row in duplicates if rollout_norm(row.status) == "done"), None)
+        if done_duplicate:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Code already saved as Done in {done_duplicate.record_id}",
+            )
 
     warnings: list[dict] = []
     in_progress = next((row for row in duplicates if rollout_norm(row.status) in {"inprogress", "planned", "blocked"}), None)
@@ -2606,7 +2610,7 @@ def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
 
     material_type = str(first_value(data, "material type", "Material Type", "material_type", default="") or "").strip()
     material_norm = rollout_norm(material_type)
-    ref = matches[0]
+    ref = matches[0] if matches else {}
     expected_len = int(ref.get("cable_length_m") or 0)
     if code_type == "cable" and expected_len:
         length_match = re.search(r"(\d+)\s*m", material_type, flags=re.I)
