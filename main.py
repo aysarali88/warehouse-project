@@ -1,5 +1,6 @@
 ﻿import csv
 import hashlib
+import base64
 import io
 import json
 import hmac
@@ -371,7 +372,13 @@ def verify_password(password: str, stored: str = "") -> bool:
         except ValueError:
             return False
     if is_legacy_password_hash(stored):
-        return False
+        try:
+            _algorithm, iterations, salt, digest = stored.split("$", 3)
+            derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(iterations))
+            expected = base64.b64decode(digest.encode("ascii"))
+            return hmac.compare_digest(derived, expected)
+        except (ValueError, TypeError, UnicodeError):
+            return False
     return hmac.compare_digest(password, stored)
 
 
