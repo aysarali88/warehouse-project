@@ -65,6 +65,21 @@ class AppUser(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class AppSession(Base):
+    __tablename__ = "app_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    csrf_token = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("app_users.id"), nullable=False, index=True)
+    program = Column(String, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("AppUser")
+
+
 class Technician(Base):
     __tablename__ = "technicians"
 
