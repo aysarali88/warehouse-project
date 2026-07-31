@@ -420,8 +420,10 @@ migrate_app_user_password_hashes()
 
 
 def seed_legacy_app_users() -> None:
-    """Copy legacy in-code accounts into the database only when absent."""
+    """Seed the original FTTH legacy accounts without copying them into Single RAN."""
     for program_key, session_factory in all_sessionmakers():
+        if is_single_ran(program_key):
+            continue
         with session_factory() as db:
             changed = False
             for legacy in APP_USERS:
@@ -497,7 +499,8 @@ def sync_admin_users_to_secondary_databases() -> None:
             logger.exception("%s admin user sync failed", program_key)
 
 
-sync_admin_users_to_secondary_databases()
+# Users are intentionally managed per program. Do not mirror FTTH admins into
+# Single RAN automatically, because that would recreate accounts removed there.
 
 
 def sync_product_part_numbers() -> None:
