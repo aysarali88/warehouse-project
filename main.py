@@ -1469,7 +1469,7 @@ def rollout_code_reference_rows() -> list[dict]:
     rows: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
 
-    def add(row: dict, code: str, code_type: str, source: str):
+    def add(row: dict, code: str, code_type: str, source: str, material_override: str = ""):
         if not code:
             return
         area = str(first_value(row, "Area", "area", "Zone", "zone", default="") or "").strip()
@@ -1479,8 +1479,8 @@ def rollout_code_reference_rows() -> list[dict]:
         if key in seen:
             return
         seen.add(key)
-        material = str(first_value(row, "Material type", "material type", "Item", "item", default="") or "").strip()
         box_type = str(first_value(row, "Box type", "box type", default="") or "").strip()
+        material = material_override or str(first_value(row, "Material type", "material type", "Item", "item", default="") or "").strip()
         rows.append(
             {
                 "city": city,
@@ -1499,7 +1499,7 @@ def rollout_code_reference_rows() -> list[dict]:
 
     for row in ref.get("boxes") or []:
         code = str(first_value(row, "Box code", "box code", default="") or "").strip()
-        add(row, code, "box", "box")
+        add(row, code, "box", "box", str(first_value(row, "Box type", "box type", default="") or "").strip())
         add(row, code, "cable", "drop")
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
