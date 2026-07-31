@@ -2513,19 +2513,15 @@ def rollout_entry_reference(
     db: Session = Depends(db_session),
 ):
     records, source = rollout_daily_progress_records(db, force=False)
-    filtered_records = records
-    if area:
-        filtered_records = [r for r in filtered_records if rollout_norm(r.get("Area")) == rollout_norm(area)]
-    if xbox:
-        filtered_records = [r for r in filtered_records if rollout_xbox_key(r.get("Related to XBOX")) == rollout_xbox_key(xbox)]
+    latest_records = records
     if query:
         needle = rollout_norm(query)
-        filtered_records = [
-            r
-            for r in filtered_records
-            if needle in rollout_norm(" ".join(str(v or "") for v in r.values()))
+        latest_records = [
+            row
+            for row in latest_records
+            if needle in rollout_norm(" ".join(str(v or "") for v in row.values()))
         ]
-    latest = list(reversed(filtered_records))[: min(max(limit, 1), 200)]
+    latest = list(reversed(latest_records))[: min(max(limit, 1), 200)]
 
     refs = rollout_code_reference_rows()
     areas_map: dict[str, dict] = {}
@@ -2554,7 +2550,7 @@ def rollout_entry_reference(
         "xboxes_by_area": {areas_map[k]["area"]: sorted(v) for k, v in xboxes_map.items()},
         "codes": scoped_refs,
         "latest": latest,
-        "count": len(filtered_records),
+        "count": len(latest_records),
     }
 
 
