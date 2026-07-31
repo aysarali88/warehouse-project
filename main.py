@@ -418,10 +418,10 @@ def seed_legacy_app_users() -> None:
         with session_factory() as db:
             changed = False
             for legacy in APP_USERS:
+                # Production has a global unique constraint on username, so an
+                # existing account must never be reseeded under another role.
                 existing = db.query(AppUser).filter(
                     func.lower(AppUser.username) == legacy["username"].lower(),
-                    AppUser.role == legacy["role"],
-                    AppUser.program == normalize_program(program_key),
                 ).first()
                 if existing is None:
                     db.add(AppUser(program=normalize_program(program_key), username=legacy["username"], name=legacy["name"], role=legacy["role"], warehouse_name=legacy.get("warehouse_name", ""), password_hash=legacy["password_hash"], status="active"))
