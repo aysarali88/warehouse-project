@@ -545,7 +545,7 @@ th{
 /* Keep the structured fiber map light while scrolling the page. */
 .fiber-map-svg{width:100%;max-width:100%;min-width:0;height:auto}
 .map-stage{overflow:visible}
-.map-card{content-visibility:auto;contain-intrinsic-size:900px}
+.map-card{content-visibility:visible;contain-intrinsic-size:auto}
 .map-filter-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:flex-end}.map-filter-row .map-scope-picker{min-width:150px}.map-filter-row select{display:block;min-width:150px;margin-top:4px}
 .warehouse-rings{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:18px;align-items:center;padding:18px 14px;border-radius:8px;background:radial-gradient(circle at 15% 10%,rgba(90,218,181,.16),transparent 30%),linear-gradient(135deg,#08253c,#0b344f 58%,#075b73);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 14px 30px rgba(5,38,64,.14)}
 .warehouse-ring-card{display:grid;justify-items:center;gap:8px;min-width:0;color:#fff}
@@ -1951,7 +1951,7 @@ filtered.forEach(r=>{const supervisor=String(r['Supervisor Name']||r.supervisor_
 const data=[...groups.values()].sort((a,b)=>a.area.localeCompare(b.area)||a.supervisor.localeCompare(b.supervisor));const total={xbox:0,hub:0,sub:0,end:0,cable:0};data.forEach(g=>Object.keys(total).forEach(k=>total[k]+=g[k]));const num=v=>Number(v||0).toLocaleString('en-US');
 panel.innerHTML=`<div class="rollout-operations-panel"><div class="rollout-operations-toolbar"><div><h3 style="margin:0">Operations</h3><div class="muted">Supervisor progress by Date</div></div><div class="rollout-operations-filter"><label for="rolloutOperationsDate">Date</label><select id="rolloutOperationsDate" onchange="renderRolloutOperations()"><option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}" ${d===activeDate?'selected':''}>${esc(d)}</option>`).join('')}</select></div></div><div class="rollout-operations-stats"><div class="rollout-operations-stat">Supervisors<strong>${num(data.length)}</strong></div><div class="rollout-operations-stat">Areas<strong>${num(new Set(data.map(g=>g.area)).size)}</strong></div><div class="rollout-operations-stat">Cable length<strong>${num(total.cable)} m</strong></div></div>${data.length?`<div class="rollout-operations-table-wrap"><table class="rollout-operations-table"><thead><tr><th>Supervisor Name</th><th>Area</th><th>XBOX</th><th>HUB BOX</th><th>SUB BOX</th><th>END BOX</th><th>Total Cable (m)</th></tr></thead><tbody>${data.map(g=>`<tr><td>${esc(g.supervisor)}</td><td>${esc(g.area)}</td><td class="num">${num(g.xbox)}</td><td class="num">${num(g.hub)}</td><td class="num">${num(g.sub)}</td><td class="num">${num(g.end)}</td><td class="num">${num(g.cable)}</td></tr>`).join('')}<tr class="total"><td colspan="2">Total</td><td class="num">${num(total.xbox)}</td><td class="num">${num(total.hub)}</td><td class="num">${num(total.sub)}</td><td class="num">${num(total.end)}</td><td class="num">${num(total.cable)}</td></tr></tbody></table></div>`:`<div class="rollout-operations-empty">No rollout records for the selected date.</div>`}</div>`;
 }
-function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));const panels={kpi:'rolloutDailyKpi',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});if(tab==='map')renderRolloutMapPanel();if(tab==='operations')renderRolloutOperations();if(tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
+function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){const current=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(current==='map'&&tab!=='map')saveWarehouseFiberScroll();if(current!=='map'&&tab==='map')warehouseFiberRestoringTab=true;document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));const panels={kpi:'rolloutDailyKpi',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});if(tab==='map')renderRolloutMapPanel();if(tab==='operations')renderRolloutOperations();if(tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
 function x4BranchElements(){
 const branchLengths={
 1:[[100,150,80],[50,100,50,100],[80,80,80,50]],2:[[250,50,150,100],[250,50,50,50],[5,80,80,80],[200,80,80,50]],
@@ -2433,6 +2433,8 @@ function wfmRenderPart(part,rows){const height=Math.max(1300,Math.max(...part.hu
 function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),wfmValue(ref,['Cable length m']),'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
 var warehouseFiberSelectedScope='';
 var warehouseFiberSelectedArea='';
+var warehouseFiberScrollState={windowY:0,mainY:0};
+var warehouseFiberRestoringTab=false;
 var WFM_MAP_SCOPES=[
   {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
   {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
@@ -2458,11 +2460,13 @@ function syncWarehouseFiberScope(area){
 function wfmSelectMapArea(value){
   warehouseFiberSelectedArea=value||'';
   warehouseFiberSelectedScope='';
+  warehouseFiberScrollState={windowY:0,mainY:0};
   renderRolloutMapPanel();
   updatePageLink();
 }
 function wfmSelectMapXbox(value){
   warehouseFiberSelectedScope=value||'';
+  warehouseFiberScrollState={windowY:0,mainY:0};
   renderRolloutMapPanel();
   updatePageLink();
 }
@@ -2479,8 +2483,10 @@ const baseRenderRolloutDailyProgress=renderRolloutDailyProgress;
 renderRolloutDailyProgress=function(){if(isSingleRan()){clearSingleRanRolloutState(false);return}return baseRenderRolloutDailyProgress()};
 const baseRefreshRolloutDailyProgress=refreshRolloutDailyProgress;
 refreshRolloutDailyProgress=async function(showToast=true,forceRefresh=showToast){if(isSingleRan()){clearSingleRanRolloutState(false);return}return baseRefreshRolloutDailyProgress(showToast,forceRefresh)};
+function saveWarehouseFiberScroll(){if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab!=='map')return;const main=document.querySelector('.main');warehouseFiberScrollState={windowY:window.scrollY||0,mainY:main?.scrollTop||0}}
+function restoreWarehouseFiberScroll(){const state=warehouseFiberScrollState||{};if(!state.windowY&&!state.mainY)return;requestAnimationFrame(()=>requestAnimationFrame(()=>{const main=document.querySelector('.main');if(main)main.scrollTop=state.mainY||0;window.scrollTo(0,state.windowY||0)}))}
 const baseRenderRolloutMapPanel=renderRolloutMapPanel;
-renderRolloutMapPanel=function(){if(isSingleRan()){const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='';return}return baseRenderRolloutMapPanel()};
+renderRolloutMapPanel=function(){if(isSingleRan()){const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='';return}if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();const result=baseRenderRolloutMapPanel();restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result};
 if(isSingleRan())clearSingleRanRolloutState(false);
 </script>
 </body>
