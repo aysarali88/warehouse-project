@@ -4706,7 +4706,7 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 
 @app.post("/api/warehouse/material-requisitions")
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Requester")
+    user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
     require_warehouse(db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
@@ -4784,7 +4784,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/resubmit")
 def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Requester")
+    user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
