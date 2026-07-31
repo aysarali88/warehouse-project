@@ -5020,26 +5020,31 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/signature")
-def sign_material_requisition(requisition_id: int, data: MaterialRequisitionSignatureIn, db: Session = Depends(db_session)):
+def sign_material_requisition(requisition_id: int, data: MaterialRequisitionSignatureIn, request: Request, db: Session = Depends(db_session)):
     program_key = normalize_program(data.program)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    if data.role == "requester":
-        row.requester_name = data.name or row.requester_name
+    actor = request_actor(request)
+    if current_user(request).role.strip().lower() == "requester":
+        if normalize_usage_key(row.created_by) != normalize_usage_key(actor) and current_user(request).role.strip().lower() != "admin":
+            raise HTTPException(status_code=403, detail="You can only sign your own requisition")
+        row.requester_name = actor
         row.requester_title = data.title or row.requester_title
         row.requester_date = data.date or row.requester_date
         row.requester_comment = data.comment
         row.requester_signature = data.signature
     else:
-        row.receiver_name = data.name or row.receiver_name
+        require_roles(request, "Admin", "Approval", "Warehouse Manager")
+        require_warehouse_access(request, db, row.warehouse_id, program_key)
+        row.receiver_name = actor
         row.receiver_title = data.title or row.receiver_title
         row.receiver_date = data.date or row.receiver_date
         row.receiver_comment = data.comment
         row.receiver_signature = data.signature
     if row.status != "issued" and row.requester_signature and row.receiver_signature:
         row.status = "signed"
-    log_audit(db, "sign_material_requisition", "material_requisition", row.order_number, data.name or "manager", data.model_dump())
+    log_audit(db, "sign_material_requisition", "material_requisition", row.order_number, actor, data.model_dump())
     db.commit()
     db.refresh(row)
     return {"success": True, "requisition": requisition_to_dict(row)}
@@ -5096,16 +5101,16 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
-def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, db: Session = Depends(db_session)):
+def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status != "approved":
         raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
-    actor = data.actor.strip()
-    if not is_workflow_role(data.title) and not is_requisition_warehouse_manager(actor, row, db):
-        raise HTTPException(status_code=403, detail="Only the assigned warehouse manager can return this MR")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    actor = request_actor(request)
     row.receiver_comment = data.comment
     row.return_reason = data.comment
     row.status = "returned_for_edit"
@@ -5132,9 +5137,8 @@ def issue_material_requisition(requisition_id: int, request: Request, data: Mate
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/delete")
-def delete_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
-    if normalize_usage_key(data.title) != "admin":
-        raise HTTPException(status_code=403, detail="Admin only")
+def delete_material_requisition(requisition_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
     row = (
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items), joinedload(MaterialRequisition.warehouse))
@@ -5144,7 +5148,7 @@ def delete_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     try:
-        result = delete_material_requisition_row(db, row, data.actor)
+        result = delete_material_requisition_row(db, row, request_actor(request))
         db.commit()
     except Exception:
         db.rollback()
