@@ -316,6 +316,7 @@ def request_arrived_over_https(request: Request) -> bool:
 @app.middleware("http")
 async def add_hsts_header(request: Request, call_next):
     response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
     if request_arrived_over_https(request):
         response.headers["Strict-Transport-Security"] = "max-age=31536000"
     return response
