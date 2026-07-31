@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 import re
+import secrets
 import smtplib
 import time
 import urllib.parse
@@ -18,7 +19,7 @@ from email.utils import formataddr
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker
 from models import (
     AuditLog,
+    AppSession,
     AppUser,
     IssueOrder,
     IssueOrderItem,
@@ -67,6 +69,13 @@ DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsh
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
 FIBER_MAP_REFERENCE_PATH = "static/assets/fiber-map-data.json"
 logger = logging.getLogger(__name__)
+SESSION_COOKIE_NAME = "warehouse_session"
+SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "8"))
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1").strip().lower() not in {"0", "false", "no", "off"}
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+
+if len(SESSION_SECRET) < 32:
+    raise RuntimeError("SESSION_SECRET must be set to a value of at least 32 characters")
 
 for program_key, db_engine in all_engines():
     try:
@@ -242,12 +251,38 @@ def extract_program_from_body(body: bytes, content_type: str = "") -> str:
 
 @app.middleware("http")
 async def require_program_scope(request: Request, call_next):
-    protected_paths = (
-        "/api/warehouse",
-        "/api/auth/login",
-        "/api/auth/users",
-    )
-    if not request.url.path.startswith(protected_paths):
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return await call_next(request)
+
+    is_login = path == "/api/auth/login"
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if not is_login:
+        if not token:
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        session_data = None
+        for _, sessionmaker in all_sessionmakers():
+            with sessionmaker() as db:
+                session = (
+                    db.query(AppSession)
+                    .options(joinedload(AppSession.user))
+                    .filter(AppSession.token_hash == session_token_hash(token), AppSession.expires_at > datetime.now(timezone.utc))
+                    .first()
+                )
+                if session is not None and session.user is not None and session.user.status == "active":
+                    session_data = (session.user, normalize_program(session.program), session.csrf_token)
+                    break
+        if session_data is None:
+            return JSONResponse({"detail": "Session expired or inactive"}, status_code=401)
+        request.state.current_user, request.state.session_program, request.state.csrf_token = session_data
+        request.state.program = request.state.session_program
+        if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            supplied = request.headers.get("X-CSRF-Token", "")
+            if not supplied or not hmac.compare_digest(supplied, request.state.csrf_token):
+                return JSONResponse({"detail": "Invalid CSRF token"}, status_code=403)
+
+    scoped_path = path.startswith("/api/warehouse") or path.startswith("/api/auth/users") or is_login
+    if not scoped_path:
         return await call_next(request)
 
     program_value = request.query_params.get("program", "")
@@ -266,6 +301,8 @@ async def require_program_scope(request: Request, call_next):
     if not is_valid_program_value(program_value):
         return JSONResponse({"detail": "Invalid program scope"}, status_code=400)
     request.state.program = normalize_program(program_value)
+    if not is_login and request.state.program != request.state.session_program:
+        return JSONResponse({"detail": "Program scope does not match this session"}, status_code=403)
     return await call_next(request)
 
 
@@ -1104,6 +1141,56 @@ def db_session(request: Request):
         yield db
     finally:
         db.close()
+
+
+def session_token_hash(token: str) -> str:
+    return hmac.new(SESSION_SECRET.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def session_user_payload(user: AppUser, program: str) -> dict:
+    return {
+        "id": user.id,
+        "program": normalize_program(program),
+        "username": user.username,
+        "name": user.name or user.username,
+        "role": user.role,
+        "warehouse_name": user.warehouse_name or "",
+    }
+
+
+def create_app_session(db: Session, user: AppUser, program: str) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    db.query(AppSession).filter(AppSession.expires_at <= now).delete(synchronize_session=False)
+    token = secrets.token_urlsafe(48)
+    csrf_token = secrets.token_urlsafe(32)
+    db.add(AppSession(token_hash=session_token_hash(token), csrf_token=csrf_token, user_id=user.id, program=normalize_program(program), expires_at=now + timedelta(hours=SESSION_TTL_HOURS)))
+    db.commit()
+    return token, csrf_token
+
+
+def clear_app_session(db: Session, token: str) -> None:
+    if token:
+        db.query(AppSession).filter(AppSession.token_hash == session_token_hash(token)).delete(synchronize_session=False)
+        db.commit()
+
+
+def current_user(request: Request) -> AppUser:
+    user = getattr(request.state, "current_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+def require_roles(request: Request, *roles: str) -> AppUser:
+    user = current_user(request)
+    if user.role.strip().lower() not in {role.strip().lower() for role in roles}:
+        raise HTTPException(status_code=403, detail="You do not have permission for this action")
+    return user
+
+
+def request_actor(request: Request) -> str:
+    user = current_user(request)
+    return user.name or user.username
 
 
 def next_number(db: Session, model, prefix: str) -> str:
@@ -2011,7 +2098,7 @@ def warehouse_home():
 
 
 @app.post("/api/auth/login")
-def login(data: LoginIn, db: Session = Depends(db_session)):
+def login(data: LoginIn, response: Response, db: Session = Depends(db_session)):
     key = data.username.strip().lower()
     program_key = normalize_program(data.program)
     try:
@@ -2032,16 +2119,9 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
             if user.password_hash and not is_bcrypt_hash(user.password_hash):
                 user.password_hash = hash_password(data.password)
                 db.commit()
-            return {
-                "success": True,
-                "user": {
-                    "program": program_key,
-                    "username": user.username,
-                    "name": user.name or user.username,
-                    "role": user.role,
-                    "warehouse_name": user.warehouse_name or "",
-                },
-            }
+            token, csrf_token = create_app_session(db, user, program_key)
+            response.set_cookie(key=SESSION_COOKIE_NAME, value=token, max_age=SESSION_TTL_HOURS * 60 * 60, httponly=True, secure=SESSION_COOKIE_SECURE, samesite="lax", path="/")
+            return {"success": True, "user": session_user_payload(user, program_key), "csrf_token": csrf_token}
 
         deleted_fallback = (
             db.query(AppUser)
@@ -2060,47 +2140,19 @@ def login(data: LoginIn, db: Session = Depends(db_session)):
     except Exception:
         db.rollback()
 
-    fallback_user = next(
-        (
-            row
-            for row in APP_USERS
-            if row["username"].lower() == key
-            and app_user_matches_program(row, program_key)
-            and verify_password(data.password, row["password_hash"])
-        ),
-        None,
-    )
-    if fallback_user is None and is_single_ran(program_key):
-        matching_fallback_user = next(
-            (
-                row
-                for row in APP_USERS
-                if row["username"].lower() == key and verify_password(data.password, row["password_hash"])
-            ),
-            None,
-        )
-        matching_fallback_admin = next(
-            (
-                row
-                for row in APP_USERS
-                if row["username"].lower() == key and is_admin_role(row["role"])
-            ),
-            None,
-        )
-        if matching_fallback_user and matching_fallback_admin:
-            fallback_user = matching_fallback_admin
-    if fallback_user is None:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {
-        "success": True,
-        "user": {
-            "program": program_key,
-            "username": fallback_user["username"],
-            "name": fallback_user["name"],
-            "role": fallback_user["role"],
-            "warehouse_name": fallback_user.get("warehouse_name", ""),
-        },
-    }
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+
+@app.get("/api/auth/me")
+def current_session(request: Request):
+    return {"success": True, "user": session_user_payload(current_user(request), request.state.session_program), "csrf_token": request.state.csrf_token}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, db: Session = Depends(db_session)):
+    clear_app_session(db, request.cookies.get(SESSION_COOKIE_NAME, ""))
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return {"success": True}
 
 
 def requisition_header_to_dict(row: MaterialRequisition) -> dict:

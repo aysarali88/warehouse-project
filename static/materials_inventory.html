@@ -1389,11 +1389,12 @@ if(localStorage.getItem('warehouseAppCacheVersion')!==APP_CACHE_VERSION){
   localStorage.removeItem('warehouseProgram');
   localStorage.setItem('warehouseAppCacheVersion',APP_CACHE_VERSION);
 }
-let session=JSON.parse(localStorage.getItem('warehouseSession')||'null');
-let activeUser=session?.name||'';
-let activeRole=session?.role||'';
-let activeWarehouseAssignment=session?.warehouse_name||'';
-let currentProgram=session?.program||localStorage.getItem('warehouseProgram')||'FTTH';
+let session=null;
+let csrfToken='';
+let activeUser='';
+let activeRole='';
+let activeWarehouseAssignment='';
+let currentProgram=localStorage.getItem('warehouseProgram')||'FTTH';
 const PROGRAM_LABELS={FTTH:'FTTH',SINGLE_RAN:'Single RAN'};
 let lastApprovalCount=0;
 let appUsers=[];
@@ -1462,7 +1463,7 @@ function normalizeProgram(v){const text=String(v||'').toUpperCase().replace(/[\s
 function programLabel(){return PROGRAM_LABELS[normalizeProgram(currentProgram)]||'FTTH'}
 function withProgramQuery(path){if(!String(path||'').startsWith('/api/warehouse'))return path;const [base,hash='']=String(path).split('#');const [url,query='']=base.split('?');const params=new URLSearchParams(query);if(!params.has('program'))params.set('program',normalizeProgram(currentProgram));return url+'?'+params.toString()+(hash?'#'+hash:'')}
 function scopedJsonBody(body){if(!body||typeof body!=='string')return body;try{const data=JSON.parse(body);if(data&&typeof data==='object'&&!Array.isArray(data)&&!data.program){data.program=normalizeProgram(currentProgram);return JSON.stringify(data)}}catch(e){}return body}
-async function api(path,opts={}){path=withProgramQuery(path);const isForm=opts.body instanceof FormData;if(isForm&&String(path).startsWith('/api/warehouse')&&!opts.body.has('program'))opts.body.append('program',normalizeProgram(currentProgram));else if(!isForm&&opts.body)opts={...opts,body:scopedJsonBody(opts.body)};const headers={...(opts.headers||{})};if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';const res=await fetch(path,{cache:'no-store',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
+async function api(path,opts={}){path=withProgramQuery(path);const isForm=opts.body instanceof FormData;if(isForm&&String(path).startsWith('/api/warehouse')&&!opts.body.has('program'))opts.body.append('program',normalizeProgram(currentProgram));else if(!isForm&&opts.body)opts={...opts,body:scopedJsonBody(opts.body)};const headers={...(opts.headers||{})};const method=String(opts.method||'GET').toUpperCase();if(!isForm&&!headers['Content-Type'])headers['Content-Type']='application/json';if(!['GET','HEAD','OPTIONS'].includes(method)&&csrfToken&&!path.endsWith('/api/auth/login'))headers['X-CSRF-Token']=csrfToken;const res=await fetch(path,{cache:'no-store',credentials:'same-origin',...opts,headers});const data=await res.json().catch(()=>({}));if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Request failed');return data}
 function bindScannerInput(id,handler){const input=document.getElementById(id);if(!input)return;input.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(scanDebounceTimers[id]);handler()}});input.addEventListener('input',()=>{clearTimeout(scanDebounceTimers[id]);const value=input.value.trim();if(value.length<3)return;scanDebounceTimers[id]=setTimeout(()=>handler(),650)})}
 function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 async function loadUsers(){try{const data=await api('/api/auth/users?program='+encodeURIComponent(normalizeProgram(currentProgram)));appUsers=data.users||[];renderUsers()}catch(e){toast(e.message)}}
@@ -1526,8 +1527,9 @@ function serialLines(id){return document.getElementById(id).value.split(/\r?\n/)
 function clearWarehouseBootstrapCache(){clearWarehouseLocalCaches()}
 function chooseProgramBeforeLogin(program){currentProgram=normalizeProgram(program);localStorage.setItem('warehouseProgram',currentProgram);document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden');setTimeout(()=>document.getElementById('loginUser')?.focus(),50)}
 function backToProgramChoice(){loginPass.value='';document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
-async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);localStorage.setItem('warehouseSession',JSON.stringify(session));activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
-function logoutApp(){localStorage.removeItem('warehouseSession');clearWarehouseBootstrapCache();session=null;activeUser='';activeRole='';activeWarehouseAssignment='';document.body.classList.remove('awaiting-program');document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
+async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
+async function logoutApp(){try{await api('/api/auth/logout',{method:'POST'})}catch(e){}localStorage.removeItem('warehouseSession');clearWarehouseBootstrapCache();session=null;csrfToken='';activeUser='';activeRole='';activeWarehouseAssignment='';document.body.classList.remove('awaiting-program');document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
+async function restoreServerSession(){localStorage.removeItem('warehouseSession');try{const data=await api('/api/auth/me');session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);applyAuthState();await loadWarehouse()}catch(e){session=null;csrfToken='';applyAuthState()}}
 function uiState(){try{return JSON.parse(localStorage.getItem(UI_STATE_KEY)||'{}')}catch(e){return{}}}
 function saveUiState(patch){localStorage.setItem(UI_STATE_KEY,JSON.stringify({...uiState(),...patch}))}
 function pageLinkState(){const view=document.querySelector('.nav button.active')?.dataset.view||'dashboard';const params=new URLSearchParams();if(view==='rolloutDaily'&&!isSingleRan()){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab!=='kpi')params.set('tab',tab);if(tab==='map'){if(warehouseFiberSelectedArea)params.set('area',warehouseFiberSelectedArea);if(warehouseFiberSelectedScope)params.set('xbox',warehouseFiberSelectedScope)}}return `#${view}${params.size?`?${params}`:''}`}
@@ -2324,9 +2326,8 @@ bindScannerInput('scanMaterialInput',handleMaterialScan);
 bindScannerInput('historyScanInput',handleHistoryScan);
 document.querySelectorAll('#transferForm input,#transferForm select').forEach(el=>{el.addEventListener('input',renderTransferPreview);el.addEventListener('change',renderTransferPreview)});
 document.querySelectorAll('#returnForm input,#returnForm select').forEach(el=>{el.addEventListener('input',renderReturnPreview);el.addEventListener('change',renderReturnPreview)});
-applyAuthState();
+restoreServerSession();
 loadInitialStockReference();
-if(session)loadWarehouse();
 window.addEventListener('hashchange',applyPageLink);
 setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{if(!session||document.hidden)return;const active=document.querySelector('.view.active')?.id;const delay=active==='rolloutDaily'?900000:900000;if(Date.now()-lastRolloutAutoRefresh>=delay)refreshRolloutDailyProgress(false)},15000);
