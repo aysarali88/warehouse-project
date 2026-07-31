@@ -4578,8 +4578,9 @@ def get_material_return(return_id: int, request: Request, program: str = DEFAULT
 
 
 @app.get("/api/warehouse/notifications")
-def warehouse_notifications(user: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def warehouse_notifications(request: Request, user: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    user = request_actor(request)
     pending = db.query(MaterialRequisition).filter(MaterialRequisition.program == program_key, MaterialRequisition.status == "pending_approval").all()
     pending_transfers = (
         db.query(MaterialTransfer)
