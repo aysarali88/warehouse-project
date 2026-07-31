@@ -2593,7 +2593,8 @@ def save_record(data: dict, request: Request, db: Session = Depends(db_session))
 
 
 @app.get("/api/warehouse/rollout-daily-progress")
-def list_rollout_daily_progress(limit: int = 500, refresh: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_rollout_daily_progress(request: Request, limit: int = 500, refresh: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
     if is_single_ran(program):
         return {"success": True, "source": "disabled", "count": 0, "records": []}
     force_refresh = str(refresh or "").strip().lower() in {"1", "true", "yes", "now"} or str(refresh or "").strip().isdigit()
@@ -2611,7 +2612,8 @@ def list_rollout_daily_progress(limit: int = 500, refresh: str = "", program: st
 
 
 @app.get("/api/warehouse/rollout-daily-progress/export")
-def export_rollout_daily_progress(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
     if is_single_ran(program):
         rows: list[dict] = []
     else:
@@ -2914,7 +2916,8 @@ def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db:
 
 
 @app.get("/api/warehouse/rollout-source-check")
-def rollout_source_check(program: str = DEFAULT_PROGRAM):
+def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM):
+    require_roles(request, "Admin", "Management")
     if is_single_ran(program):
         return {
             "success": True,
@@ -3011,8 +3014,8 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         "scanLogs": scans["scans"],
     }
     if not light:
-        tech = list_technician_balances(program_key, db)
-        audit = list_audit_logs(40, program_key, db)
+        tech = list_technician_balances(request, program_key, db)
+        audit = list_audit_logs(request, 40, program_key, db) if current_user(request).role.strip().lower() == "admin" else {"logs": []}
         payload.update(
             {
                 "technicianBalances": tech["balances"],
@@ -3020,8 +3023,8 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
             }
         )
         if not is_single_ran(program_key):
-            rollout = list_rollout_material_usage(db=db)
-            daily_progress = list_rollout_daily_progress(limit=5000, db=db)
+            rollout = list_rollout_material_usage(request, db=db, program=program_key)
+            daily_progress = list_rollout_daily_progress(request, limit=5000, program=program_key, db=db)
             payload.update(
                 {
                     "rolloutUsage": rollout["usage"],
@@ -3540,29 +3543,38 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
 
 
 @app.get("/api/warehouse/technician-balances")
-def list_technician_balances(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_technician_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(TechnicianBalance)
         .options(joinedload(TechnicianBalance.technician), joinedload(TechnicianBalance.product))
         .filter(TechnicianBalance.program == program_key)
         .order_by(TechnicianBalance.technician_id, TechnicianBalance.product_id)
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        technician_ids = [row[0] for row in db.query(IssueOrder.technician_id).filter(IssueOrder.program == program_key, IssueOrder.warehouse_id.in_(allowed)).distinct().all()]
+        query = query.filter(TechnicianBalance.technician_id.in_(technician_ids))
+    rows = query.all()
     return {"success": True, "balances": [technician_balance_to_dict(r) for r in rows]}
 
 
 @app.get("/api/warehouse/technician-material-usage")
-def list_technician_material_usage(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_technician_material_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(program)
     rows: dict[tuple[str, int], dict] = {}
-    requisitions = (
+    requisitions_query = (
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product))
         .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.asc())
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    requisitions = requisitions_query.all()
     for requisition in requisitions:
         if requisition.status not in {"issued", "signed"}:
             continue
@@ -3704,9 +3716,9 @@ def area_usage_keys(site_id: str, site_address: str) -> set[str]:
     return {key} if key else set()
 
 
-def material_ledger_product_options(db: Session, query: str = "", product_id: int = 0) -> list[Product]:
+def material_ledger_product_options(db: Session, program: str, query: str = "", product_id: int = 0) -> list[Product]:
     if product_id:
-        product = db.get(Product, product_id)
+        product = db.query(Product).filter(Product.id == product_id, Product.program == normalize_program(program)).first()
         return [product] if product else []
     term = str(query or "").strip()
     if not term:
@@ -3715,6 +3727,7 @@ def material_ledger_product_options(db: Session, query: str = "", product_id: in
     rows = (
         db.query(Product)
         .filter(
+            Product.program == normalize_program(program),
             or_(
                 func.lower(Product.sku).like(needle),
                 func.lower(Product.name).like(needle),
@@ -3768,8 +3781,9 @@ def material_ledger_event(
 
 
 @app.get("/api/warehouse/material-ledger")
-def material_ledger(query: str = "", product_id: int = 0, force: bool = False, db: Session = Depends(db_session)):
-    products = material_ledger_product_options(db, query=query, product_id=product_id)
+def material_ledger(request: Request, query: str = "", product_id: int = 0, force: bool = False, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    products = material_ledger_product_options(db, program_key, query=query, product_id=product_id)
     selected = products[0] if products else None
     matches = [product_to_dict(row) for row in products]
     if selected is None:
@@ -3800,10 +3814,13 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
     balances = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse))
-        .filter(StockBalance.product_id == selected.id)
+        .filter(StockBalance.product_id == selected.id, StockBalance.program == program_key)
         .order_by(StockBalance.warehouse_id.asc())
         .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        balances = [row for row in balances if row.warehouse_id in allowed]
     stock_by_warehouse = [balance_to_dict(row) for row in balances]
     summary["current_stock"] = sum(float(row.quantity or 0) for row in balances)
 
@@ -3954,7 +3971,7 @@ def material_ledger(query: str = "", product_id: int = 0, force: bool = False, d
 
 
 @app.get("/api/warehouse/rollout-material-usage")
-def list_rollout_material_usage(db: Session = Depends(db_session), force: bool = False, program: str = DEFAULT_PROGRAM):
+def list_rollout_material_usage(request: Request, db: Session = Depends(db_session), force: bool = False, program: str = DEFAULT_PROGRAM):
     if is_single_ran(program):
         return {"success": True, "usage": [], "rollout_records": 0, "rollout_source": "disabled"}
     rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
@@ -3971,7 +3988,7 @@ def list_rollout_material_usage(db: Session = Depends(db_session), force: bool =
         rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
         rollout_material_usage[material_key] = rollout_material_usage.get(material_key, 0) + actual
 
-    mr_usage = list_technician_material_usage(DEFAULT_PROGRAM, db)["usage"]
+    mr_usage = list_technician_material_usage(request, program, db)["usage"]
     rows = []
     for row in mr_usage:
         material = row["material"]
@@ -4028,7 +4045,8 @@ def list_stock_movements(request: Request, limit: int = 50, program: str = DEFAU
 
 
 @app.get("/api/warehouse/audit-logs")
-def list_audit_logs(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_audit_logs(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
     program_key = normalize_program(program)
     program_token = f'"program": "{program_key}"'
     if program_key == DEFAULT_PROGRAM:
