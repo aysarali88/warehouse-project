@@ -2985,15 +2985,15 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     mrs = (
         list_material_requisition_headers(80, db=db, viewer=viewer, role=role, program=program_key)
         if light
-        else list_material_requisitions(200, viewer=viewer, role=role, program=program_key, db=db)
+        else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
     receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(60, program_key, db)
     transfers = (
         list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
         if light
-        else list_material_transfers(200, viewer=viewer, role=role, program=program_key, db=db)
+        else list_material_transfers(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
-    returns = list_material_return_headers(120, program_key, db) if light else list_material_returns(200, program_key, db)
+    returns = list_material_return_headers(120, program_key, db) if light else list_material_returns(request, 200, program_key, db)
     scans = list_material_scans(80 if light else 300, program_key, db)
     payload = {
         "success": True,
@@ -4061,8 +4061,9 @@ def list_audit_logs(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session
 
 
 @app.get("/api/warehouse/material-requisitions")
-def list_material_requisitions(limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_material_requisitions(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer, role = request_actor(request), current_user(request).role
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
@@ -4088,8 +4089,9 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
-def get_material_requisition(requisition_id: int, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def get_material_requisition(requisition_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer, role = request_actor(request), current_user(request).role
     row = (
         db.query(MaterialRequisition)
         .options(
@@ -4498,8 +4500,9 @@ def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_ses
 
 
 @app.get("/api/warehouse/material-transfers")
-def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_material_transfers(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer, role = request_actor(request), current_user(request).role
     rows = (
         db.query(MaterialTransfer)
         .options(
@@ -4516,8 +4519,9 @@ def list_material_transfers(limit: int = 50, viewer: str = "", role: str = "", p
 
 
 @app.get("/api/warehouse/material-transfers/{transfer_id}")
-def get_material_transfer(transfer_id: int, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def get_material_transfer(transfer_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer, role = request_actor(request), current_user(request).role
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
@@ -4540,9 +4544,9 @@ def list_material_return_headers(limit: int = 50, program: str = DEFAULT_PROGRAM
 
 
 @app.get("/api/warehouse/material-returns")
-def list_material_returns(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_material_returns(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = (
+    query = (
         db.query(MaterialReturn)
         .options(
             joinedload(MaterialReturn.warehouse),
@@ -4550,18 +4554,22 @@ def list_material_returns(limit: int = 50, program: str = DEFAULT_PROGRAM, db: S
         )
         .filter(MaterialReturn.program == program_key)
         .order_by(MaterialReturn.id.desc())
-        .limit(min(limit, 200))
-        .all()
     )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        query = query.filter(MaterialReturn.warehouse_id.in_(allowed))
+    rows = query.limit(min(limit, 200)).all()
     return {"success": True, "returns": [material_return_to_dict(r) for r in rows]}
 
 
 @app.get("/api/warehouse/material-returns/{return_id}")
-def get_material_return(return_id: int, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def get_material_return(return_id: int, request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     row = db.query(MaterialReturn).filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material return not found")
+    if allowed_warehouse_ids(request, db, program_key) is not None and row.warehouse_id not in allowed_warehouse_ids(request, db, program_key):
+        raise HTTPException(status_code=403, detail="Not allowed to view this material return")
     return {"success": True, "return": material_return_to_dict(row)}
 
 
