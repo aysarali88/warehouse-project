@@ -2695,9 +2695,8 @@ def rollout_entry_reference(
 
 
 @app.post("/api/warehouse/rollout-field-entry")
-def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
-    if rollout_norm(first_value(data, "role", default="")) != "admin":
-        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
 
     area = str(first_value(data, "Area", "area", default="") or "").strip()
     xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default="") or "").strip()
@@ -2789,11 +2788,10 @@ def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
 
 
 @app.patch("/api/warehouse/rollout-field-entry/{record_id}")
-def edit_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(db_session)):
-    if rollout_norm(first_value(data, "role", default="")) != "admin":
-        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == normalize_program(data.get("program", DEFAULT_PROGRAM))).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
@@ -2891,11 +2889,10 @@ def edit_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(d
 
 
 @app.delete("/api/warehouse/rollout-field-entry/{record_id}")
-def delete_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(db_session)):
-    if rollout_norm(first_value(data, "role", default="")) != "admin":
-        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == normalize_program(data.get("program", DEFAULT_PROGRAM))).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
@@ -2905,8 +2902,8 @@ def delete_rollout_field_entry(record_id: str, data: dict, db: Session = Depends
         "delete_rollout_field_entry",
         "rollout_record",
         row.record_id,
-        str(first_value(data, "actor", default="") or ""),
-        {"program": DEFAULT_PROGRAM, "deleted": deleted},
+        request_actor(request),
+        {"program": normalize_program(data.get("program", DEFAULT_PROGRAM)), "deleted": deleted},
     )
     db.delete(row)
     db.commit()
@@ -4447,13 +4444,18 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
 
 @app.post("/api/warehouse/material-requisitions/import-excel")
 async def import_material_requisition_excels(
+    request: Request,
     files: list[UploadFile] = File(...),
     default_warehouse_id: int = Form(0),
     actor: str = Form("Import"),
     program: str = Form(DEFAULT_PROGRAM),
     db: Session = Depends(db_session),
 ):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(program)
+    actor = request_actor(request)
+    if default_warehouse_id:
+        require_warehouse_access(request, db, default_warehouse_id, program_key)
     results = []
     imported_rows: list[MaterialRequisition] = []
     for upload in files:
