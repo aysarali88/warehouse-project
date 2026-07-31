@@ -2583,7 +2583,7 @@ def delete_app_user(data: AppUserDeleteIn, request: Request, db: Session = Depen
 
 @app.get("/api/records")
 def list_records(request: Request, db: Session = Depends(db_session)):
-    rows = db.query(RolloutRecord).filter(RolloutRecord.program == request.state.program).order_by(RolloutRecord.id.desc()).all()
+    rows = db.query(RolloutRecord).order_by(RolloutRecord.id.desc()).all()
     rows = [row for row in rows if rollout_records_for_session(request, [row_to_record(row)])]
     return {"success": True, "records": [row_to_record(row) for row in rows]}
 
@@ -2810,7 +2810,7 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == request.state.program).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
@@ -2911,7 +2911,7 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
 def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == request.state.program).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
