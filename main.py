@@ -1243,6 +1243,17 @@ def require_program_record(row, program: str, label: str):
     return row
 
 
+def rollout_records_for_session(request: Request, rows: list[dict]) -> list[dict]:
+    user = current_user(request)
+    if user.role.strip().lower() != "warehouse manager":
+        return rows
+    return [
+        row for row in rows
+        if warehouse_scope_matches(user.warehouse_name, str(row.get("city") or row.get("City") or ""))
+        or warehouse_scope_matches(user.warehouse_name, str(row.get("Area") or row.get("area") or ""))
+    ]
+
+
 def next_number(db: Session, model, prefix: str) -> str:
     number_column = next(
         (
@@ -2571,14 +2582,16 @@ def delete_app_user(data: AppUserDeleteIn, request: Request, db: Session = Depen
 
 
 @app.get("/api/records")
-def list_records(db: Session = Depends(db_session)):
-    rows = db.query(RolloutRecord).order_by(RolloutRecord.id.desc()).all()
+def list_records(request: Request, db: Session = Depends(db_session)):
+    rows = db.query(RolloutRecord).filter(RolloutRecord.program == request.state.program).order_by(RolloutRecord.id.desc()).all()
+    rows = [row for row in rows if rollout_records_for_session(request, [row_to_record(row)])]
     return {"success": True, "records": [row_to_record(row) for row in rows]}
 
 
 @app.post("/api/records")
 def save_record(data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Requester")
+    data["program"] = request.state.program
     row, _ = upsert_rollout_record(data, db)
     db.commit()
     clear_warehouse_cache()
@@ -2599,6 +2612,7 @@ def list_rollout_daily_progress(request: Request, limit: int = 500, refresh: str
         return {"success": True, "source": "disabled", "count": 0, "records": []}
     force_refresh = str(refresh or "").strip().lower() in {"1", "true", "yes", "now"} or str(refresh or "").strip().isdigit()
     rows, source = rollout_daily_progress_records(db, force=force_refresh)
+    rows = rollout_records_for_session(request, rows)
     limited = list(reversed(rows))[: min(max(limit, 1), 10000)]
     return {
         "success": True,
@@ -2618,6 +2632,7 @@ def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGR
         rows: list[dict] = []
     else:
         rows, _source = rollout_daily_progress_records(db, force=False)
+        rows = rollout_records_for_session(request, rows)
 
     headers = [
         "ID", "Date", "entry time", "Supervisor Name", "team leader", "city", "Area", "Activity",
@@ -2648,6 +2663,7 @@ def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGR
 
 @app.get("/api/warehouse/rollout-entry-reference")
 def rollout_entry_reference(
+    request: Request,
     area: str = "",
     xbox: str = "",
     query: str = "",
@@ -2655,6 +2671,7 @@ def rollout_entry_reference(
     db: Session = Depends(db_session),
 ):
     records, source = rollout_daily_progress_records(db, force=False)
+    records = rollout_records_for_session(request, records)
     latest_records = records
     if query:
         needle = rollout_norm(query)
@@ -2793,7 +2810,7 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == normalize_program(data.get("program", DEFAULT_PROGRAM))).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == request.state.program).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
@@ -2894,7 +2911,7 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
 def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == normalize_program(data.get("program", DEFAULT_PROGRAM))).first()
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip(), RolloutRecord.program == request.state.program).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
@@ -2905,7 +2922,7 @@ def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db:
         "rollout_record",
         row.record_id,
         request_actor(request),
-        {"program": normalize_program(data.get("program", DEFAULT_PROGRAM)), "deleted": deleted},
+        {"program": request.state.program, "deleted": deleted},
     )
     db.delete(row)
     db.commit()
@@ -4479,6 +4496,7 @@ async def import_material_requisition_excels(
     program: str = Form(DEFAULT_PROGRAM),
     db: Session = Depends(db_session),
 ):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(program)
     actor = request_actor(request)
