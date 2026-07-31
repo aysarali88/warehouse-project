@@ -412,6 +412,27 @@ def migrate_app_user_password_hashes() -> None:
 migrate_app_user_password_hashes()
 
 
+def seed_legacy_app_users() -> None:
+    """Copy legacy in-code accounts into the database only when absent."""
+    for program_key, session_factory in all_sessionmakers():
+        with session_factory() as db:
+            changed = False
+            for legacy in APP_USERS:
+                existing = db.query(AppUser).filter(
+                    func.lower(AppUser.username) == legacy["username"].lower(),
+                    AppUser.role == legacy["role"],
+                    AppUser.program == normalize_program(program_key),
+                ).first()
+                if existing is None:
+                    db.add(AppUser(program=normalize_program(program_key), username=legacy["username"], name=legacy["name"], role=legacy["role"], warehouse_name=legacy.get("warehouse_name", ""), password_hash=legacy["password_hash"], status="active"))
+                    changed = True
+            if changed:
+                db.commit()
+
+
+seed_legacy_app_users()
+
+
 def sync_admin_users_to_secondary_databases() -> None:
     sessions = all_sessionmakers()
     if len(sessions) < 2:
