@@ -2648,6 +2648,108 @@ def save_rollout_field_entry(data: dict, db: Session = Depends(db_session)):
     }
 
 
+@app.patch("/api/warehouse/rollout-field-entry/{record_id}")
+def edit_rollout_field_entry(record_id: str, data: dict, db: Session = Depends(db_session)):
+    if rollout_norm(first_value(data, "role", default="")) != "admin":
+        raise HTTPException(status_code=403, detail="Admin only while Field Entry is in testing")
+
+    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Field Entry record was not found")
+
+    area = str(row.area or "").strip()
+    xbox = str(row.related_to_xbox or "").strip()
+    item = str(first_value(data, "item", "Item", default=row.item) or "").strip()
+    material_type = str(first_value(data, "material type", "Material Type", "material_type", default=row.material_type) or "").strip()
+    code_type = rollout_entry_mode({"code_type": first_value(data, "code_type", "type", default=""), "item": item, "material_type": material_type})
+    raw_code = str(first_value(data, "code", "Cable Code", "cable code", "cable_code", "Box Code", "box code", "box_code", default="") or "").strip()
+
+    if not area or not xbox:
+        raise HTTPException(status_code=400, detail="This record has no Area or Related to XBOX")
+    if code_type not in {"cable", "box", "accessory"}:
+        raise HTTPException(status_code=400, detail="Select a material type")
+
+    matches: list[dict] = []
+    duplicates: list[RolloutRecord] = []
+    if code_type in {"cable", "box"}:
+        if not raw_code:
+            raise HTTPException(status_code=400, detail="Select a code from the list")
+        matches = rollout_reference_matches(area, xbox, raw_code, code_type)
+        if not matches:
+            raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
+
+        code_attr = RolloutRecord.cable_code if code_type == "cable" else RolloutRecord.box_code
+        for candidate in db.query(RolloutRecord).filter(code_attr != "").all():
+            if candidate.record_id == row.record_id or rollout_record_code_type(candidate) != code_type:
+                continue
+            if rollout_norm(candidate.area) != rollout_norm(area):
+                continue
+            if rollout_xbox_key(candidate.related_to_xbox) != rollout_xbox_key(xbox):
+                continue
+            saved_code = candidate.cable_code if code_type == "cable" else candidate.box_code
+            if rollout_code_key(saved_code) == rollout_code_key(raw_code):
+                duplicates.append(candidate)
+
+        done_duplicate = next((candidate for candidate in duplicates if rollout_norm(candidate.status) == "done"), None)
+        if done_duplicate:
+            raise HTTPException(status_code=400, detail=f"Code already saved as Done in {done_duplicate.record_id}")
+
+    warnings: list[dict] = []
+    in_progress = next((candidate for candidate in duplicates if rollout_norm(candidate.status) in {"inprogress", "planned", "blocked"}), None)
+    if in_progress:
+        warnings.append({"type": "duplicate_in_progress", "message": "Code exists in another non-Done record", "record": rollout_duplicate_details(in_progress)})
+
+    material_norm = rollout_norm(material_type)
+    ref = matches[0] if matches else {}
+    expected_len = int(ref.get("cable_length_m") or 0)
+    if code_type == "cable" and expected_len:
+        length_match = re.search(r"(\d+)\s*m", material_type, flags=re.I)
+        entered_len = int(length_match.group(1)) if length_match else 0
+        if entered_len and entered_len != expected_len:
+            warnings.append({"type": "cable_length_mismatch", "message": f"Planned length is {expected_len}m, selected material looks {entered_len}m"})
+    if code_type == "box":
+        expected_box = rollout_norm(ref.get("box_type") or "")
+        if expected_box:
+            if "end" in expected_box and "end" not in material_norm:
+                warnings.append({"type": "box_type_mismatch", "message": "Map reference is END BOX, selected material is different"})
+            if "sub" in expected_box and "sub" not in material_norm:
+                warnings.append({"type": "box_type_mismatch", "message": "Map reference is SUB BOX, selected material is different"})
+
+    if warnings and not first_value(data, "confirm_warnings", "confirmed", default=False):
+        return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
+
+    before = {
+        "item": row.item,
+        "material_type": row.material_type,
+        "cable_code": row.cable_code,
+        "box_code": row.box_code,
+    }
+    row.item = item
+    row.material_type = material_type
+    row.cable_code = raw_code if code_type == "cable" else ""
+    row.box_code = raw_code if code_type == "box" else ""
+    after = {
+        "item": row.item,
+        "material_type": row.material_type,
+        "cable_code": row.cable_code,
+        "box_code": row.box_code,
+    }
+    log_audit(
+        db,
+        "edit_rollout_field_entry",
+        "rollout_record",
+        row.record_id,
+        str(first_value(data, "actor", default="") or ""),
+        {"program": DEFAULT_PROGRAM, "before": before, "after": after},
+    )
+    db.commit()
+    clear_warehouse_cache()
+    clear_rollout_db_cache()
+    db.refresh(row)
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {"success": True, "message": "Field Entry updated", "record": row_to_record(row), "summary": rollout_entry_summary(records), "warnings": warnings}
+
+
 @app.get("/api/warehouse/rollout-source-check")
 def rollout_source_check(program: str = DEFAULT_PROGRAM):
     if is_single_ran(program):
