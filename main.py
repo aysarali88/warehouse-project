@@ -1598,37 +1598,9 @@ def stable_rollout_record_id(data: dict) -> str:
 
 
 def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[dict], str]:
-    global ROLLOUT_LAST_SYNC_AT
-
-    now = time.monotonic()
-    if not force and ROLLOUT_LAST_SYNC_AT and now - ROLLOUT_LAST_SYNC_AT < ROLLOUT_SYNC_TTL_SECONDS:
-        return db_rollout_records(db), "database"
-
-    with ROLLOUT_SYNC_LOCK:
-        now = time.monotonic()
-        if not force and ROLLOUT_LAST_SYNC_AT and now - ROLLOUT_LAST_SYNC_AT < ROLLOUT_SYNC_TTL_SECONDS:
-            return db_rollout_records(db), "database"
-
-        rows, _source = fetch_rollout_daily_progress_csv(force=True)
-        if not rows:
-            return db_rollout_records(db), "database"
-
-        source_ids = [stable_rollout_record_id(row) for row in rows]
-        existing = {
-            row.record_id: row
-            for row in db.query(RolloutRecord).filter(RolloutRecord.record_id.in_(source_ids)).all()
-        }
-        try:
-            for row in rows:
-                upsert_rollout_record(row, db, existing)
-            db.commit()
-            ROLLOUT_LAST_SYNC_AT = time.monotonic()
-            clear_rollout_db_cache()
-            return db_rollout_records(db), "database"
-        except Exception:
-            db.rollback()
-            logger.exception("Rollout CSV sync failed; keeping existing database records")
-            return db_rollout_records(db), "database"
+    # Supabase is the sole source of truth. The legacy Google Sheet is no
+    # longer consulted, including for forced refreshes from the UI.
+    return db_rollout_records(db), "database"
 
 
 def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
@@ -3184,7 +3156,7 @@ def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db:
 
 
 @app.get("/api/warehouse/rollout-source-check")
-def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM):
+def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management")
     if is_single_ran(program):
         return {
@@ -3193,33 +3165,22 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM):
             "sources": [],
             "source": "disabled",
         }
-    sources = []
-    for source, url in rollout_csv_urls():
-        try:
-            rows = read_rollout_daily_progress_url(url, force=True)
-            latest = rows[-1] if rows else {}
-            sources.append(
-                {
-                    "source": source,
-                    "ok": True,
-                    "count": len(rows),
-                    "latest_id": latest.get("ID") or latest.get("id") or "",
-                    "latest_date": str(latest.get("Date") or latest.get("date") or "")[:10],
-                }
-            )
-        except Exception as exc:
-            sources.append(
-                {
-                    "source": source,
-                    "ok": False,
-                    "count": 0,
-                    "error": str(exc)[:240],
-                }
-            )
+    rows, _source = rollout_daily_progress_records(db, force=False)
+    rows = rollout_records_for_session(request, rows)
+    latest = max(rows, key=lambda row: str(row.get("entry time") or row.get("Date") or ""), default={})
     return {
         "success": True,
         "checked_at": datetime.now(TRIPOLI_TZ).isoformat(),
-        "sources": sources,
+        "source": "database",
+        "sources": [
+            {
+                "source": "supabase",
+                "ok": True,
+                "count": len(rows),
+                "latest_id": latest.get("ID") or latest.get("id") or "",
+                "latest_date": str(latest.get("Date") or latest.get("date") or "")[:10],
+            }
+        ],
     }
 
 
