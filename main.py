@@ -77,6 +77,7 @@ SESSION_COOKIE_NAME = "warehouse_session"
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "8"))
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1").strip().lower() not in {"0", "false", "no", "off"}
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+ACTIVE_USER_WINDOW_SECONDS = 120
 
 if len(SESSION_SECRET) < 32:
     raise RuntimeError("SESSION_SECRET must be set to a value of at least 32 characters")
@@ -2248,6 +2249,55 @@ def login(data: LoginIn, response: Response, db: Session = Depends(db_session)):
 @app.get("/api/auth/me")
 def current_session(request: Request):
     return {"success": True, "user": session_user_payload(current_user(request), request.state.session_program), "csrf_token": request.state.csrf_token}
+
+
+@app.post("/api/auth/heartbeat")
+def heartbeat(request: Request, db: Session = Depends(db_session)):
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db.query(AppSession).filter(AppSession.token_hash == session_token_hash(token)).update(
+        {AppSession.last_seen_at: datetime.now(timezone.utc)},
+        synchronize_session=False,
+    )
+    db.commit()
+    return {"success": True}
+
+
+@app.get("/api/auth/active-users")
+def active_users(request: Request):
+    require_roles(request, "Admin")
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=ACTIVE_USER_WINDOW_SECONDS)
+    latest_by_user: dict[tuple[str, str], dict] = {}
+    for program_key, session_factory in all_sessionmakers():
+        with session_factory() as db:
+            rows = (
+                db.query(AppSession)
+                .options(joinedload(AppSession.user))
+                .filter(
+                    AppSession.expires_at > now,
+                    AppSession.last_seen_at >= cutoff,
+                )
+                .all()
+            )
+            for session in rows:
+                user = session.user
+                if user is None or user.status != "active":
+                    continue
+                key = (user.username.strip().lower(), normalize_program(session.program))
+                current = latest_by_user.get(key)
+                if current and current["last_seen_at"] >= session.last_seen_at:
+                    continue
+                latest_by_user[key] = {
+                    "name": user.name or user.username,
+                    "username": user.username,
+                    "role": user.role,
+                    "program": normalize_program(session.program),
+                    "last_seen_at": session.last_seen_at.isoformat() if session.last_seen_at else "",
+                }
+    users = sorted(latest_by_user.values(), key=lambda row: (row["name"].lower(), row["program"]))
+    return {"success": True, "count": len(users), "users": users}
 
 
 @app.post("/api/auth/logout")
