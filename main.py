@@ -5393,9 +5393,9 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
     if row.status not in {"pending_approval", "draft", "rejected"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be approved from status {row.status}")
     actor = request_actor(request)
-    if row.receiver_name.strip() and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and user.role.strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Only the assigned approver can approve this MR")
-    row.receiver_name = row.receiver_name or actor
+    # All Approval users share the approval queue. Record the person who
+    # completed the action instead of relying on the draft's placeholder name.
+    row.receiver_name = actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
@@ -5419,9 +5419,7 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     if row.status not in {"pending_approval", "draft"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be rejected from status {row.status}")
     actor = request_actor(request)
-    if row.receiver_name.strip() and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and user.role.strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Only the assigned approver can reject this MR")
-    row.receiver_name = row.receiver_name or actor
+    row.receiver_name = actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
