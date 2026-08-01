@@ -5282,7 +5282,12 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
 def confirm_material_transfer(transfer_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "approved":
