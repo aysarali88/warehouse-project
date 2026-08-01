@@ -1555,7 +1555,7 @@ function isManagement(){return roleKey()==='management'}
 function canApprove(){return ['approver','approval','admin'].includes(roleKey())}
 function canCreateMr(){return ['requester','management','admin'].includes(roleKey())}
 function canViewAll(){return ['management','requester','approver','approval','admin'].includes(roleKey())}
-function setCurrentUserFromSession(){if(session?.program){currentProgram=normalizeProgram(session.program);localStorage.setItem('warehouseProgram',currentProgram)}activeUser=session?.name||'';activeRole=session?.role||'';activeWarehouseAssignment=session?.warehouse_name||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole} - ${programLabel()}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Approver';if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa'}
+function setCurrentUserFromSession(){if(session?.program){currentProgram=normalizeProgram(session.program);localStorage.setItem('warehouseProgram',currentProgram)}activeUser=session?.name||'';activeRole=session?.role||'';activeWarehouseAssignment=session?.warehouse_name||'';const label=document.getElementById('currentUserLabel');if(label)label.textContent=activeUser?`${activeUser} - ${activeRole} - ${programLabel()}`:'User';if(document.getElementById('mrRequesterName')&&!mrRequesterName.value&&activeUser)mrRequesterName.value=activeUser;if(document.getElementById('mrReceiverName')&&!mrReceiverName.value)mrReceiverName.value='Mustafa';if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa'}
 function normalizeText(v){return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'')}
 function isAssignedToCurrent(req){return normalizeText(req.receiver_name)===normalizeText(activeUser)}
 function canManageWarehouse(){return ['warehousemanager','admin'].includes(roleKey())}
@@ -2255,7 +2255,7 @@ async function saveMr(){
       const available=Number((bal&&bal.quantity)||0);
       if(available<Number(item.quantity||0)){toast('Insufficient stock: '+item.description+' in '+warehouseName+' available '+available);return}
     }
-    if(!mrReceiverName.value.trim())mrReceiverName.value='Approver';
+    if(!mrReceiverName.value.trim())mrReceiverName.value='Mustafa';
     const body={
       creation_date:mrCreationDate.value,
       warehouse_id:Number(mrWarehouse.value),

@@ -5009,7 +5009,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
         requester_signature=data.requester_signature,
         requester_date=data.requester_date,
         requester_comment=data.requester_comment,
-        receiver_name=data.receiver_name,
+        receiver_name=data.receiver_name.strip() or "Mustafa",
         receiver_title=data.receiver_title,
         receiver_signature=data.receiver_signature,
         receiver_date=data.receiver_date,
@@ -5088,7 +5088,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     row.requester_signature = data.requester_signature
     row.requester_date = data.requester_date
     row.requester_comment = data.requester_comment
-    row.receiver_name = data.receiver_name
+    row.receiver_name = data.receiver_name.strip() or "Mustafa"
     row.receiver_title = data.receiver_title
     row.receiver_signature = data.receiver_signature
     row.receiver_date = data.receiver_date
