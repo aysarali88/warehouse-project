@@ -2846,11 +2846,40 @@ def rollout_entry_reference(
         area_key = rollout_norm(area_name)
         areas_map.setdefault(area_key, {"area": area_name, "city": row.get("city") or ""})
         xboxes_map.setdefault(area_key, set()).add(row.get("xbox") or "")
+    code_states: dict[tuple[str, str, str, str], str] = {}
+    for record in records:
+        code_type = rollout_entry_mode(record)
+        if code_type not in {"cable", "box"}:
+            continue
+        code_value = first_value(record, "cable code", "Cable Code", default="") if code_type == "cable" else first_value(record, "box code", "Box Code", default="")
+        code = str(code_value or "").strip()
+        if not code:
+            continue
+        key = (
+            rollout_norm(first_value(record, "Area", "area", default="")),
+            rollout_xbox_key(first_value(record, "Related to XBOX", "related_to_xbox", default="")),
+            code_type,
+            rollout_code_key(code),
+        )
+        status = "done" if rollout_norm(first_value(record, "staus", "status", default="")) == "done" else "in_progress"
+        if status == "done" or key not in code_states:
+            code_states[key] = status
+
     scoped_refs = refs
     if area:
         scoped_refs = [r for r in scoped_refs if rollout_norm(r.get("area")) == rollout_norm(area)]
     if xbox:
         scoped_refs = [r for r in scoped_refs if rollout_xbox_key(r.get("xbox")) == rollout_xbox_key(xbox)]
+    scoped_refs = [
+        {
+            **row,
+            "entry_status": code_states.get(
+                (rollout_norm(row.get("area")), rollout_xbox_key(row.get("xbox")), row.get("type") or "", rollout_code_key(row.get("code"))),
+                "available",
+            ),
+        }
+        for row in scoped_refs
+    ]
 
     return {
         "success": True,
