@@ -34,6 +34,14 @@ class RolloutRecord(Base):
     olt = Column(String, default="")
     cable_route = Column(String, default="")
     notes = Column(String, default="")
+    submission_key = Column(String, default="", index=True)
+
+
+class RolloutEntryCounter(Base):
+    __tablename__ = "rollout_entry_counters"
+
+    name = Column(String, primary_key=True)
+    next_value = Column(Integer, nullable=False)
 
 
 class Warehouse(Base):
