@@ -1248,11 +1248,18 @@ def request_actor(request: Request) -> str:
     return user.name or user.username
 
 
+def request_scope_viewer(request: Request) -> str:
+    user = current_user(request)
+    if user.role.strip().lower() == "warehouse manager":
+        return user.warehouse_name or user.name or user.username
+    return request_actor(request)
+
+
 def user_can_access_warehouse(user: AppUser, warehouse: Warehouse | None) -> bool:
     role = user.role.strip().lower()
     if role in {"admin", "management"}:
         return True
-    return role == "warehouse manager" and warehouse is not None and normalize_usage_key(user.warehouse_name) == normalize_usage_key(warehouse.name)
+    return role == "warehouse manager" and warehouse is not None and warehouse_scope_matches(user.warehouse_name or user.username or user.name, warehouse.name)
 
 
 def require_warehouse_access(request: Request, db: Session, warehouse_id: int, program: str) -> Warehouse:
@@ -1268,7 +1275,12 @@ def allowed_warehouse_ids(request: Request, db: Session, program: str) -> list[i
         return None
     if user.role.strip().lower() != "warehouse manager":
         return []
-    return [row.id for row in db.query(Warehouse.id).filter(Warehouse.program == normalize_program(program), func.lower(Warehouse.name) == (user.warehouse_name or "").strip().lower()).all()]
+    scope = user.warehouse_name or user.username or user.name
+    return [
+        row.id
+        for row in db.query(Warehouse).filter(Warehouse.program == normalize_program(program)).all()
+        if warehouse_scope_matches(scope, row.name)
+    ]
 
 
 def require_program_record(row, program: str, label: str):
@@ -1281,10 +1293,11 @@ def rollout_records_for_session(request: Request, rows: list[dict]) -> list[dict
     user = current_user(request)
     if user.role.strip().lower() != "warehouse manager":
         return rows
+    scope = user.warehouse_name or user.name or user.username
     return [
         row for row in rows
-        if warehouse_scope_matches(user.warehouse_name, str(row.get("city") or row.get("City") or ""))
-        or warehouse_scope_matches(user.warehouse_name, str(row.get("Area") or row.get("area") or ""))
+        if warehouse_scope_matches(scope, str(row.get("city") or row.get("City") or ""))
+        or warehouse_scope_matches(scope, str(row.get("Area") or row.get("area") or ""))
     ]
 
 
@@ -3161,7 +3174,7 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
 @app.get("/api/warehouse/bootstrap")
 def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer = request_actor(request)
+    viewer = request_scope_viewer(request)
     role = current_user(request).role
     cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
     cached = WAREHOUSE_CACHE.get(cache_key)
@@ -4277,7 +4290,7 @@ def list_audit_logs(request: Request, limit: int = 50, program: str = DEFAULT_PR
 @app.get("/api/warehouse/material-requisitions")
 def list_material_requisitions(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
@@ -4305,7 +4318,7 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     row = (
         db.query(MaterialRequisition)
         .options(
@@ -4577,24 +4590,179 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     return row
 
 
-def next_import_order_number(db: Session, program: str = DEFAULT_PROGRAM) -> str:
-    """Return the next unused numeric MR number for sheets without an Order No."""
+MR_ORDER_PATTERN = re.compile(r"^MR-([A-Z0-9]+)-(\d+)$")
+
+
+def material_requisition_warehouse_code(warehouse: Warehouse) -> str:
+    """Return the stable short code used in MR numbers for a warehouse."""
+    key = normalize_usage_key(warehouse.name or "")
+    if "freezone" in key:
+        return "FZ"
+    if "tripoli" in key:
+        return "TRI"
+    if any(token in key for token in ("misurata", "misrata", "misrat")):
+        return "MIS"
+
+    words = re.findall(r"[A-Za-z0-9]+", warehouse.name or "")
+    initials = "".join(word[0] for word in words).upper()
+    return initials[:4] or f"WH{warehouse.id}"
+
+
+def is_material_requisition_number_for_warehouse(order_number: str, warehouse: Warehouse) -> bool:
+    match = MR_ORDER_PATTERN.fullmatch(str(order_number or "").strip().upper())
+    return bool(match and match.group(1) == material_requisition_warehouse_code(warehouse))
+
+
+def next_material_requisition_number(db: Session, warehouse: Warehouse, program: str = DEFAULT_PROGRAM) -> str:
+    """Return the next MR number within the selected warehouse's own sequence."""
     program_key = normalize_program(program)
-    values = db.query(MaterialRequisition.order_number).filter(MaterialRequisition.program == program_key).all()
-    numbers = []
+    warehouse_code = material_requisition_warehouse_code(warehouse)
+    highest = 0
+    values = (
+        db.query(MaterialRequisition.order_number)
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.warehouse_id == warehouse.id,
+        )
+        .all()
+    )
     for (value,) in values:
-        try:
-            numbers.append(int(str(value).strip()))
-        except (TypeError, ValueError):
-            continue
-    candidate = max(numbers, default=0) + 1
+        match = MR_ORDER_PATTERN.fullmatch(str(value or "").strip().upper())
+        if match and match.group(1) == warehouse_code:
+            highest = max(highest, int(match.group(2)))
+
+    candidate = highest + 1
     while (
         db.query(MaterialRequisition.id)
-        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == str(candidate))
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.order_number == f"MR-{warehouse_code}-{candidate:04d}",
+        )
         .first()
     ):
         candidate += 1
-    return str(candidate)
+    return f"MR-{warehouse_code}-{candidate:04d}"
+
+
+def migrate_legacy_material_requisition_numbers() -> None:
+    """Give old numeric MRs a warehouse-specific number without changing their data."""
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                rows = (
+                    db.query(MaterialRequisition)
+                    .options(joinedload(MaterialRequisition.warehouse))
+                    .filter(MaterialRequisition.program == normalize_program(program_key))
+                    .all()
+                )
+                legacy_rows = [row for row in rows if not is_material_requisition_number_for_warehouse(row.order_number, row.warehouse)]
+                if not legacy_rows:
+                    continue
+
+                next_sequence: dict[int, int] = {}
+                for row in rows:
+                    if not is_material_requisition_number_for_warehouse(row.order_number, row.warehouse):
+                        continue
+                    match = MR_ORDER_PATTERN.fullmatch(row.order_number.strip().upper())
+                    next_sequence[row.warehouse_id] = max(next_sequence.get(row.warehouse_id, 0), int(match.group(2)))
+
+                legacy_rows.sort(key=lambda row: (str(row.creation_date or ""), str(row.created_at or ""), row.id))
+                changes: list[tuple[MaterialRequisition, str, str]] = []
+                for row in legacy_rows:
+                    next_sequence[row.warehouse_id] = next_sequence.get(row.warehouse_id, 0) + 1
+                    new_order_number = f"MR-{material_requisition_warehouse_code(row.warehouse)}-{next_sequence[row.warehouse_id]:04d}"
+                    changes.append((row, str(row.order_number or ""), new_order_number))
+
+                # Temporary values avoid unique-index conflicts if a legacy value
+                # happens to look like a new MR number in another warehouse.
+                for row, _old_order_number, _new_order_number in changes:
+                    row.order_number = f"__mr_renumber_{row.id}__"
+                db.flush()
+
+                for row, old_order_number, new_order_number in changes:
+                    row.order_number = new_order_number
+                    db.query(StockMovement).filter(
+                        StockMovement.program == normalize_program(program_key),
+                        StockMovement.reference == old_order_number,
+                    ).update({StockMovement.reference: new_order_number}, synchronize_session=False)
+                    db.query(MaterialScanLog).filter(
+                        MaterialScanLog.material_requisition_id == row.id,
+                        MaterialScanLog.note == f"MR {old_order_number}",
+                    ).update({MaterialScanLog.note: f"MR {new_order_number}"}, synchronize_session=False)
+                    db.query(AuditLog).filter(
+                        AuditLog.entity_type == "material_requisition",
+                        AuditLog.entity_id == old_order_number,
+                    ).update({AuditLog.entity_id: new_order_number}, synchronize_session=False)
+                    db.add(
+                        AuditLog(
+                            action="renumber_material_requisition",
+                            entity_type="material_requisition",
+                            entity_id=new_order_number,
+                            actor="system",
+                            details=json.dumps(
+                                {
+                                    "program": normalize_program(program_key),
+                                    "warehouse": row.warehouse.name if row.warehouse else "",
+                                    "previous_order_number": old_order_number,
+                                }
+                            ),
+                        )
+                    )
+                db.commit()
+                logger.info("%s MR number migration completed for %s records", program_key, len(changes))
+        except Exception:
+            logger.exception("%s MR number migration failed", program_key)
+
+
+migrate_legacy_material_requisition_numbers()
+
+
+def add_previous_mr_numbers_to_notes() -> None:
+    """Show the legacy MR number in the request note after a renumbering."""
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                audit_rows = (
+                    db.query(AuditLog)
+                    .filter(
+                        AuditLog.action == "renumber_material_requisition",
+                        AuditLog.entity_type == "material_requisition",
+                    )
+                    .all()
+                )
+                changed = 0
+                for audit in audit_rows:
+                    try:
+                        details = json.loads(audit.details or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    previous_number = str(details.get("previous_order_number") or "").strip()
+                    if not previous_number:
+                        continue
+                    row = (
+                        db.query(MaterialRequisition)
+                        .filter(
+                            MaterialRequisition.program == normalize_program(program_key),
+                            MaterialRequisition.order_number == audit.entity_id,
+                        )
+                        .first()
+                    )
+                    if row is None:
+                        continue
+                    note = f"Previous MR No: {previous_number}"
+                    current_comment = (row.requester_comment or "").strip()
+                    if note.lower() in current_comment.lower():
+                        continue
+                    row.requester_comment = f"{current_comment}\n{note}".strip()
+                    changed += 1
+                if changed:
+                    db.commit()
+                    logger.info("%s added previous MR numbers to %s request notes", program_key, changed)
+        except Exception:
+            logger.exception("%s previous MR note migration failed", program_key)
+
+
+add_previous_mr_numbers_to_notes()
 
 
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
@@ -4603,15 +4771,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
     warehouse = find_warehouse_for_import(db, grid, default_warehouse_id, program_key)
     items = parse_import_items(db, grid, program_key)
     today = local_today()
-    order_number = find_sheet_value(grid, "Order No", "Order Number", "MR No", "MR Number").strip()
-    if not order_number:
-        order_number = next_import_order_number(db, program_key)
-    elif (
-        db.query(MaterialRequisition.id)
-        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == order_number)
-        .first()
-    ):
-        raise ValueError(f"Order No {order_number} already exists")
+    order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
         program=program_key,
         order_number=order_number,
@@ -4722,7 +4882,7 @@ def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_ses
 @app.get("/api/warehouse/material-transfers")
 def list_material_transfers(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     rows = (
         db.query(MaterialTransfer)
         .options(
@@ -4741,7 +4901,7 @@ def list_material_transfers(request: Request, limit: int = 50, viewer: str = "",
 @app.get("/api/warehouse/material-transfers/{transfer_id}")
 def get_material_transfer(transfer_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
@@ -4870,13 +5030,13 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    warehouse = require_warehouse(db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
-    order_number = next_import_order_number(db, program_key)
+    order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
         program=program_key,
         order_number=order_number,
@@ -4897,7 +5057,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
         requester_signature=data.requester_signature,
         requester_date=data.requester_date,
         requester_comment=data.requester_comment,
-        receiver_name=data.receiver_name,
+        receiver_name=data.receiver_name.strip() or "Mustafa",
         receiver_title=data.receiver_title,
         receiver_signature=data.receiver_signature,
         receiver_date=data.receiver_date,
@@ -4976,7 +5136,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     row.requester_signature = data.requester_signature
     row.requester_date = data.requester_date
     row.requester_comment = data.requester_comment
-    row.receiver_name = data.receiver_name
+    row.receiver_name = data.receiver_name.strip() or "Mustafa"
     row.receiver_title = data.receiver_title
     row.receiver_signature = data.receiver_signature
     row.receiver_date = data.receiver_date
@@ -5122,7 +5282,12 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
 def confirm_material_transfer(transfer_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "approved":
@@ -5281,9 +5446,9 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
     if row.status not in {"pending_approval", "draft", "rejected"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be approved from status {row.status}")
     actor = request_actor(request)
-    if row.receiver_name.strip() and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and user.role.strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Only the assigned approver can approve this MR")
-    row.receiver_name = row.receiver_name or actor
+    # All Approval users share the approval queue. Record the person who
+    # completed the action instead of relying on the draft's placeholder name.
+    row.receiver_name = actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
@@ -5307,9 +5472,7 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
     if row.status not in {"pending_approval", "draft"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be rejected from status {row.status}")
     actor = request_actor(request)
-    if row.receiver_name.strip() and normalize_usage_key(row.receiver_name) != normalize_usage_key(actor) and user.role.strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Only the assigned approver can reject this MR")
-    row.receiver_name = row.receiver_name or actor
+    row.receiver_name = actor
     row.receiver_title = data.title or row.receiver_title
     row.receiver_date = local_today()
     row.receiver_comment = data.comment
