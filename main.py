@@ -1248,11 +1248,18 @@ def request_actor(request: Request) -> str:
     return user.name or user.username
 
 
+def request_scope_viewer(request: Request) -> str:
+    user = current_user(request)
+    if user.role.strip().lower() == "warehouse manager":
+        return user.warehouse_name or user.name or user.username
+    return request_actor(request)
+
+
 def user_can_access_warehouse(user: AppUser, warehouse: Warehouse | None) -> bool:
     role = user.role.strip().lower()
     if role in {"admin", "management"}:
         return True
-    return role == "warehouse manager" and warehouse is not None and normalize_usage_key(user.warehouse_name) == normalize_usage_key(warehouse.name)
+    return role == "warehouse manager" and warehouse is not None and warehouse_scope_matches(user.warehouse_name or user.username or user.name, warehouse.name)
 
 
 def require_warehouse_access(request: Request, db: Session, warehouse_id: int, program: str) -> Warehouse:
@@ -1268,7 +1275,12 @@ def allowed_warehouse_ids(request: Request, db: Session, program: str) -> list[i
         return None
     if user.role.strip().lower() != "warehouse manager":
         return []
-    return [row.id for row in db.query(Warehouse.id).filter(Warehouse.program == normalize_program(program), func.lower(Warehouse.name) == (user.warehouse_name or "").strip().lower()).all()]
+    scope = user.warehouse_name or user.username or user.name
+    return [
+        row.id
+        for row in db.query(Warehouse).filter(Warehouse.program == normalize_program(program)).all()
+        if warehouse_scope_matches(scope, row.name)
+    ]
 
 
 def require_program_record(row, program: str, label: str):
@@ -1281,10 +1293,11 @@ def rollout_records_for_session(request: Request, rows: list[dict]) -> list[dict
     user = current_user(request)
     if user.role.strip().lower() != "warehouse manager":
         return rows
+    scope = user.warehouse_name or user.name or user.username
     return [
         row for row in rows
-        if warehouse_scope_matches(user.warehouse_name, str(row.get("city") or row.get("City") or ""))
-        or warehouse_scope_matches(user.warehouse_name, str(row.get("Area") or row.get("area") or ""))
+        if warehouse_scope_matches(scope, str(row.get("city") or row.get("City") or ""))
+        or warehouse_scope_matches(scope, str(row.get("Area") or row.get("area") or ""))
     ]
 
 
@@ -3161,7 +3174,7 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
 @app.get("/api/warehouse/bootstrap")
 def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer = request_actor(request)
+    viewer = request_scope_viewer(request)
     role = current_user(request).role
     cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
     cached = WAREHOUSE_CACHE.get(cache_key)
@@ -4277,7 +4290,7 @@ def list_audit_logs(request: Request, limit: int = 50, program: str = DEFAULT_PR
 @app.get("/api/warehouse/material-requisitions")
 def list_material_requisitions(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
@@ -4305,7 +4318,7 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     row = (
         db.query(MaterialRequisition)
         .options(
@@ -4722,7 +4735,7 @@ def list_material_transfer_headers(limit: int = 50, db: Session = Depends(db_ses
 @app.get("/api/warehouse/material-transfers")
 def list_material_transfers(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     rows = (
         db.query(MaterialTransfer)
         .options(
@@ -4741,7 +4754,7 @@ def list_material_transfers(request: Request, limit: int = 50, viewer: str = "",
 @app.get("/api/warehouse/material-transfers/{transfer_id}")
 def get_material_transfer(transfer_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_actor(request), current_user(request).role
+    viewer, role = request_scope_viewer(request), current_user(request).role
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
