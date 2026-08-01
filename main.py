@@ -47,6 +47,7 @@ from models import (
     ProductSerial,
     ReceiveOrder,
     ReceiveOrderItem,
+    RolloutEntryCounter,
     RolloutRecord,
     StockBalance,
     StockMovement,
@@ -121,6 +122,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS olt VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS notes VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS submission_key VARCHAR DEFAULT ''",
         ]
         statements.extend([f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
         statements.extend(
@@ -149,6 +151,7 @@ def ensure_optional_columns(target_engine=engine):
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_requisition_program_number ON material_requisitions (program, order_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_rollout_records_submission_key ON rollout_records (submission_key) WHERE submission_key <> ''",
             ]
         )
     else:
@@ -166,6 +169,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE rollout_records ADD COLUMN olt VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN notes VARCHAR DEFAULT ''",
+            "ALTER TABLE rollout_records ADD COLUMN submission_key VARCHAR DEFAULT ''",
         ]
         statements.extend([f"ALTER TABLE {table} ADD COLUMN program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
         statements.extend(
@@ -186,6 +190,7 @@ def ensure_optional_columns(target_engine=engine):
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_requisition_program_number ON material_requisitions (program, order_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_rollout_records_submission_key ON rollout_records (submission_key) WHERE submission_key <> ''",
             ]
         )
     with target_engine.begin() as conn:
@@ -1728,6 +1733,48 @@ def next_rollout_entry_id(db: Session) -> str:
     return next_id
 
 
+def rollout_entry_counter(db: Session) -> RolloutEntryCounter:
+    """Lock the shared Field Entry counter for the current transaction."""
+    counter = (
+        db.query(RolloutEntryCounter)
+        .filter(RolloutEntryCounter.name == "field_entry_rdp")
+        .with_for_update()
+        .first()
+    )
+    if counter is not None:
+        return counter
+
+    highest = 0
+    for (record_id,) in db.query(RolloutRecord.record_id).filter(RolloutRecord.record_id.like("RDP-%")).all():
+        match = re.match(r"^RDP-(\d+)$", str(record_id or "").strip(), flags=re.I)
+        if match:
+            highest = max(highest, int(match.group(1)))
+
+    # PostgreSQL and supported SQLite versions both accept this conflict-safe insert.
+    db.execute(
+        text(
+            "INSERT INTO rollout_entry_counters (name, next_value) "
+            "VALUES ('field_entry_rdp', :next_value) ON CONFLICT(name) DO NOTHING"
+        ),
+        {"next_value": highest + 1},
+    )
+    return (
+        db.query(RolloutEntryCounter)
+        .filter(RolloutEntryCounter.name == "field_entry_rdp")
+        .with_for_update()
+        .one()
+    )
+
+
+def allocate_rollout_entry_id(db: Session, counter: RolloutEntryCounter) -> str:
+    value = max(int(counter.next_value or 1), 1)
+    while db.query(RolloutRecord.id).filter(RolloutRecord.record_id == f"RDP-{value}").first() is not None:
+        value += 1
+    counter.next_value = value + 1
+    db.flush()
+    return f"RDP-{value}"
+
+
 def rollout_entry_summary(rows: list[dict]) -> dict:
     summary = {"cable": 0, "end_box": 0, "sub_box": 0, "hub_box": 0, "xbox": 0}
     for row in rows:
@@ -1803,6 +1850,9 @@ def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, Rol
     row.olt = str(first_value(data, "OLT", "olt", default="") or "")
     row.cable_route = str(first_value(data, "Cable route", "Cable Route", "cable_route", default="") or "")
     row.notes = str(first_value(data, "Notes", "notes", default="") or "")
+    submission_key = str(first_value(data, "submission_key", default="") or "").strip()
+    if submission_key:
+        row.submission_key = submission_key
     return row, created
 
 
@@ -2808,6 +2858,21 @@ def rollout_entry_reference(
 def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
+    submission_key = str(first_value(data, "submission_key", default="") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{16,128}", submission_key):
+        raise HTTPException(status_code=400, detail="Invalid field entry submission key")
+    existing_submission = db.query(RolloutRecord).filter(RolloutRecord.submission_key == submission_key).first()
+    if existing_submission is not None:
+        records, _ = rollout_daily_progress_records(db, force=False)
+        return {
+            "success": True,
+            "message": "Field entry already saved",
+            "record": row_to_record(existing_submission),
+            "summary": rollout_entry_summary(records),
+            "warnings": [],
+            "replayed": True,
+        }
+
     area = str(first_value(data, "Area", "area", default="") or "").strip()
     xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default="") or "").strip()
     code_type = rollout_entry_mode(data)
@@ -2874,9 +2939,25 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
 
     with ROLLOUT_SYNC_LOCK:
-        record_id = next_rollout_entry_id(db)
+        counter = rollout_entry_counter(db)
+        # A retry can arrive while the first request is committing. Check again
+        # after the database lock so the same submission is never saved twice.
+        existing_submission = db.query(RolloutRecord).filter(RolloutRecord.submission_key == submission_key).first()
+        if existing_submission is not None:
+            db.rollback()
+            records, _ = rollout_daily_progress_records(db, force=False)
+            return {
+                "success": True,
+                "message": "Field entry already saved",
+                "record": row_to_record(existing_submission),
+                "summary": rollout_entry_summary(records),
+                "warnings": [],
+                "replayed": True,
+            }
+        record_id = allocate_rollout_entry_id(db, counter)
         payload = normalize_rollout_row(data)
         payload["ID"] = record_id
+        payload["submission_key"] = submission_key
         payload["Related to XBOX"] = rollout_xbox_key(xbox)
         payload["entry time"] = datetime.now(TRIPOLI_TZ).strftime("%Y-%m-%d %H:%M:%S")
         payload["cable code"] = raw_code if code_type == "cable" else ""
