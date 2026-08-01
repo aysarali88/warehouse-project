@@ -4717,6 +4717,54 @@ def migrate_legacy_material_requisition_numbers() -> None:
 migrate_legacy_material_requisition_numbers()
 
 
+def add_previous_mr_numbers_to_notes() -> None:
+    """Show the legacy MR number in the request note after a renumbering."""
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                audit_rows = (
+                    db.query(AuditLog)
+                    .filter(
+                        AuditLog.action == "renumber_material_requisition",
+                        AuditLog.entity_type == "material_requisition",
+                    )
+                    .all()
+                )
+                changed = 0
+                for audit in audit_rows:
+                    try:
+                        details = json.loads(audit.details or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    previous_number = str(details.get("previous_order_number") or "").strip()
+                    if not previous_number:
+                        continue
+                    row = (
+                        db.query(MaterialRequisition)
+                        .filter(
+                            MaterialRequisition.program == normalize_program(program_key),
+                            MaterialRequisition.order_number == audit.entity_id,
+                        )
+                        .first()
+                    )
+                    if row is None:
+                        continue
+                    note = f"Previous MR No: {previous_number}"
+                    current_comment = (row.requester_comment or "").strip()
+                    if note.lower() in current_comment.lower():
+                        continue
+                    row.requester_comment = f"{current_comment}\n{note}".strip()
+                    changed += 1
+                if changed:
+                    db.commit()
+                    logger.info("%s added previous MR numbers to %s request notes", program_key, changed)
+        except Exception:
+            logger.exception("%s previous MR note migration failed", program_key)
+
+
+add_previous_mr_numbers_to_notes()
+
+
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
     program_key = normalize_program(program)
     grid = sheet_grid(sheet)
