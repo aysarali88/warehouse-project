@@ -1611,6 +1611,15 @@ def rollout_norm(value) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
+def rollout_area_key(value) -> str:
+    key = rollout_norm(value)
+    return "hayalandaluszone2" if key in {"hayalandalus", "hayandaluszone2", "hayalandaluszone2"} else key
+
+
+def rollout_area_label(value) -> str:
+    return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
+
+
 def rollout_xbox_key(value) -> str:
     text_value = str(value or "").upper()
     match = re.search(r"X\s*-?\s*BOX\s*0*(\d+)|X\s*0*(\d+)", text_value)
@@ -1672,10 +1681,10 @@ def rollout_code_reference_rows() -> list[dict]:
     def add(row: dict, code: str, code_type: str, source: str, material_override: str = ""):
         if not code:
             return
-        area = str(first_value(row, "Area", "area", "Zone", "zone", default="") or "").strip()
+        area = rollout_area_label(first_value(row, "Zone", "zone", "Area", "area", default=""))
         city = str(first_value(row, "City", "city", default="") or "").strip()
         xbox = str(first_value(row, "Related to XBOX", "related to xbox", "XBOX", "xbox", default="") or "").strip()
-        key = (rollout_norm(area), rollout_xbox_key(xbox), rollout_code_key(code), code_type)
+        key = (rollout_area_key(area), rollout_xbox_key(xbox), rollout_code_key(code), code_type)
         if key in seen:
             return
         seen.add(key)
@@ -1709,14 +1718,14 @@ def rollout_code_reference_rows() -> list[dict]:
 
 
 def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str) -> list[dict]:
-    area_key = rollout_norm(area)
+    area_key = rollout_area_key(area)
     xbox_key = rollout_xbox_key(xbox)
     code_key = rollout_code_key(code)
     return [
         row
         for row in rollout_code_reference_rows()
         if row["type"] == code_type
-        and rollout_norm(row.get("area")) == area_key
+        and rollout_area_key(row.get("area")) == area_key
         and rollout_xbox_key(row.get("xbox")) == xbox_key
         and rollout_code_key(row.get("code")) == code_key
     ]
@@ -2843,7 +2852,7 @@ def rollout_entry_reference(
         area_name = row.get("area") or ""
         if not area_name:
             continue
-        area_key = rollout_norm(area_name)
+        area_key = rollout_area_key(area_name)
         areas_map.setdefault(area_key, {"area": area_name, "city": row.get("city") or ""})
         xboxes_map.setdefault(area_key, set()).add(row.get("xbox") or "")
     code_states: dict[tuple[str, str, str, str], str] = {}
@@ -2856,7 +2865,7 @@ def rollout_entry_reference(
         if not code:
             continue
         key = (
-            rollout_norm(first_value(record, "Area", "area", default="")),
+            rollout_area_key(first_value(record, "Area", "area", default="")),
             rollout_xbox_key(first_value(record, "Related to XBOX", "related_to_xbox", default="")),
             code_type,
             rollout_code_key(code),
@@ -2867,14 +2876,14 @@ def rollout_entry_reference(
 
     scoped_refs = refs
     if area:
-        scoped_refs = [r for r in scoped_refs if rollout_norm(r.get("area")) == rollout_norm(area)]
+        scoped_refs = [r for r in scoped_refs if rollout_area_key(r.get("area")) == rollout_area_key(area)]
     if xbox:
         scoped_refs = [r for r in scoped_refs if rollout_xbox_key(r.get("xbox")) == rollout_xbox_key(xbox)]
     scoped_refs = [
         {
             **row,
             "entry_status": code_states.get(
-                (rollout_norm(row.get("area")), rollout_xbox_key(row.get("xbox")), row.get("type") or "", rollout_code_key(row.get("code"))),
+                (rollout_area_key(row.get("area")), rollout_xbox_key(row.get("xbox")), row.get("type") or "", rollout_code_key(row.get("code"))),
                 "available",
             ),
         }
@@ -2940,7 +2949,7 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         for row in existing_candidates:
             if rollout_record_code_type(row) != code_type:
                 continue
-            if rollout_norm(row.area) != rollout_norm(area):
+            if rollout_area_key(row.area) != rollout_area_key(area):
                 continue
             if rollout_xbox_key(row.related_to_xbox) != rollout_xbox_key(xbox):
                 continue
@@ -3053,7 +3062,7 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
         for candidate in db.query(RolloutRecord).filter(code_attr != "").all():
             if candidate.record_id == row.record_id or rollout_record_code_type(candidate) != code_type:
                 continue
-            if rollout_norm(candidate.area) != rollout_norm(area):
+            if rollout_area_key(candidate.area) != rollout_area_key(area):
                 continue
             if rollout_xbox_key(candidate.related_to_xbox) != rollout_xbox_key(xbox):
                 continue

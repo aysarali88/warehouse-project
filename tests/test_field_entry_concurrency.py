@@ -47,3 +47,9 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             db.commit()
         db.rollback()
         db.close()
+
+    def test_andalus_zone_two_reference_matches_legacy_area(self):
+        refs = [row for row in main.rollout_code_reference_rows() if row["xbox"] == "X4"]
+        self.assertTrue(refs)
+        self.assertTrue(all(row["area"] == "Hay Al Andalus Zone 2" for row in refs))
+        self.assertEqual(main.rollout_area_key("Hay Al Andalus"), main.rollout_area_key("Hay Al Andalus Zone 2"))
