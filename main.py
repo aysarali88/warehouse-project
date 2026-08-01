@@ -2856,7 +2856,7 @@ def rollout_entry_reference(
 
 @app.post("/api/warehouse/rollout-field-entry")
 def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin")
+    require_roles(request, "Requester")
 
     submission_key = str(first_value(data, "submission_key", default="") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9-]{16,128}", submission_key):
