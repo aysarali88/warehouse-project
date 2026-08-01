@@ -58,6 +58,16 @@ class Warehouse(Base):
     balances = relationship("StockBalance", back_populates="warehouse")
 
 
+class Site(Base):
+    __tablename__ = "sites"
+    __table_args__ = (UniqueConstraint("program", "name", name="uq_site_program_name"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AppUser(Base):
     __tablename__ = "app_users"
 

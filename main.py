@@ -49,6 +49,7 @@ from models import (
     ReceiveOrderItem,
     RolloutEntryCounter,
     RolloutRecord,
+    Site,
     StockBalance,
     StockMovement,
     Technician,
@@ -217,6 +218,7 @@ PROGRAM_LABELS = {
     SINGLE_RAN_PROGRAM: "Single RAN",
 }
 VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
+DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2")
 
 
 def raw_program_value(value: str = "") -> str:
@@ -234,6 +236,27 @@ def is_valid_program_value(value: str = "") -> bool:
 
 def is_single_ran(program: str = "") -> bool:
     return normalize_program(program) == SINGLE_RAN_PROGRAM
+
+
+def ensure_default_site_ids():
+    db = get_sessionmaker(DEFAULT_PROGRAM)()
+    try:
+        existing = {
+            row.name.strip().casefold()
+            for row in db.query(Site).filter(Site.program == DEFAULT_PROGRAM).all()
+        }
+        for name in DEFAULT_SITE_IDS:
+            if name.casefold() not in existing:
+                db.add(Site(program=DEFAULT_PROGRAM, name=name))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Default Site ID initialization failed")
+    finally:
+        db.close()
+
+
+ensure_default_site_ids()
 
 
 def program_filter(model, program: str = ""):
@@ -1000,6 +1023,11 @@ class AppUserDeleteIn(BaseModel):
 class WarehouseIn(BaseModel):
     name: str
     location: str = ""
+    program: str = DEFAULT_PROGRAM
+
+
+class SiteIn(BaseModel):
+    name: str
     program: str = DEFAULT_PROGRAM
 
 
@@ -3242,6 +3270,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         "partial": light,
         "summary": warehouse_summary(program_key, db),
         "warehouses": list_warehouses(program_key, db)["warehouses"],
+        "sites": list_sites(program_key, db)["sites"],
         "technicians": list_technicians(program_key, db)["technicians"],
         "products": list_products(program_key, db)["products"],
         "stockBalances": stock["balances"],
@@ -3284,6 +3313,32 @@ def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_ses
     program_key = normalize_program(program)
     rows = db.query(Warehouse).filter(Warehouse.program == program_key).order_by(Warehouse.name).all()
     return {"success": True, "warehouses": [{"id": r.id, "program": program_key, "name": r.name, "location": r.location, "status": r.status} for r in rows]}
+
+
+@app.get("/api/warehouse/sites")
+def list_sites(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    rows = db.query(Site).filter(Site.program == program_key).order_by(Site.name).all()
+    return {"success": True, "sites": [{"id": r.id, "program": program_key, "name": r.name} for r in rows]}
+
+
+@app.post("/api/warehouse/sites")
+def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
+    program_key = normalize_program(data.program)
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Site ID is required")
+    row = Site(program=program_key, name=name)
+    db.add(row)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Site ID already exists") from exc
+    db.refresh(row)
+    clear_warehouse_cache()
+    return {"success": True, "site": {"id": row.id, "program": program_key, "name": row.name}}
 
 
 @app.post("/api/warehouse/warehouses")

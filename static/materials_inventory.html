@@ -947,7 +947,7 @@ th{
   </section>
 
   <section class="view" id="setup">
-    <div class="grid two">
+    <div class="grid three">
       <div class="card">
         <h3>إضافة مستودع</h3>
         <div class="form">
@@ -964,11 +964,19 @@ th{
           <button class="btn primary full" onclick="createTechnician()">حفظ الفني</button>
         </div>
       </div>
+      <div class="card">
+        <h3>إضافة Site ID</h3>
+        <div class="form">
+          <div class="field full"><label>Site ID</label><input id="siteName" placeholder="مثال: Hay Al Andalus Z2"></div>
+          <button class="btn primary full" onclick="createSite()">حفظ Site ID</button>
+        </div>
+      </div>
     </div>
     <div class="grid three">
       <div class="card"><h3>المستودعات</h3><div id="warehousesTable"></div></div>
       <div class="card"><h3>الفنيون</h3><div id="techniciansTable"></div></div>
       <div class="card"><h3>المواد</h3><div id="productsTable"></div></div>
+      <div class="card"><h3>Site IDs</h3><div id="sitesTable"></div></div>
     </div>
   </section>
 
@@ -1020,7 +1028,7 @@ th{
           <div class="field"><label>Warehouse name</label><select id="mrWarehouse" onchange="renderMrLines();renderMrPreview()"></select></div>
           <div class="field"><label>Entity</label><input id="mrEntity" value="Rollout"></div>
           <div class="field"><label>Project Name</label><input id="mrProject" value="FTTH"></div>
-          <div class="field"><label>Site ID</label><input id="mrSiteId" placeholder="Enter Site ID"></div>
+          <div class="field"><label>Site ID</label><select id="mrSiteId"><option value="">Select Site ID</option></select></div>
           <div class="field"><label>Site Address</label><select id="mrSiteAddress"><option value="">Select Site Address</option><option>Tripoli</option><option>Misurata</option></select></div>
           <div class="field"><label>WO No</label><input id="mrWoNo" placeholder="HLC"></div>
           <div class="field"><label>Product Domain</label><input id="mrDomain" value="Passive"></div>
@@ -1573,7 +1581,7 @@ function userOwnsAudit(r){if(isAdmin()||isManagement())return true;return normal
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
 function applyWarehouseData(data,merge=false){
   if(normalizeProgram(data?.program)!==normalizeProgram(currentProgram))return;
-  wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};
+  wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],sites:data.sites||merge&&wh.sites||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};
   if(isSingleRan())clearSingleRanRolloutState(false);
   renderWarehouse();
   fieldEntryUpdateStockRemaining()
@@ -1697,9 +1705,10 @@ renderScanLogs();
 document.getElementById('movementsTable').innerHTML=rowsTable([['النوع','type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['المرجع','reference'],['المستودع','warehouse'],['الفني','technician'],['SKU','sku'],['الكمية','quantity',(v)=>fmt(v)],['المستخدم','created_by'],['Serial','serial_number']],myMovements);
 document.getElementById('auditTable').innerHTML=rowsTable([['الإجراء','action'],['الكيان','entity_type'],['المرجع','entity_id'],['المستخدم','actor'],['الوقت','created_at']],myAudit);
 renderUsers();
-['receiveWarehouse','issueWarehouse','mrWarehouse','trFromWarehouse','trToWarehouse','retWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);initReceiveDefaults();initReturnDefaults();initTransferDefaults();renderMrLines();renderReturnLines();renderTransferLines();renderMrPreview();renderTransferPreview();renderReturnsTable();renderMrTable();renderTransferTable();syncSerialHint('issue')}
+['receiveWarehouse','issueWarehouse','mrWarehouse','trFromWarehouse','trToWarehouse','retWarehouse'].forEach(id=>fillSelect(id,wh.warehouses,r=>r.name));fillSelect('mrSiteId',wh.sites||[],r=>r.name);fillSelect('issueTechnician',wh.technicians,r=>r.name);fillSelect('issueProduct',wh.products,r=>`${r.sku} - ${r.name}`);document.getElementById('sitesTable').innerHTML=rowsTable([['Site ID','name']],wh.sites||[]);initReceiveDefaults();initReturnDefaults();initTransferDefaults();renderMrLines();renderReturnLines();renderTransferLines();renderMrPreview();renderTransferPreview();renderReturnsTable();renderMrTable();renderTransferTable();syncSerialHint('issue')}
 function syncSerialHint(mode){const p=productById(document.getElementById(mode+'Product').value);const h=document.getElementById(mode+'Hint');if(!p){h.textContent='';return}h.textContent=p.tracking_type==='serialized'?'هذه مادة Serialized: أدخل رقم سيريال لكل وحدة.':'هذه مادة Bulk: لا تحتاج لإدخال سيريالات.'}
 async function createWarehouse(){try{await api('/api/warehouse/warehouses',{method:'POST',body:JSON.stringify({name:whName.value.trim(),location:whLocation.value.trim()})});whName.value='';whLocation.value='';toast('تم حفظ المستودع');await loadWarehouse()}catch(e){toast(e.message)}}
+async function createSite(){const name=siteName.value.trim();if(!name){toast('اكتب Site ID');return}try{await api('/api/warehouse/sites',{method:'POST',body:JSON.stringify({program:normalizeProgram(currentProgram),name})});siteName.value='';toast('تم حفظ Site ID');await loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function createTechnician(){try{await api('/api/warehouse/technicians',{method:'POST',body:JSON.stringify({name:techName.value.trim(),phone:techPhone.value.trim()})});techName.value='';techPhone.value='';toast('تم حفظ الفني');await loadWarehouse()}catch(e){toast(e.message)}}
 function productActions(row){return roleKey()==='admin'?`<button class="btn danger" onclick="deleteProduct(${row.id})">حذف</button>`:''}
 async function deleteProduct(id){
