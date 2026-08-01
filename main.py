@@ -61,6 +61,9 @@ ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
 ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
 ROLLOUT_DB_CACHE_TTL = 30
+ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
+ROLLOUT_ENTRY_ID_CACHE_TTL = 30
+ROLLOUT_CODE_REFERENCE_CACHE: list[dict] | None = None
 ROLLOUT_SYNC_TTL_SECONDS = int(os.getenv("ROLLOUT_SYNC_TTL_SECONDS", "900"))
 ROLLOUT_LAST_SYNC_AT = 0.0
 ROLLOUT_SYNC_LOCK = Lock()
@@ -1301,8 +1304,9 @@ def clear_warehouse_cache():
 
 
 def clear_rollout_db_cache():
-    global ROLLOUT_DB_CACHE
+    global ROLLOUT_DB_CACHE, ROLLOUT_ENTRY_ID_CACHE
     ROLLOUT_DB_CACHE = None
+    ROLLOUT_ENTRY_ID_CACHE = None
 
 
 def log_audit(db: Session, action: str, entity_type: str, entity_id: str, actor: str, details: dict):
@@ -1638,6 +1642,10 @@ def load_fiber_map_reference() -> dict:
 
 
 def rollout_code_reference_rows() -> list[dict]:
+    global ROLLOUT_CODE_REFERENCE_CACHE
+    if ROLLOUT_CODE_REFERENCE_CACHE is not None:
+        return ROLLOUT_CODE_REFERENCE_CACHE
+
     ref = load_fiber_map_reference()
     rows: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -1677,7 +1685,8 @@ def rollout_code_reference_rows() -> list[dict]:
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
         add(row, code, "cable", "route")
-    return rows
+    ROLLOUT_CODE_REFERENCE_CACHE = rows
+    return ROLLOUT_CODE_REFERENCE_CACHE
 
 
 def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str) -> list[dict]:
@@ -1703,12 +1712,19 @@ def rollout_record_code_type(row: RolloutRecord) -> str:
 
 
 def next_rollout_entry_id(db: Session) -> str:
+    global ROLLOUT_ENTRY_ID_CACHE
+    now = time.monotonic()
+    if ROLLOUT_ENTRY_ID_CACHE and now - ROLLOUT_ENTRY_ID_CACHE[0] < ROLLOUT_ENTRY_ID_CACHE_TTL:
+        return ROLLOUT_ENTRY_ID_CACHE[1]
+
     highest = 0
     for (record_id,) in db.query(RolloutRecord.record_id).filter(RolloutRecord.record_id.like("RDP-%")).all():
         match = re.match(r"^RDP-(\d+)$", str(record_id or "").strip(), flags=re.I)
         if match:
             highest = max(highest, int(match.group(1)))
-    return f"RDP-{highest + 1}"
+    next_id = f"RDP-{highest + 1}"
+    ROLLOUT_ENTRY_ID_CACHE = (now, next_id)
+    return next_id
 
 
 def rollout_entry_summary(rows: list[dict]) -> dict:
