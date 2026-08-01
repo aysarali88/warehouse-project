@@ -4590,24 +4590,131 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     return row
 
 
-def next_import_order_number(db: Session, program: str = DEFAULT_PROGRAM) -> str:
-    """Return the next unused numeric MR number for sheets without an Order No."""
+MR_ORDER_PATTERN = re.compile(r"^MR-([A-Z0-9]+)-(\d+)$")
+
+
+def material_requisition_warehouse_code(warehouse: Warehouse) -> str:
+    """Return the stable short code used in MR numbers for a warehouse."""
+    key = normalize_usage_key(warehouse.name or "")
+    if "freezone" in key:
+        return "FZ"
+    if "tripoli" in key:
+        return "TRI"
+    if any(token in key for token in ("misurata", "misrata", "misrat")):
+        return "MIS"
+
+    words = re.findall(r"[A-Za-z0-9]+", warehouse.name or "")
+    initials = "".join(word[0] for word in words).upper()
+    return initials[:4] or f"WH{warehouse.id}"
+
+
+def is_material_requisition_number_for_warehouse(order_number: str, warehouse: Warehouse) -> bool:
+    match = MR_ORDER_PATTERN.fullmatch(str(order_number or "").strip().upper())
+    return bool(match and match.group(1) == material_requisition_warehouse_code(warehouse))
+
+
+def next_material_requisition_number(db: Session, warehouse: Warehouse, program: str = DEFAULT_PROGRAM) -> str:
+    """Return the next MR number within the selected warehouse's own sequence."""
     program_key = normalize_program(program)
-    values = db.query(MaterialRequisition.order_number).filter(MaterialRequisition.program == program_key).all()
-    numbers = []
+    warehouse_code = material_requisition_warehouse_code(warehouse)
+    highest = 0
+    values = (
+        db.query(MaterialRequisition.order_number)
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.warehouse_id == warehouse.id,
+        )
+        .all()
+    )
     for (value,) in values:
-        try:
-            numbers.append(int(str(value).strip()))
-        except (TypeError, ValueError):
-            continue
-    candidate = max(numbers, default=0) + 1
+        match = MR_ORDER_PATTERN.fullmatch(str(value or "").strip().upper())
+        if match and match.group(1) == warehouse_code:
+            highest = max(highest, int(match.group(2)))
+
+    candidate = highest + 1
     while (
         db.query(MaterialRequisition.id)
-        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == str(candidate))
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.order_number == f"MR-{warehouse_code}-{candidate:04d}",
+        )
         .first()
     ):
         candidate += 1
-    return str(candidate)
+    return f"MR-{warehouse_code}-{candidate:04d}"
+
+
+def migrate_legacy_material_requisition_numbers() -> None:
+    """Give old numeric MRs a warehouse-specific number without changing their data."""
+    for program_key, session_factory in all_sessionmakers():
+        try:
+            with session_factory() as db:
+                rows = (
+                    db.query(MaterialRequisition)
+                    .options(joinedload(MaterialRequisition.warehouse))
+                    .filter(MaterialRequisition.program == normalize_program(program_key))
+                    .all()
+                )
+                legacy_rows = [row for row in rows if not is_material_requisition_number_for_warehouse(row.order_number, row.warehouse)]
+                if not legacy_rows:
+                    continue
+
+                next_sequence: dict[int, int] = {}
+                for row in rows:
+                    if not is_material_requisition_number_for_warehouse(row.order_number, row.warehouse):
+                        continue
+                    match = MR_ORDER_PATTERN.fullmatch(row.order_number.strip().upper())
+                    next_sequence[row.warehouse_id] = max(next_sequence.get(row.warehouse_id, 0), int(match.group(2)))
+
+                legacy_rows.sort(key=lambda row: (str(row.creation_date or ""), str(row.created_at or ""), row.id))
+                changes: list[tuple[MaterialRequisition, str, str]] = []
+                for row in legacy_rows:
+                    next_sequence[row.warehouse_id] = next_sequence.get(row.warehouse_id, 0) + 1
+                    new_order_number = f"MR-{material_requisition_warehouse_code(row.warehouse)}-{next_sequence[row.warehouse_id]:04d}"
+                    changes.append((row, str(row.order_number or ""), new_order_number))
+
+                # Temporary values avoid unique-index conflicts if a legacy value
+                # happens to look like a new MR number in another warehouse.
+                for row, _old_order_number, _new_order_number in changes:
+                    row.order_number = f"__mr_renumber_{row.id}__"
+                db.flush()
+
+                for row, old_order_number, new_order_number in changes:
+                    row.order_number = new_order_number
+                    db.query(StockMovement).filter(
+                        StockMovement.program == normalize_program(program_key),
+                        StockMovement.reference == old_order_number,
+                    ).update({StockMovement.reference: new_order_number}, synchronize_session=False)
+                    db.query(MaterialScanLog).filter(
+                        MaterialScanLog.material_requisition_id == row.id,
+                        MaterialScanLog.note == f"MR {old_order_number}",
+                    ).update({MaterialScanLog.note: f"MR {new_order_number}"}, synchronize_session=False)
+                    db.query(AuditLog).filter(
+                        AuditLog.entity_type == "material_requisition",
+                        AuditLog.entity_id == old_order_number,
+                    ).update({AuditLog.entity_id: new_order_number}, synchronize_session=False)
+                    db.add(
+                        AuditLog(
+                            action="renumber_material_requisition",
+                            entity_type="material_requisition",
+                            entity_id=new_order_number,
+                            actor="system",
+                            details=json.dumps(
+                                {
+                                    "program": normalize_program(program_key),
+                                    "warehouse": row.warehouse.name if row.warehouse else "",
+                                    "previous_order_number": old_order_number,
+                                }
+                            ),
+                        )
+                    )
+                db.commit()
+                logger.info("%s MR number migration completed for %s records", program_key, len(changes))
+        except Exception:
+            logger.exception("%s MR number migration failed", program_key)
+
+
+migrate_legacy_material_requisition_numbers()
 
 
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
@@ -4616,15 +4723,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
     warehouse = find_warehouse_for_import(db, grid, default_warehouse_id, program_key)
     items = parse_import_items(db, grid, program_key)
     today = local_today()
-    order_number = find_sheet_value(grid, "Order No", "Order Number", "MR No", "MR Number").strip()
-    if not order_number:
-        order_number = next_import_order_number(db, program_key)
-    elif (
-        db.query(MaterialRequisition.id)
-        .filter(MaterialRequisition.program == program_key, MaterialRequisition.order_number == order_number)
-        .first()
-    ):
-        raise ValueError(f"Order No {order_number} already exists")
+    order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
         program=program_key,
         order_number=order_number,
@@ -4883,13 +4982,13 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    warehouse = require_warehouse(db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
-    order_number = next_import_order_number(db, program_key)
+    order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
         program=program_key,
         order_number=order_number,
