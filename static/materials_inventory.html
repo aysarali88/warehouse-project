@@ -2029,6 +2029,8 @@ function rolloutDashDateLabel(value){if(!value)return 'Latest data';const d=new 
 function rolloutDaysInclusive(start,end){const a=new Date(`${start}T00:00:00`),b=new Date(`${end}T00:00:00`);if(isNaN(a)||isNaN(b))return 0;return Math.max(1,Math.round((b-a)/86400000)+1)}
 function rolloutMetricFromRows(rows){
   const metric={cableMeters:0,distributionQty:0,fourCoreQty:0,subEndBox:0,hubBox:0,xbox:0,records:0,teams:new Set(),latestDate:''};
+  const confirmedXboxRefs=new Set();
+  let unlinkedXboxQty=0;
   rows.forEach(r=>{
     const qty=Number(r.actual||0);
     const material=String(r['material type']||r.item||r.Material||'').trim();
@@ -2041,6 +2043,7 @@ function rolloutMetricFromRows(rows){
     const isSubOrEndBox=normMaterial.includes('subbox')||normMaterial.includes('subboxavec8userscapacit')||normMaterial.includes('endbox')||normMaterial.includes('endboxavec8userscapacit');
     const isHubBox=normMaterial.includes('hubbox');
     const isXbox=normMaterial.includes('xbox');
+    const relatedXbox=String(r['Related to XBOX']||r.related_to_xbox||'').trim().toUpperCase();
     const team=String(r['team leader']||r.team_leader||r.TeamLeader||'').trim();
     const date=String(r.Date||'').slice(0,10);
     metric.records+=1;
@@ -2051,8 +2054,14 @@ function rolloutMetricFromRows(rows){
     if(isFourCoreCable)metric.fourCoreQty+=qty;
     if(isSubOrEndBox)metric.subEndBox+=qty;
     if(isHubBox)metric.hubBox+=qty;
-    if(isXbox)metric.xbox+=qty;
+    // A connected HubBox is sufficient evidence that its XBOX is installed,
+    // even when the field team did not add a separate XBOX material row.
+    if(qty>0&&(isXbox||isHubBox)){
+      if(relatedXbox)confirmedXboxRefs.add(relatedXbox);
+      else if(isXbox)unlinkedXboxQty+=qty;
+    }
   });
+  metric.xbox=confirmedXboxRefs.size+unlinkedXboxQty;
   metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
   metric.actualUsers=metric.distributionQty*8;
   return metric;
