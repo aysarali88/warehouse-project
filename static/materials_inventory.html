@@ -2410,7 +2410,7 @@ function wfmRecordMatchesCode(row,code){
   const target=wfmCodeKey(code);if(!target)return false;
   return ['ID','id','cable code','Cable code','box code','Box code','code','Code'].some(name=>{
     const value=wfmCodeKey(wfmValue(row,[name]));
-    return value===target||value.includes(target)||target.includes(value)&&value.length>3;
+    return value===target;
   });
 }
 function wfmDistribution(row){return /single[\s-]*core\s+distribution\s+cable/i.test(wfmText(row))&&wfmLength(row)>0}
