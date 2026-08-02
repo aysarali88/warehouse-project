@@ -2419,6 +2419,7 @@ function wfmBoxType(row){
   const text=wfmKey(wfmText(row));
   if(text.includes('ENDBOX')||text.endsWith('END'))return 'END';
   if(text.includes('SUBBOX')||text.includes('SUB'))return 'SUB';
+  if(text.includes('HUBBOX')||text==='HUB')return 'HUB';
   return '';
 }
 function wfmRowsForPart(part,rows){return (rows||[]).filter(row=>wfmRecordScope(row,part))}
