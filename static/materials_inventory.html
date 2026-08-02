@@ -568,6 +568,7 @@ body.sr-program .login-logo img{
 .warehouse-ring-percent{color:#fff;font-size:24px;font-weight:1000;line-height:1;margin-top:-74px;min-height:28px;text-shadow:0 2px 10px rgba(0,0,0,.28)}
 .warehouse-ring-name{width:100%;color:rgba(245,250,255,.94);font-size:13px;font-weight:900;text-align:center;overflow-wrap:anywhere}
 .warehouse-ring-stock{color:rgba(191,218,237,.78);font-size:11px;font-weight:900}
+.fiber-map-pdf-page{width:1200px;background:#fff;color:#0a335d}.fiber-map-pdf-page header{border-bottom:2px solid #0b81b8;margin-bottom:14px;padding:0 0 12px}.fiber-map-pdf-page h1{margin:0;color:#0b4d95;font-size:28px}.fiber-map-pdf-page p{margin:5px 0 0;color:#38556f;font-size:14px;font-weight:700}.fiber-map-pdf-legend{display:flex;gap:18px;margin-top:10px;color:#38556f;font-size:12px;font-weight:800}.fiber-map-pdf-page .map-card{border:0;background:#fff}.fiber-map-pdf-page .fiber-map-svg{width:1200px;max-width:none;min-width:0}
 </style>
 <style>
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -2506,9 +2507,51 @@ function wfmSelectMapXbox(value){
   renderRolloutMapPanel();
   updatePageLink();
 }
+async function downloadAreaFiberMapPdf(){
+  const area=warehouseFiberSelectedArea||'';
+  if(!area){toast('Select an area first');return}
+  if(!warehouseFiberReference){toast('The map is still loading. Please try again in a moment.');return}
+  const scopes=wfmScopesForArea(area);
+  const parts=scopes.flatMap(scope=>wfmParts(scope.area,scope.xbox));
+  if(!parts.length){toast('No map design found for this area');return}
+
+  const holder=document.createElement('div');
+  holder.className='fiber-map-pdf-export';
+  holder.style.cssText='position:fixed;left:-10000px;top:0;width:1200px;background:#fff;padding:24px;z-index:-1';
+  document.body.appendChild(holder);
+  try{
+    await loadSinglePagePdfTools();
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({unit:'mm',format:'a3',orientation:'landscape'});
+    const pageW=pdf.internal.pageSize.getWidth(),pageH=pdf.internal.pageSize.getHeight(),margin=8;
+    const rows=wh.rolloutDailyProgress||[];
+    for(let index=0;index<parts.length;index++){
+      const part=parts[index];
+      const page=document.createElement('section');
+      page.className='fiber-map-pdf-page';
+      page.innerHTML=`<header><h1>${esc(area)} - Fiber Map</h1><p>${esc(part.title)} · Live status from Rollout Daily Progress</p><div class="fiber-map-pdf-legend"><span>Green: installed / correct</span><span>Blue: mismatch</span><span>Red: missing</span></div></header>${wfmRenderPart(part,rows)}`;
+      holder.appendChild(page);
+      const canvas=await window.html2canvas(page,{scale:2,useCORS:true,backgroundColor:'#ffffff'});
+      const ratio=Math.min((pageW-margin*2)/canvas.width,(pageH-margin*2)/canvas.height);
+      const imageW=canvas.width*ratio,imageH=canvas.height*ratio;
+      if(index>0)pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg',.98),'JPEG',(pageW-imageW)/2,(pageH-imageH)/2,imageW,imageH);
+      pdf.setFontSize(8);
+      pdf.setTextColor(80,100,120);
+      pdf.text(`${index+1} / ${parts.length}`,pageW-margin,pageH-4,{align:'right'});
+      page.remove();
+    }
+    const safeName=String(area).replace(/[^\w\u0600-\u06FF-]+/g,'_');
+    pdf.save(`Fiber-Map-${safeName}.pdf`);
+    toast('Area map PDF downloaded');
+  }catch(error){
+    console.error(error);
+    toast('Could not create the map PDF: '+(error.message||'Please try again'));
+  }finally{holder.remove()}
+}
 function renderRolloutMapPanel(){
   const box=document.getElementById('rolloutDailyMap');if(!box)return;const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];syncWarehouseFiberScope(selectedArea);
-  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([key,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===key?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)" ${selectedArea?'':'disabled'}><option value="">All XBOXes</option>${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===warehouseFiberSelectedScope?'selected':''}>${esc(scope.xbox)}</option>`).join('')}</select></label></div>`;
+  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([key,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===key?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)" ${selectedArea?'':'disabled'}><option value="">All XBOXes</option>${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===warehouseFiberSelectedScope?'selected':''}>${esc(scope.xbox)}</option>`).join('')}</select></label><button class="btn primary" type="button" onclick="downloadAreaFiberMapPdf()" ${selectedArea?'':'disabled'}>Download area PDF</button></div>`;
   if(!selectedArea){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>Fiber Map</h3><p>Select an area to load the complete area map.</p></div>${controls}</div><div class="map-note">No map loaded. Select an area first.</div></div>`;return}
   const selectedScope=scopes.find(scope=>scope.id===warehouseFiberSelectedScope);const page=selectedScope||{title:`${selectedArea} - Select XBOX`,area:selectedArea,xbox:'',all:false};
   if(!selectedScope){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>Select one XBOX to load the map smoothly.</p></div>${controls}</div><div class="map-list">${scopes.map(scope=>`<button class="map-list-row" type="button" onclick="wfmSelectMapXbox('${esc(scope.id)}')"><b>${esc(scope.xbox)}</b><span>${esc(scope.title||scope.area)}</span><span class="map-status ok">Open</span></button>`).join('')||'<div class="map-note">No XBOX maps found for this area.</div>'}</div></div>`;return}
