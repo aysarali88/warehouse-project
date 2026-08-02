@@ -53,3 +53,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertTrue(refs)
         self.assertTrue(all(row["area"] == "Hay Al Andalus Zone 2" for row in refs))
         self.assertEqual(main.rollout_area_key("Hay Al Andalus"), main.rollout_area_key("Hay Al Andalus Zone 2"))
+
+    def test_hub_codes_are_available_from_map_parent_hub_field(self):
+        refs = main.rollout_code_reference_rows()
+        hubs = [
+            row for row in refs
+            if row["type"] == "box" and row["box_type"] == "HUB BOX"
+        ]
+        self.assertTrue(hubs)
+        self.assertTrue(any(row["code"] == "H7" for row in hubs))
+        self.assertTrue(any(row["code"] == "H10" for row in hubs))

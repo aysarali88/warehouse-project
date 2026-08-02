@@ -1682,6 +1682,13 @@ def rollout_code_reference_rows() -> list[dict]:
         code = str(first_value(row, "Box code", "box code", default="") or "").strip()
         add(row, code, "box", "box", str(first_value(row, "Box type", "box type", default="") or "").strip())
         add(row, code, "cable", "drop")
+        # Hubs are the parent node of the SUB/END box rows in the map data;
+        # they do not have their own Box code row. Expose one HubBox code for
+        # each area/XBOX so it can be selected during field entry.
+        hub_code = str(first_value(row, "Hub", "hub", default="") or "").strip()
+        if hub_code:
+            hub_row = {**row, "Box type": "HUB BOX", "Material type": "HubBox"}
+            add(hub_row, hub_code, "box", "hub", "HubBox")
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
         add(row, code, "cable", "route")
