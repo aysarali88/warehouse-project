@@ -3302,6 +3302,14 @@ def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session
     return {"success": True, "site": {"id": row.id, "program": program_key, "name": row.name}}
 
 
+def resolved_site_name(db: Session, program: str, site_value: str) -> str:
+    value = str(site_value or "").strip()
+    if not value.isdigit():
+        return value
+    site = db.query(Site).filter(Site.id == int(value), Site.program == normalize_program(program)).first()
+    return site.name if site else value
+
+
 @app.post("/api/warehouse/warehouses")
 def create_warehouse(data: WarehouseIn, db: Session = Depends(db_session)):
     program_key = normalize_program(data.program)
@@ -5084,6 +5092,7 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    data.site_id = resolved_site_name(db, program_key, data.site_id)
     warehouse = require_warehouse(db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
     data.requester_name = data.created_by
@@ -5162,6 +5171,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    data.site_id = resolved_site_name(db, program_key, data.site_id)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
