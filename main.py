@@ -5573,7 +5573,12 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
 def issue_material_requisition(requisition_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     require_warehouse_access(request, db, row.warehouse_id, program_key)
