@@ -712,6 +712,11 @@ def transfer_source_warehouse_manager_emails(row: MaterialTransfer, db: Session)
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
+def transfer_destination_warehouse_manager_emails(row: MaterialTransfer, db: Session) -> list[str]:
+    identifiers = [row.to_warehouse.name if row.to_warehouse else ""]
+    return active_user_emails(db, "warehouse manager", identifiers)
+
+
 def is_source_warehouse_manager(actor: str, row: MaterialTransfer, db: Session) -> bool:
     actor_key = normalize_usage_key(actor)
     warehouse_name = row.from_warehouse.name if row.from_warehouse else ""
@@ -837,6 +842,34 @@ def notify_transfer_created(row: MaterialTransfer, db: Session) -> None:
             "This is an automated notification from Global Technology Company.",
         ],
         "transfer_created_email",
+    )
+
+
+def notify_transfer_approved(row: MaterialTransfer, db: Session) -> None:
+    from_name = row.from_warehouse.name if row.from_warehouse else ""
+    to_name = row.to_warehouse.name if row.to_warehouse else ""
+    notify_transfer_email(
+        row,
+        db,
+        transfer_destination_warehouse_manager_emails(row, db),
+        f"Receiving action needed: Material Transfer {row.transfer_number}",
+        [
+            "Hello,",
+            "",
+            "A material transfer to your warehouse has been approved and is waiting for physical receiving confirmation.",
+            "",
+            f"Transfer No: {row.transfer_number}",
+            f"From Warehouse: {from_name or '-'}",
+            f"To Warehouse: {to_name or '-'}",
+            f"Approved by: {row.approver_name or '-'}",
+            "Status: Approved - waiting for your confirmation",
+            "",
+            "Please check the delivered materials, then sign in to the warehouse system and select Confirm.",
+            "Stock will move only after your confirmation.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "transfer_approved_destination_email",
     )
 
 
@@ -5381,7 +5414,7 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
 def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
+    require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
@@ -5389,8 +5422,6 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be approved from status {row.status}")
     actor = request_actor(request)
-    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
-        raise HTTPException(status_code=403, detail="Only the source warehouse manager can approve this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
     row.approver_date = local_today()
@@ -5399,12 +5430,13 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
     log_audit(db, "approve_material_transfer", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_transfer_approved(row, db)
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/reject")
 def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
+    require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
@@ -5412,8 +5444,6 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be rejected from status {row.status}")
     actor = request_actor(request)
-    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
-        raise HTTPException(status_code=403, detail="Only the source warehouse manager can reject this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
     row.approver_date = local_today()
