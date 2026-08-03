@@ -1554,7 +1554,7 @@ function warehouseById(id){return (wh.warehouses||[]).find(w=>String(w.id)===Str
 function warehouseByName(name){return (wh.warehouses||[]).find(w=>normalizeText(w.name)===normalizeText(name))}
 function ledgerTypeClass(type){return String(type||'').toLowerCase().replace(/\s+/g,'-')}
 function ledgerTypeLabel(type){return `<span class="ledger-type ${esc(ledgerTypeClass(type))}">${esc(type)}</span>`}
-function ledgerQty(v,row){const n=Number(v||0);const signed=['TR Out','MR','Rollout Used'].includes(row.type)?-Math.abs(n):Math.abs(n);return fmt(signed)}
+function ledgerQty(v,row){const n=Number(v||0);const signed=['TR Out','MR'].includes(row.type)?-Math.abs(n):Math.abs(n);return fmt(signed)}
 function ledgerRoute(row){return row.from||row.to?`${esc(row.from||'')} → ${esc(row.to||'')}`:esc(row.warehouse||'')}
 function renderMaterialLedger(){
 const input=document.getElementById('ledgerSearchInput');if(input&&materialLedgerState.query&&!input.value)input.value=materialLedgerState.query;
@@ -1566,10 +1566,8 @@ matchesBox.innerHTML=(data.matches||[]).map(p=>`<button class="ledger-match ${St
 if(!data.material){result.className='ledger-empty';result.innerHTML='لم يتم العثور على مادة مطابقة.';return}
 result.className='ledger-shell';
 const s=data.summary||{},m=data.material,stockRows=data.stock_by_warehouse||[],events=data.events||[];
-const mrRolloutDiff=s.mr_vs_rollout??s.variance_vs_rollout??0;
-const varianceClass=Number(mrRolloutDiff)<0?'bad':Number(mrRolloutDiff)>0?'warn':'good';
-const kpis=[['Total Received',s.total_received,'good'],['MR Issued',s.mr_issued,'warn'],['Transferred',s.transferred??s.tr_out,''],['Net Transfer',s.net_transfer||0,'good'],['Returned RN',s.returned,'good'],['Rollout Used',s.rollout_used,'warn'],['Current Stock',s.current_stock,'good'],['MR - Rollout',mrRolloutDiff,varianceClass]];
-result.innerHTML=`<div class="ledger-material-head"><div><h4>${esc(m.name)}</h4><small>${esc(m.sku)} · Part # ${esc(m.part_number||'-')} · ${esc(m.unit||'PCS')}</small></div><button class="btn soft" onclick="loadMaterialLedger(true)">Refresh</button></div><div class="ledger-kpis">${kpis.map(k=>`<div class="ledger-kpi ${k[2]}"><span>${esc(k[0])}</span><strong>${fmt(k[1])}</strong></div>`).join('')}</div><div class="ledger-sections"><div><h3>Current Stock by WH</h3>${rowsTable([['Warehouse','warehouse'],['Qty','quantity',(v)=>fmt(v)],['Unit','unit']],stockRows)}</div><div><h3>Movement Timeline</h3>${rowsTable([['Date','date'],['Type','type',(v)=>ledgerTypeLabel(v)],['Ref','reference'],['WH / Route','warehouse',(_,r)=>ledgerRoute(r)],['Area','area'],['Qty','quantity',(v,r)=>ledgerQty(v,r)],['Status','status',(v)=>statusChip(v||'')],['By','actor'],['Note','note']],events)}</div></div>`;
+const kpis=[['Total Received',s.total_received,'good'],['MR Issued',s.mr_issued,'warn'],['TR Out',s.tr_out,'bad'],['TR In',s.tr_in,'good'],['Returned RN',s.returned,'good'],['Current Stock',s.current_stock,'good']];
+result.innerHTML=`<div class="ledger-material-head"><div><h4>${esc(m.name)}</h4><small>${esc(m.sku)} · Part # ${esc(m.part_number||'-')} · ${esc(m.unit||'PCS')}</small></div><button class="btn soft" onclick="loadMaterialLedger(true)">Refresh</button></div><div class="ledger-kpis">${kpis.map(k=>`<div class="ledger-kpi ${k[2]}"><span>${esc(k[0])}</span><strong>${fmt(k[1])}</strong></div>`).join('')}</div><div class="ledger-sections"><div><h3>Warehouse Movement Summary</h3>${rowsTable([['Warehouse','warehouse'],['Total Received','total_received',(v)=>fmt(v)],['MR Issued','mr_issued',(v)=>fmt(v)],['TR Out','tr_out',(v)=>fmt(v)],['TR In','tr_in',(v)=>fmt(v)],['Returned RN','returned',(v)=>fmt(v)],['Current Stock','current_stock',(v)=>fmt(v)],['Unit','unit']],stockRows)}</div><div><h3>Movement Timeline</h3>${rowsTable([['Date','date'],['Type','type',(v)=>ledgerTypeLabel(v)],['Ref','reference'],['WH / Route','warehouse',(_,r)=>ledgerRoute(r)],['Area','area'],['Qty','quantity',(v,r)=>ledgerQty(v,r)],['Status','status',(v)=>statusChip(v||'')],['By','actor'],['Note','note']],events)}</div></div>`;
 }
 async function loadMaterialLedger(force=false){
 const input=document.getElementById('ledgerSearchInput');const q=(input?.value||materialLedgerState.query||'').trim();
