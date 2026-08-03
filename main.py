@@ -3194,6 +3194,15 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: S
 @app.get("/api/warehouse/summary")
 def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    inventory_receive_total = (
+        db.query(func.coalesce(func.sum(StockMovement.quantity), 0))
+        .filter(
+            StockMovement.program == program_key,
+            StockMovement.movement_type == "receive",
+            StockMovement.note.like("Inventory receive:%"),
+        )
+        .scalar()
+    )
     return {
         "success": True,
         "program": program_key,
@@ -3202,6 +3211,7 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
         "products": db.query(Product).filter(Product.program == program_key).count(),
         "stock_movements": db.query(StockMovement).filter(StockMovement.program == program_key).count(),
         "open_serials": db.query(ProductSerial).filter(ProductSerial.program == program_key, ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
+        "inventory_receive_total": float(inventory_receive_total or 0),
     }
 
 
