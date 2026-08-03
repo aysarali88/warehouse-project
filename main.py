@@ -5819,19 +5819,26 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
 def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    if row.status != "approved":
+    role_key = normalize_usage_key(user.role)
+    returning_from_approval = role_key in {"approval", "approver"} and row.status == "pending_approval"
+    returning_from_warehouse = row.status == "approved"
+    if not returning_from_approval and not returning_from_warehouse:
         raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
-    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    if not returning_from_approval:
+        require_warehouse_access(request, db, row.warehouse_id, program_key)
     actor = request_actor(request)
+    row.receiver_name = actor or row.receiver_name
+    row.receiver_title = data.title or row.receiver_title
+    row.receiver_date = local_today()
     row.receiver_comment = data.comment
     row.return_reason = data.comment
     row.status = "returned_for_edit"
-    log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "warehouse", data.model_dump())
+    log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "reviewer", data.model_dump())
     db.commit()
     db.refresh(row)
     notify_mr_returned_for_edit(row, db)
