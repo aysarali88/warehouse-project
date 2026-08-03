@@ -1643,7 +1643,7 @@ function syncWarehouseLater(){localStorage.removeItem(warehouseBootstrapCacheKey
 async function refreshStockUsage(){const data=await api('/api/warehouse/stock-usage');wh.stockUsage=data.usage||[];renderWarehouse()}
 setTimeout(()=>{refreshStockUsage().catch(()=>{})},2500)
 async function refreshReceiptsFast(showToast=false){try{const data=await api('/api/warehouse/receive-orders?limit=200');wh.receipts=data.receipts||[];renderReceiveHistory();renderExecutiveDashboard();if(showToast)toast('تم تحديث سجل الاستلام')}catch(e){if(showToast)toast(e.message)}}
-async function loadInitialStockReference(){try{const data=await fetch('/static/assets/initial-stock-reference.json',{cache:'no-store'}).then(r=>r.ok?r.json():{rows:[]});initialStockReference=data||{summary:{rows:0,total_quantity:0},rows:[]};renderReceiveHistory()}catch(e){initialStockReference={summary:{rows:0,total_quantity:0},rows:[]}}}
+async function loadInitialStockReference(){try{const data=await fetch('/static/assets/initial-stock-reference.json',{cache:'no-store'}).then(r=>r.ok?r.json():{rows:[]});initialStockReference=data||{summary:{rows:0,total_quantity:0},rows:[]};renderReceiveHistory();renderExecutiveDashboard()}catch(e){initialStockReference={summary:{rows:0,total_quantity:0},rows:[]};renderExecutiveDashboard()}}
 function upsertLocalMr(req){if(!req)return;const rows=wh.mrs||[];const i=rows.findIndex(r=>String(r.id)===String(req.id));if(i>=0)rows[i]=req;else rows.unshift(req);wh.mrs=rows;renderWarehouse()}
 function upsertLocalTransfer(row){if(!row)return;const rows=wh.transfers||[];const i=rows.findIndex(r=>String(r.id)===String(row.id));if(i>=0)rows[i]=row;else rows.unshift(row);wh.transfers=rows;renderWarehouse()}
 function upsertLocalReturn(row){if(!row)return;const rows=wh.returns||[];const i=rows.findIndex(r=>String(r.id)===String(row.id));if(i>=0)rows[i]=row;else rows.unshift(row);wh.returns=rows;renderWarehouse()}
@@ -1689,7 +1689,8 @@ async function rejectMr(id){if(!canApprove()){toast('Approver فقط يقدر ي
 async function returnMrForEdit(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يرجع MR للتعديل');return}const comment=(prompt('سبب الإرجاع للتعديل؟')||'').trim();if(!comment){toast('اكتب سبب التعديل');return}try{toast('جاري إرجاع MR للتعديل...');const r=await api(`/api/warehouse/material-requisitions/${id}/return-for-edit`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('MR returned for edit');upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 async function issueApprovedMr(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يصرف المواد');return}try{toast('جاري صرف المواد...');const r=await api(`/api/warehouse/material-requisitions/${id}/issue`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Issued by warehouse'})});toast('Materials issued '+(r.issue_order||''));upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 function renderExecutiveDashboard(){
-const totalReceived=wh.stockUsage.reduce((s,r)=>s+Number(r.total_received||0),0);
+// FTTH received quantity is the fixed opening inventory from the approved import file.
+const totalReceived=isSingleRan()?wh.stockUsage.reduce((s,r)=>s+Number(r.total_received||0),0):Number(initialStockReference.summary?.total_quantity||0);
 const totalOut=wh.stockUsage.reduce((s,r)=>s+Number(r.total_consumed||0),0);
 const totalRemaining=wh.stockUsage.reduce((s,r)=>s+Number(r.remaining||0),0);
 const usage=pct(totalOut,totalReceived||totalOut+totalRemaining);
