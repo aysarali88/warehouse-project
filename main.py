@@ -2452,6 +2452,8 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
 def canonical_mr_history_area(value: str) -> str:
     text_value = str(value or "").strip()
     key = normalize_usage_key(text_value)
+    if key in {"haydamascus", "haydemascus"}:
+        return "Hay Demascus"
     if key in {"maqawba", "magawba"}:
         return "Maqawba"
     if key in {"hayalandalusz3", "hayalandaluszone3"}:
