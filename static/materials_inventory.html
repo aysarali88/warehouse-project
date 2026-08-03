@@ -1235,7 +1235,6 @@ body.sr-program .login-logo img{
   <section class="view" id="balances">
     <div class="tabs">
       <button class="tab active" data-balance="stockBalances">مخزون المستودعات</button>
-      <button class="tab rollout-work" data-balance="rolloutUsage">Rollout Usage</button>
       <button class="tab" data-balance="materialLedger">حركة المادة</button>
     </div>
     <div class="card" id="stockBalances">
@@ -1250,16 +1249,6 @@ body.sr-program .login-logo img{
         </div>
       </div>
       <div id="stockBalancesTable"></div>
-    </div>
-    <div class="card rollout-work" id="rolloutUsage" style="display:none">
-      <div class="top" style="margin-bottom:12px">
-        <div>
-          <h3>Rollout Usage</h3>
-          <p>مقارنة المواد المصروفة للـ MR مع الاستهلاك المسجل في Daily Progress حسب المنطقة.</p>
-        </div>
-        <button class="btn soft" onclick="refreshWarehouse()">تحديث</button>
-      </div>
-      <div id="rolloutUsageTable"></div>
     </div>
     <div class="card" id="materialLedger" style="display:none">
       <div class="top" style="margin-bottom:12px">
@@ -1898,7 +1887,7 @@ await loadWarehouse();
 }catch(e){toast(e.message)}
 }
 async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
-function setBalanceTab(tab='stockBalances',persist=true){document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));if(document.getElementById('stockBalances'))stockBalances.style.display=tab==='stockBalances'?'block':'none';if(document.getElementById('rolloutUsage'))rolloutUsage.style.display=tab==='rolloutUsage'?'block':'none';if(document.getElementById('materialLedger'))materialLedger.style.display=tab==='materialLedger'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(persist)saveUiState({balanceTab:tab})}
+function setBalanceTab(tab='stockBalances',persist=true){if(tab==='rolloutUsage')tab='stockBalances';document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));if(document.getElementById('stockBalances'))stockBalances.style.display=tab==='stockBalances'?'block':'none';if(document.getElementById('materialLedger'))materialLedger.style.display=tab==='materialLedger'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(persist)saveUiState({balanceTab:tab})}
 function setMrMode(mode='mrForm',persist=true){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.toggle('active',x.dataset.mrMode===mode));document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===mode?'block':'none');if(mode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}if(mode==='returnForm'){renderReturnLines();renderReturnsTable()}if(persist)saveUiState({mrMode:mode})}
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.program)switchProgram(b.dataset.program);else switchView(b.dataset.view)}));
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
@@ -1996,7 +1985,7 @@ function rolloutReportHtml(area){const areaKey=normalizeText(area);const isAll=a
 function resolveRolloutAreaValue(value,optionsList){const wanted=normalizeText(canonicalRolloutReportArea(value));return optionsList.find(option=>normalizeText(canonicalRolloutReportArea(option))===wanted)||''}
 function renderRolloutReport(){const selects=['rolloutReportArea','rolloutDailyReportArea'].map(id=>document.getElementById(id)).filter(Boolean);if(!selects.length)return;const areas=rolloutReportAreas();const optionsList=areas.length?['All Areas',...areas]:[];if(!optionsList.length){selects.forEach(select=>select.innerHTML='<option value="">No areas</option>');selectedRolloutReportArea='';return}const resolved=resolveRolloutAreaValue(selectedRolloutReportArea,optionsList);selectedRolloutReportArea=resolved||optionsList[0];const options=optionsList.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('');selects.forEach(select=>{select.innerHTML=options;select.value=selectedRolloutReportArea})}
 function setRolloutReportArea(value){selectedRolloutReportArea=value||'All Areas';if(document.querySelector('.view.active')?.id==='rolloutDaily')renderRolloutDailyProgress();else renderRolloutReport()}
-function renderRolloutUsage(){renderRolloutReport();const rows=wh.rolloutUsage||[];if(!rows.length){document.getElementById('rolloutUsageTable').innerHTML=`<div class="empty">لا توجد بيانات MR للمقارنة. Rollout records loaded: ${fmt(wh.rolloutRecords)}</div>`;return}document.getElementById('rolloutUsageTable').innerHTML=rowsTable([['المنطقة','area'],['Site Address','site_address'],['المادة','material'],['SKU','sku'],['MR Issued','mr_issued_qty',(v)=>fmt(v)],['Rollout Used','rollout_used_qty',(v)=>fmt(v)],['Remaining','remaining_after_rollout',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['Match','usage_match',(v)=>rolloutMatchLabel(v)],['Receiver','technician'],['Last MR','last_mr']],rows)}
+function renderRolloutUsage(){renderRolloutReport()}
 async function downloadRolloutReportPdf(selectId='rolloutDailyReportArea'){const select=document.getElementById(selectId)||document.getElementById('rolloutReportArea');if(select)selectedRolloutReportArea=select.value;renderRolloutReport();if(!selectedRolloutReportArea){toast('اختر منطقة أولاً');return}const holder=document.createElement('div');holder.style.position='fixed';holder.style.left='-10000px';holder.style.top='0';holder.style.background='#fff';holder.innerHTML=rolloutReportHtml(selectedRolloutReportArea);document.body.appendChild(holder);const el=holder.querySelector('.rollout-report-sheet');try{await waitForImages(el);const name=`Rollout-Progress-${String(selectedRolloutReportArea||'Area').replace(/[^\w\u0600-\u06FF-]+/g,'_')}.pdf`;await downloadSinglePagePdf(el,name);toast('تم تنزيل تقرير Rollout PDF صفحة واحدة')}catch(e){console.error(e);toast('تعذر تنزيل PDF: '+(e.message||'استخدم الطباعة ثم Save as PDF'))}finally{holder.remove()}}
 function fieldEntryCodeType(){const item=normalizeText(document.getElementById('feItem')?.value||'');if(item.includes('accessor'))return 'accessory';return item.includes('cable')?'cable':'box'}
 function fieldEntryToggle(btn){btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');fieldEntryRememberLastEntry()}
