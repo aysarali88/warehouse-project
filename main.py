@@ -2482,7 +2482,7 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
     return normalize_usage_key(row.created_by) == viewer_key
 
 
-def canonical_mr_history_area(value: str) -> str:
+def canonical_area_name(value: str) -> str:
     text_value = str(value or "").strip()
     key = normalize_usage_key(text_value)
     if key in {"haydamascus", "haydemascus", "haydemashq"}:
@@ -2494,6 +2494,10 @@ def canonical_mr_history_area(value: str) -> str:
     if key in {"hayandalus", "hayalandalus", "hayalandalusz2", "hayalandaluszone2"}:
         return "Hay Al Andalus Z2"
     return text_value
+
+
+def canonical_mr_history_area(value: str) -> str:
+    return canonical_area_name(value)
 
 
 def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
@@ -4382,53 +4386,92 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
 def list_rollout_material_usage(request: Request, db: Session = Depends(db_session), force: bool = False, program: str = DEFAULT_PROGRAM):
     if is_single_ran(program):
         return {"success": True, "usage": [], "rollout_records": 0, "rollout_source": "disabled"}
+    program_key = normalize_program(program)
     rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
-    rollout_area_usage: dict[tuple[str, str], float] = {}
-    rollout_material_usage: dict[str, float] = {}
+    grouped: dict[tuple[str, str], dict] = {}
+
+    def usage_row(area: str, material_key: str, material: str = "", sku: str = "") -> dict:
+        key = (area, material_key)
+        if key not in grouped:
+            grouped[key] = {
+                "area": area,
+                "material": material or material_key,
+                "sku": sku,
+                "mr_issued_qty": 0.0,
+                "rollout_used_qty": 0.0,
+                "warehouses": set(),
+            }
+        row = grouped[key]
+        if material and not row["material"]:
+            row["material"] = material
+        if sku and not row["sku"]:
+            row["sku"] = sku
+        return row
+
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    requisitions_query = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product))
+        .filter(MaterialRequisition.program == program_key, MaterialRequisition.status.in_(["issued", "signed"]))
+        .order_by(MaterialRequisition.id.asc())
+    )
+    if allowed is not None:
+        requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    for requisition in requisitions_query.all():
+        area = canonical_area_name(requisition.site_id or requisition.site_address)
+        if not area:
+            continue
+        for item in requisition.items:
+            qty = float(item.quantity or 0)
+            material = product_display_name(item.product) if item.product else str(item.description or "")
+            material_key = canonical_material_key(material or (item.product.sku if item.product else ""))
+            if qty <= 0 or not material_key:
+                continue
+            row = usage_row(area, material_key, material, item.product.sku if item.product else item.model)
+            row["mr_issued_qty"] += qty
+            if requisition.warehouse and requisition.warehouse.name:
+                row["warehouses"].add(requisition.warehouse.name)
+
     for record in rollout_rows:
-        area = str(record.get("Area") or "").strip()
+        area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
         material = str(record.get("material type") or record.get("item") or "").strip()
         if not area or not material:
             continue
+        status = normalize_usage_key(str(record.get("status") or record.get("staus") or ""))
+        if status and status not in {"done", "completed", "installed"}:
+            continue
         actual = safe_float(record.get("actual"))
         material_key = canonical_material_key(material)
-        key = (normalize_usage_key(area), material_key)
-        rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
-        rollout_material_usage[material_key] = rollout_material_usage.get(material_key, 0) + actual
-
-    mr_usage = list_technician_material_usage(request, program, db)["usage"]
-    rows = []
-    for row in mr_usage:
-        material = row["material"]
-        issued = row["mr_issued_qty"] or 0
-        if issued <= 0:
+        if actual <= 0 or not material_key:
             continue
-        material_key = canonical_material_key(material)
-        area_used = sum(
-            rollout_area_usage.get((area_key, material_key), 0)
-            for area_key in area_usage_keys(row.get("site_id", ""), row.get("site_address", ""))
-        )
-        material_used = rollout_material_usage.get(material_key, 0)
-        used = min(area_used, issued)
-        extra_used = max(area_used - issued, 0)
-        remaining = max(issued - used, 0)
-        if area_used > issued:
+        usage_row(area, material_key, material)["rollout_used_qty"] += actual
+
+    rows = []
+    for row in grouped.values():
+        issued = float(row["mr_issued_qty"] or 0)
+        installed = float(row["rollout_used_qty"] or 0)
+        difference = issued - installed
+        if installed > issued:
             usage_match = "over_mr"
-        elif area_used:
+        elif installed:
             usage_match = "area"
         else:
-            usage_match = "area_not_found" if material_used else "none"
+            usage_match = "none"
         rows.append(
             {
-                **row,
-                "rollout_used_qty": used,
-                "rollout_actual_qty": area_used,
-                "rollout_extra_qty": extra_used,
-                "remaining_after_rollout": remaining,
-                "usage_percent": (used / issued * 100) if issued else 0,
+                "area": row["area"],
+                "material": row["material"],
+                "sku": row["sku"],
+                "warehouse": ", ".join(sorted(row["warehouses"])),
+                "mr_issued_qty": issued,
+                "rollout_used_qty": installed,
+                "rollout_actual_qty": installed,
+                "remaining_after_rollout": difference,
+                "usage_percent": (installed / issued * 100) if issued else 0,
                 "usage_match": usage_match,
             }
         )
+    rows.sort(key=lambda row: (row["area"], row["material"], row["sku"]))
     return {"success": True, "usage": rows, "rollout_records": len(rollout_rows), "rollout_source": rollout_source}
 
 
