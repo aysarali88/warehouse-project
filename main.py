@@ -2449,6 +2449,18 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
     return normalize_usage_key(row.created_by) == viewer_key
 
 
+def canonical_mr_history_area(value: str) -> str:
+    text_value = str(value or "").strip()
+    key = normalize_usage_key(text_value)
+    if key in {"maqawba", "magawba"}:
+        return "Maqawba"
+    if key in {"hayalandalusz3", "hayalandaluszone3"}:
+        return "Hay Al Andalus Z3"
+    if key in {"hayandalus", "hayalandalus", "hayalandalusz2", "hayalandaluszone2"}:
+        return "Hay Al Andalus Z2"
+    return text_value
+
+
 def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
     item_count = len(row.items or [])
     total_quantity = sum(float(item.quantity or 0) for item in row.items)
@@ -2460,7 +2472,7 @@ def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
         "creation_date": row.creation_date,
         "warehouse": row.warehouse.name if row.warehouse else "",
         "warehouse_id": row.warehouse_id,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "requester_name": row.requester_name,
         "team_leader": row.team_leader,
@@ -2501,7 +2513,7 @@ def requisition_history_payload(
     visible_rows = [row for row in rows if user_can_view_requisition(row, viewer, role)]
     options = {
         "warehouses": sorted({str(row.warehouse.name if row.warehouse else "").strip() for row in visible_rows if str(row.warehouse.name if row.warehouse else "").strip()}),
-        "areas": sorted({str(row.site_id or "").strip() for row in visible_rows if str(row.site_id or "").strip()}),
+        "areas": sorted({canonical_mr_history_area(row.site_id) for row in visible_rows if str(row.site_id or "").strip()}),
         "technicians": sorted({str(row.team_leader or "").strip() for row in visible_rows if str(row.team_leader or "").strip()}),
         "requesters": sorted({str(row.requester_name or "").strip() for row in visible_rows if str(row.requester_name or "").strip()}),
         "statuses": sorted({str(row.status or "").strip() for row in visible_rows if str(row.status or "").strip()}),
@@ -2516,7 +2528,7 @@ def requisition_history_payload(
     for row in visible_rows:
         if not match_filter(warehouse, row.warehouse.name if row.warehouse else ""):
             continue
-        if not match_filter(area, row.site_id):
+        if not match_filter(area, canonical_mr_history_area(row.site_id)):
             continue
         if not match_filter(technician, row.team_leader):
             continue
