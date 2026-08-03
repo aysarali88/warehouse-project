@@ -3087,6 +3087,99 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
     }
 
 
+@app.post("/api/warehouse/rollout-field-entry/hub-accessories")
+def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Requester", "Admin")
+
+    submission_key = str(first_value(data, "submission_key", default="") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{16,128}", submission_key):
+        raise HTTPException(status_code=400, detail="Invalid accessory submission key")
+
+    area = str(first_value(data, "Area", "area", default="") or "").strip()
+    xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default="") or "").strip()
+    hub_code = str(first_value(data, "hub_code", "hub", default="") or "").strip()
+    if not area or not xbox or not hub_code:
+        raise HTTPException(status_code=400, detail="Select Area, Related to XBOX, and Hub")
+
+    hub_matches = [
+        row
+        for row in rollout_reference_matches(area, xbox, hub_code, "box")
+        if "hub" in rollout_norm(row.get("box_type") or "")
+    ]
+    if not hub_matches:
+        raise HTTPException(status_code=400, detail="Selected Hub is not listed for this Area / XBOX")
+
+    allowed_materials = {
+        rollout_norm("S' type clamp"): "S' type clamp",
+        rollout_norm("Metal wedge clamping"): "Metal wedge clamping",
+        rollout_norm("Plastic Cable Storing Assembly"): "Plastic Cable Storing Assembly",
+        rollout_norm("Plum ring hook"): "Plum ring hook",
+        rollout_norm("Pole mounting assembly"): "Pole mounting assembly",
+    }
+    requested = first_value(data, "accessories", default=[])
+    if not isinstance(requested, list):
+        raise HTTPException(status_code=400, detail="Accessories must be a list")
+    accessories: list[tuple[str, float]] = []
+    seen_materials: set[str] = set()
+    for entry in requested:
+        if not isinstance(entry, dict):
+            continue
+        material = allowed_materials.get(rollout_norm(first_value(entry, "material", default="")))
+        quantity = safe_float(first_value(entry, "quantity", "actual", default=0))
+        if not material or quantity <= 0 or material in seen_materials:
+            continue
+        seen_materials.add(material)
+        accessories.append((material, quantity))
+    if not accessories:
+        raise HTTPException(status_code=400, detail="Enter at least one accessory quantity")
+
+    saved_rows: list[RolloutRecord] = []
+    entry_time = datetime.now(TRIPOLI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    user_notes = str(first_value(data, "Notes", "notes", default="") or "").strip()
+    hub_note = f"Hub: {hub_code}"
+    notes = f"{hub_note} | {user_notes}" if user_notes else hub_note
+    with ROLLOUT_SYNC_LOCK:
+        counter = rollout_entry_counter(db)
+        for index, (material, quantity) in enumerate(accessories, start=1):
+            item_submission_key = f"{submission_key}-ha-{index}"
+            existing = db.query(RolloutRecord).filter(RolloutRecord.submission_key == item_submission_key).first()
+            if existing is not None:
+                saved_rows.append(existing)
+                continue
+            payload = normalize_rollout_row(data)
+            payload.update(
+                {
+                    "ID": allocate_rollout_entry_id(db, counter),
+                    "submission_key": item_submission_key,
+                    "Related to XBOX": rollout_xbox_key(xbox),
+                    "item": "Hub Accessories",
+                    "material type": material,
+                    "actual": quantity,
+                    "stock remaining": 0,
+                    "entry time": entry_time,
+                    "cable code": "",
+                    "box code": "",
+                    "staus": str(first_value(data, "staus", "status", default="Done") or "Done"),
+                    "Notes": notes,
+                }
+            )
+            row, _ = upsert_rollout_record(payload, db)
+            saved_rows.append(row)
+        db.commit()
+        clear_warehouse_cache()
+        clear_rollout_db_cache()
+        for row in saved_rows:
+            db.refresh(row)
+
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {
+        "success": True,
+        "message": "Hub accessories saved",
+        "records": [row_to_record(row) for row in saved_rows],
+        "summary": rollout_entry_summary(records),
+    }
+
+
 @app.patch("/api/warehouse/rollout-field-entry/{record_id}")
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
