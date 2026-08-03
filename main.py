@@ -3823,6 +3823,58 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     return {"success": True, "usage": usage_rows}
 
 
+@app.get("/api/warehouse/inventory-export.xlsx")
+def export_inventory_excel(request: Request, warehouse: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(program)
+    selected_warehouse = warehouse.strip()
+    rows = list_stock_usage(request, program_key, db)["usage"]
+    if selected_warehouse:
+        rows = [row for row in rows if row["warehouse"] == selected_warehouse]
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory"
+    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Usage %"])
+    for row in rows:
+        sheet.append(
+            [
+                row["warehouse"],
+                row["part_number"],
+                row["sku"],
+                row["product"],
+                row["unit"],
+                row["total_received"],
+                row["total_consumed"],
+                row["rollout_consumed_qty"],
+                row["wh_remaining"],
+                row["usage_percent"] / 100,
+            ]
+        )
+    for cell in sheet[1]:
+        cell.font = cell.font.copy(bold=True)
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.column_dimensions["A"].width = 22
+    sheet.column_dimensions["B"].width = 20
+    sheet.column_dimensions["C"].width = 18
+    sheet.column_dimensions["D"].width = 46
+    for column in ("E", "F", "G", "H", "I", "J"):
+        sheet.column_dimensions[column].width = 16
+    for cell in sheet["J"][1:]:
+        cell.number_format = "0.0%"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    suffix = re.sub(r"[^A-Za-z0-9_-]+", "-", selected_warehouse).strip("-") or "all-warehouses"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="inventory-{suffix}.xlsx"'},
+    )
+
+
 @app.get("/api/warehouse/technician-balances")
 def list_technician_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")

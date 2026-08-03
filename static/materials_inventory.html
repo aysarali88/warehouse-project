@@ -1230,9 +1230,12 @@ body.sr-program .login-logo img{
     <div class="card" id="stockBalances">
       <div class="top" style="margin-bottom:12px">
         <h3>مخزون المستودعات</h3>
-        <div class="field" style="min-width:220px">
-          <label>Filter WH</label>
-          <select id="stockWhFilter" onchange="renderWarehouse()"></select>
+        <div class="top" style="gap:8px">
+          <div class="field" style="min-width:220px">
+            <label>Filter WH</label>
+            <select id="stockWhFilter" onchange="renderWarehouse()"></select>
+          </div>
+          <button class="btn soft" type="button" onclick="exportInventoryExcel()">Excel</button>
         </div>
       </div>
       <div id="stockBalancesTable"></div>
@@ -1729,6 +1732,7 @@ const rolloutRows=[...wh.rolloutUsage].filter(r=>Number(r.mr_issued_qty)>0).sort
 const maxRollout=Math.max(...rolloutRows.map(r=>Number(r.rollout_used_qty||0)),1);
 document.getElementById('rolloutOverview').innerHTML=rolloutRows.length?`<div>${rolloutRows.map(r=>`<div class="chart-row"><b>${esc(r.area)}</b><div class="chart-track"><div class="chart-fill hot" style="width:${pct(r.rollout_used_qty,maxRollout)}%"></div></div><strong>${fmt(r.rollout_used_qty)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد استهلاك Rollout مطابق بعد</div>';
 }
+function exportInventoryExcel(){const q=authQueryParams();q.set('program',currentProgram);const warehouse=document.getElementById('stockWhFilter')?.value||'';if(warehouse)q.set('warehouse',warehouse);window.location.href='/api/warehouse/inventory-export.xlsx?'+q.toString()}
 function renderWarehouse(){renderExecutiveDashboard();animateDashboardSurface(document.getElementById('dashboard'));renderWorkflowQueues();
 const myMovements=(wh.movements||[]).filter(userOwnsMovement);
 const myAudit=(wh.audit||[]).filter(userOwnsAudit);
