@@ -2498,6 +2498,7 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
         "receiver_title": row.receiver_title,
         "receiver_date": row.receiver_date,
         "receiver_comment": row.receiver_comment,
+        "return_reason": row.return_reason,
         "status": row.status,
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else "",
