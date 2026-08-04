@@ -2660,6 +2660,7 @@ def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
                 "product_id": item.product_id,
                 "part_nbr": item.part_nbr,
                 "description": item.description,
+                "vendor": str(item.product.vendor or "").strip() if item.product else "",
                 "uom": item.uom,
                 "quantity": item.quantity,
                 "remark": item.remark,
