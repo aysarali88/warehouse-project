@@ -922,6 +922,33 @@ def notify_transfer_approved(row: MaterialTransfer, db: Session) -> None:
     )
 
 
+def notify_transfer_returned_for_edit(row: MaterialTransfer, db: Session) -> None:
+    from_name = row.from_warehouse.name if row.from_warehouse else ""
+    to_name = row.to_warehouse.name if row.to_warehouse else ""
+    notify_transfer_email(
+        row,
+        db,
+        requester_notification_emails(row, db),
+        f"Material Transfer {row.transfer_number} returned for edit",
+        [
+            "Hello,",
+            "",
+            "Your material transfer was returned for update.",
+            "",
+            f"Transfer No: {row.transfer_number}",
+            f"From Warehouse: {from_name or '-'}",
+            f"To Warehouse: {to_name or '-'}",
+            f"Return reason: {row.approver_comment or '-'}",
+            "Status: Returned for edit",
+            "",
+            "Please sign in to the warehouse system, update the transfer, and submit it again.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "transfer_returned_for_edit_email",
+    )
+
+
 def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
     warehouse_name = row.warehouse.name if row.warehouse else ""
     lines = [
@@ -5646,6 +5673,102 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
     db.refresh(row)
     notify_transfer_created(row, db)
     return {"success": True, "transfer_number": row.transfer_number, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/return-for-edit")
+def return_material_transfer_for_edit(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Approval")
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be returned for edit from status {row.status}")
+    comment = data.comment.strip()
+    if not comment:
+        raise HTTPException(status_code=400, detail="Return reason is required")
+    actor = request_actor(request)
+    row.approver_name = actor or row.approver_name
+    row.approver_title = data.title or row.approver_title
+    row.approver_date = local_today()
+    row.approver_comment = comment
+    row.status = "returned_for_edit"
+    log_audit(db, "return_material_transfer_for_edit", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
+    db.commit()
+    db.refresh(row)
+    notify_transfer_returned_for_edit(row, db)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/resubmit")
+def resubmit_material_transfer(transfer_id: int, data: MaterialTransferIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    role_key = normalize_usage_key(user.role)
+    if role_key not in {"admin", "management"} and normalize_usage_key(row.created_by) != normalize_usage_key(request_actor(request)):
+        raise HTTPException(status_code=403, detail="You can only resubmit your own material transfers")
+    if row.status != "returned_for_edit":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be edited from status {row.status}")
+    if role_key == "requester":
+        require_warehouse(db, data.from_warehouse_id, program_key)
+    else:
+        require_warehouse_access(request, db, data.from_warehouse_id, program_key)
+    require_warehouse(db, data.to_warehouse_id, program_key)
+    if data.from_warehouse_id == data.to_warehouse_id:
+        raise HTTPException(status_code=400, detail="From and To warehouse must be different")
+    if not data.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+
+    validated_items = []
+    for item in data.items:
+        product = require_product(db, item.product_id, program_key)
+        available = stock_balance(db, data.from_warehouse_id, item.product_id, program_key).quantity or 0
+        if available < item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {available}.",
+            )
+        validated_items.append((item, product))
+
+    row.transfer_date = data.transfer_date or local_today()
+    row.from_warehouse_id = data.from_warehouse_id
+    row.to_warehouse_id = data.to_warehouse_id
+    row.reference_no = data.reference_no.strip()
+    row.reason = data.reason.strip()
+    row.requester_name = request_actor(request)
+    row.requester_title = data.requester_title.strip()
+    row.approver_name = data.approver_name.strip()
+    row.approver_title = data.approver_title.strip()
+    row.approver_date = ""
+    row.approver_comment = ""
+    row.receiver_name = data.receiver_name.strip()
+    row.receiver_date = ""
+    row.receiver_comment = ""
+    row.status = "pending_approval"
+
+    db.query(MaterialTransferItem).filter(MaterialTransferItem.transfer_id == row.id).delete()
+    for index, (item, product) in enumerate(validated_items, start=1):
+        db.add(
+            MaterialTransferItem(
+                transfer_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=product_part_number(product.sku, product.part_number),
+                description=product_display_name(product),
+                uom=product.unit,
+                quantity=item.quantity,
+                remark=item.remark.strip(),
+            )
+        )
+
+    log_audit(db, "resubmit_material_transfer", "material_transfer", row.transfer_number, request_actor(request), data.model_dump())
+    db.commit()
+    db.refresh(row)
+    notify_transfer_created(row, db)
+    return {"success": True, "transfer": transfer_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
