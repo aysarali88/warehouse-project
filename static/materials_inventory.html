@@ -569,6 +569,8 @@ body.sr-program .login-logo img{
 .warehouse-ring-name{width:100%;color:rgba(245,250,255,.94);font-size:13px;font-weight:900;text-align:center;overflow-wrap:anywhere}
 .warehouse-ring-stock{color:rgba(191,218,237,.78);font-size:11px;font-weight:900}
 .fiber-map-pdf-page{width:1200px;background:#fff;color:#0a335d}.fiber-map-pdf-page header{border-bottom:2px solid #0b81b8;margin-bottom:14px;padding:0 0 12px}.fiber-map-pdf-page h1{margin:0;color:#0b4d95;font-size:28px}.fiber-map-pdf-page p{margin:5px 0 0;color:#38556f;font-size:14px;font-weight:700}.fiber-map-pdf-legend{display:flex;gap:18px;margin-top:10px;color:#38556f;font-size:12px;font-weight:800}.fiber-map-pdf-page .map-card{border:0;background:#fff}.fiber-map-pdf-page .fiber-map-svg{width:1200px;max-width:none;min-width:0}.fiber-map-svg .map-entry-target{cursor:pointer}.fiber-map-svg .map-entry-target:hover{filter:drop-shadow(0 0 5px rgba(11,129,184,.55))}
+#topStockOut .chart-row b{white-space:normal;line-height:1.25}
+#topStockOut .chart-row b small{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:800}
 </style>
 <style>
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1717,7 +1719,7 @@ document.getElementById('opsSnapshot').innerHTML=[
 ].map(x=>`<div class="workflow-pill ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
-document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.map(r=>`<div class="chart-row"><b title="${esc(r.product)}">${esc(r.product)}</b><div class="chart-track"><div class="chart-fill ${Number(r.usage_percent)>=60?'hot':''}" style="width:${pct(r.total_consumed,maxOut)}%"></div></div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد Stock Out بعد</div>';
+document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.map(r=>`<div class="chart-row"><b title="${esc(r.product)} · ${esc(r.warehouse)}">${esc(r.product)}<small>${esc(r.warehouse||'Unknown warehouse')}</small></b><div class="chart-track"><div class="chart-fill ${Number(r.usage_percent)>=60?'hot':''}" style="width:${pct(r.total_consumed,maxOut)}%"></div></div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد Stock Out بعد</div>';
 const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,stock:0,stockOut:0,rollout:0,remainingAfterRollout:0};const stock=Number(r.remaining||0);const stockOut=Number(r.total_consumed||0);const rollout=Number(r.rollout_consumed_qty||0);cur.stock+=stock;cur.stockOut+=stockOut;cur.rollout+=rollout;cur.remainingAfterRollout+=stock-rollout;byWh.set(r.warehouse,cur)});
 const whRows=[...byWh.values()].sort((a,b)=>b.stock-a.stock);
 const totalWarehouseStock=Math.max(whRows.reduce((sum,r)=>sum+Number(r.stock||0),0),1);
