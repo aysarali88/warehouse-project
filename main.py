@@ -112,6 +112,8 @@ def ensure_optional_columns(target_engine=engine):
         statements = [
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS part_number VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisition_items ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
@@ -159,6 +161,8 @@ def ensure_optional_columns(target_engine=engine):
         statements = [
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN part_number VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN vendor VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisition_items ADD COLUMN vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
@@ -217,6 +221,51 @@ PROGRAM_LABELS = {
     DEFAULT_PROGRAM: "FTTH",
     SINGLE_RAN_PROGRAM: "Single RAN",
 }
+
+
+def sync_single_ran_product_vendors():
+    for program_key, session_factory in all_sessionmakers():
+        if program_key != SINGLE_RAN_PROGRAM:
+            continue
+        db = session_factory()
+        try:
+            rows = (
+                db.query(Product, ReceiveOrder.supplier)
+                .join(ReceiveOrderItem, ReceiveOrderItem.product_id == Product.id)
+                .join(ReceiveOrder, ReceiveOrder.id == ReceiveOrderItem.receive_order_id)
+                .filter(Product.program == SINGLE_RAN_PROGRAM, ReceiveOrder.program == SINGLE_RAN_PROGRAM)
+                .order_by(ReceiveOrder.id.asc())
+                .all()
+            )
+            changed = 0
+            for product, supplier in rows:
+                vendor = str(supplier or "").strip()
+                if vendor and not str(product.vendor or "").strip():
+                    product.vendor = vendor
+                    changed += 1
+            requisition_items = (
+                db.query(MaterialRequisitionItem)
+                .join(MaterialRequisition, MaterialRequisition.id == MaterialRequisitionItem.requisition_id)
+                .join(Product, Product.id == MaterialRequisitionItem.product_id)
+                .filter(MaterialRequisition.program == SINGLE_RAN_PROGRAM)
+                .all()
+            )
+            for item in requisition_items:
+                vendor = str(item.product.vendor or "").strip() if item.product else ""
+                if vendor and not str(item.vendor or "").strip():
+                    item.vendor = vendor
+                    changed += 1
+            if changed:
+                db.commit()
+                logger.info("Single RAN product vendors populated for %s materials", changed)
+        except Exception:
+            db.rollback()
+            logger.exception("Single RAN product vendor population failed")
+        finally:
+            db.close()
+
+
+sync_single_ran_product_vendors()
 VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
 DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2")
 
@@ -1077,6 +1126,7 @@ class ProductIn(BaseModel):
     category: str = ""
     name: str
     item_detail: str = ""
+    vendor: str = ""
     qr_code: str = ""
     unit: str = "PCS"
     tracking_type: Literal["bulk", "serialized"] = "bulk"
@@ -1155,6 +1205,7 @@ class MaterialRequisitionItemIn(BaseModel):
     part_nbr: str = ""
     model: str = ""
     description: str
+    vendor: str = ""
     uom: str = "PCS"
     quantity: float = Field(gt=0)
     remark: str = ""
@@ -2001,6 +2052,7 @@ def product_to_dict(row: Product) -> dict:
         "category": row.category,
         "name": material_display_name(row.name, row.sku),
         "item_detail": row.item_detail,
+        "vendor": row.vendor,
         "qr_code": row.qr_code,
         "unit": row.unit,
         "tracking_type": row.tracking_type,
@@ -2167,6 +2219,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
                 "part_nbr": item.part_nbr,
                 "model": item.model,
                 "description": item.description,
+                "vendor": item.vendor,
                 "uom": item.uom,
                 "quantity": item.quantity,
                 "remark": item.remark,
@@ -3788,6 +3841,7 @@ def create_product(data: ProductIn, request: Request, db: Session = Depends(db_s
         category=data.category.strip(),
         name=name,
         item_detail=data.item_detail.strip(),
+        vendor=data.vendor.strip() if program_key == SINGLE_RAN_PROGRAM else "",
         qr_code=data.qr_code.strip(),
         unit=data.unit.strip() or "PCS",
         tracking_type=data.tracking_type,
@@ -5134,6 +5188,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
     db.add(row)
     db.flush()
     for index, item in enumerate(items, start=1):
+        product = db.get(Product, item.product_id) if item.product_id else None
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -5142,6 +5197,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
                 part_nbr=item.part_nbr,
                 model=item.model,
                 description=item.description,
+                vendor=str(product.vendor or "").strip() if program_key == SINGLE_RAN_PROGRAM and product else "",
                 uom=item.uom,
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5406,6 +5462,16 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key) if item.product_id else None
+        item_vendor = item.vendor.strip()
+        if program_key == SINGLE_RAN_PROGRAM:
+            if product is None:
+                raise HTTPException(status_code=400, detail="Choose a Single RAN material from the search results")
+            product_vendor = str(product.vendor or "").strip()
+            if not item_vendor:
+                raise HTTPException(status_code=400, detail=f"Vendor is required for {product_display_name(product)}")
+            if product_vendor and item_vendor.casefold() != product_vendor.casefold():
+                raise HTTPException(status_code=400, detail=f"Vendor does not match {product_display_name(product)}")
+            item_vendor = product_vendor or item_vendor
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -5414,6 +5480,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
                 part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
+                vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5483,6 +5550,16 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key) if item.product_id else None
+        item_vendor = item.vendor.strip()
+        if program_key == SINGLE_RAN_PROGRAM:
+            if product is None:
+                raise HTTPException(status_code=400, detail="Choose a Single RAN material from the search results")
+            product_vendor = str(product.vendor or "").strip()
+            if not item_vendor:
+                raise HTTPException(status_code=400, detail=f"Vendor is required for {product_display_name(product)}")
+            if product_vendor and item_vendor.casefold() != product_vendor.casefold():
+                raise HTTPException(status_code=400, detail=f"Vendor does not match {product_display_name(product)}")
+            item_vendor = product_vendor or item_vendor
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -5491,6 +5568,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
                 part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
+                vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5907,6 +5985,8 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
 
     for item in data.items:
         product = require_product(db, item.product_id, program_key)
+        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+            product.vendor = data.supplier.strip()
         validate_serial_count(product, item.quantity, item.serial_numbers)
         stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
 
@@ -5974,6 +6054,7 @@ def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = 
             category=data.category.strip(),
             name=name,
             item_detail=name,
+            vendor=data.supplier.strip() if program_key == SINGLE_RAN_PROGRAM else "",
             qr_code=data.qr_code.strip(),
             unit=data.unit.strip() or "PCS",
             tracking_type="bulk",
@@ -5988,6 +6069,8 @@ def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = 
         product.unit = data.unit.strip() or product.unit or "PCS"
         product.qr_code = data.qr_code.strip() or product.qr_code
         product.category = data.category.strip() or product.category
+        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+            product.vendor = data.supplier.strip()
 
     order = ReceiveOrder(
         program=program_key,
