@@ -325,6 +325,28 @@ body.sr-program .logo{
   line-height:1.25;
   color:#fff;
 }
+.program-logos{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:18px;
+  width:min(390px,100%);
+  margin:0 auto;
+}
+.program-logos img{
+  display:block;
+  height:54px;
+  object-fit:contain;
+  background:transparent;
+}
+.program-logos .program-gtc-logo{width:170px}
+.program-logos .program-next-logo{width:175px}
+@media(max-width:480px){
+  .program-logos{gap:10px}
+  .program-logos img{height:46px}
+  .program-logos .program-gtc-logo{width:145px}
+  .program-logos .program-next-logo{width:150px}
+}
 .program-choice{
   display:grid;
   gap:10px;
@@ -785,7 +807,10 @@ body.sr-program .login-logo img{
 <div class="program-screen" id="programScreen">
   <div class="program-particles" aria-hidden="true"></div>
   <div class="program-card">
-    <div class="login-logo"><img data-program-logo src="/static/assets/gtc-logo.png" alt="Global Technology Company"></div>
+    <div class="program-logos">
+      <img class="program-gtc-logo" src="/static/assets/gtc-logo.png" alt="Global Technology Company">
+      <img class="program-next-logo" src="/static/assets/next-logo-cropped.png" alt="NEXT Generation Company">
+    </div>
     <h2>Network Operations Portal</h2>
     <div class="program-choice">
       <button onclick="chooseProgramBeforeLogin('FTTH')">FTTH Operations Center</button>
