@@ -1789,7 +1789,7 @@ document.getElementById('warehousesTable').innerHTML=rowsTable([['الاسم','n
 document.getElementById('techniciansTable').innerHTML=rowsTable([['الاسم','name'],['الهاتف','phone'],['الحالة','status']],wh.technicians);
 document.getElementById('productsTable').innerHTML=rowsTable([['Part #','part_number'],['SKU','sku'],['الاسم','name'],['الوحدة','unit'],['التتبع','tracking_type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['إجراء','id',(v,r)=>productActions(r)]],wh.products);
 renderReceiveHistory();
-document.getElementById('stockBalancesTable').innerHTML=rowsTable([['WH','warehouse'],['Part #','part_number'],['SKU','sku'],['Item','product'],['Unit','unit'],['Total Stock','total_received',(v)=>fmt(v)],['Issued WH','total_consumed',(v)=>fmt(v)],['Rollout Used','rollout_consumed_qty',(v)=>fmt(v)],['WH Remaining','wh_remaining',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['History','product_id',(v,r)=>`<button class="btn soft" onclick="openMaterialLedger(${Number(v||0)},'${esc(r.sku||'')}')">History</button>`]],stockUsageRows);
+document.getElementById('stockBalancesTable').innerHTML=rowsTable([['WH','warehouse'],['Part #','part_number'],['SKU','sku'],['Item','product'],['Unit','unit'],['Total Stock','total_received',(v)=>fmt(v)],['Issued WH','total_consumed',(v)=>fmt(v)],['Rollout Used','rollout_consumed_qty',(v)=>fmt(v)],['WH Remaining','wh_remaining',(v)=>fmt(v)],['Reserved Pending','reserved_pending',(v)=>fmt(v)],['Available','available_stock',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['History','product_id',(v,r)=>`<button class="btn soft" onclick="openMaterialLedger(${Number(v||0)},'${esc(r.sku||'')}')">History</button>`]],stockUsageRows);
 renderMaterialLedger();
 renderRolloutUsage();
 renderRolloutDailyProgress();
@@ -1939,7 +1939,7 @@ function productOptionHtml(selected=''){
   const selectedWarehouse=document.getElementById('mrWarehouse')?.value||'';
   return '<option value="">اختر المادة</option>'+rows.map(p=>{
     const bal=wh.stockBalances.find(b=>String(b.warehouse_id)===String(selectedWarehouse)&&String(b.product_id)===String(p.id));
-    const stockText=selectedWarehouse?` - available ${fmt((bal&&bal.quantity)||0)}`:'';
+    const stockText=selectedWarehouse?` - available ${fmt((bal&&bal.available_quantity)||0)}`:'';
     return `<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})${stockText}</option>`;
   }).join('')+'<option value="">Manual item</option>'
 }
@@ -2013,7 +2013,7 @@ function openSrMaterialPicker(input){
 }
 document.addEventListener('click',event=>{const menu=document.getElementById('srMaterialPickerMenu');if(menu&&!menu.contains(event.target)&&event.target!==srMaterialPickerInput)closeSrMaterialPicker()});
 window.addEventListener('resize',()=>closeSrMaterialPicker());
-function warehouseBalanceQty(warehouseId,productId){const row=(wh.stockBalances||[]).find(b=>String(b.warehouse_id)===String(warehouseId)&&String(b.product_id)===String(productId));return Number(row?.quantity||0)}
+function warehouseBalanceQty(warehouseId,productId){const row=(wh.stockBalances||[]).find(b=>String(b.warehouse_id)===String(warehouseId)&&String(b.product_id)===String(productId));return Number(row?.available_quantity??row?.quantity??0)}
 function transferProductOptionHtml(selected=''){
   const rows=[...wh.products].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const fromWarehouse=document.getElementById('trFromWarehouse')?.value||'';
@@ -2549,7 +2549,7 @@ async function saveMr(){
       if(!item.product_id){toast('Choose material from the list, not Manual item');return}
       if(isSingleRan()&&!item.vendor){toast('Choose Vendor for '+item.description);return}
       const bal=wh.stockBalances.find(b=>String(b.warehouse_id)===String(mrWarehouse.value)&&String(b.product_id)===String(item.product_id));
-      const available=Number((bal&&bal.quantity)||0);
+      const available=Number((bal&&bal.available_quantity)||0);
       if(available<Number(item.quantity||0)){toast('Insufficient stock: '+item.description+' in '+warehouseName+' available '+available);return}
     }
     if(!mrReceiverName.value.trim())mrReceiverName.value='Mustafa';

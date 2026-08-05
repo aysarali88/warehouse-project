@@ -1494,6 +1494,115 @@ def stock_balance(db: Session, warehouse_id: int, product_id: int, program: str 
     return row
 
 
+def locked_stock_balance(db: Session, warehouse_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> StockBalance:
+    program_key = normalize_program(program)
+    stock_balance(db, warehouse_id, product_id, program_key)
+    db.flush()
+    return (
+        db.query(StockBalance)
+        .filter(
+            StockBalance.program == program_key,
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.product_id == product_id,
+        )
+        .with_for_update()
+        .one()
+    )
+
+
+RESERVING_REQUISITION_STATUSES = {"pending_approval", "approved", "signed"}
+RESERVING_TRANSFER_STATUSES = {"pending_approval", "approved"}
+
+
+def reserved_stock_quantities(
+    db: Session,
+    program: str = DEFAULT_PROGRAM,
+    exclude_requisition_id: int | None = None,
+    exclude_transfer_id: int | None = None,
+) -> dict[tuple[int, int], float]:
+    """Return quantities held by open MR and outbound TR workflows."""
+    program_key = normalize_program(program)
+    reserved: dict[tuple[int, int], float] = {}
+
+    requisitions = (
+        db.query(MaterialRequisition)
+        .options(selectinload(MaterialRequisition.items))
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.status.in_(RESERVING_REQUISITION_STATUSES),
+        )
+        .all()
+    )
+    for requisition in requisitions:
+        if exclude_requisition_id and requisition.id == exclude_requisition_id:
+            continue
+        for item in requisition.items:
+            if item.product_id:
+                key = (requisition.warehouse_id, item.product_id)
+                reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+
+    transfers = (
+        db.query(MaterialTransfer)
+        .options(selectinload(MaterialTransfer.items))
+        .filter(
+            MaterialTransfer.program == program_key,
+            MaterialTransfer.status.in_(RESERVING_TRANSFER_STATUSES),
+        )
+        .all()
+    )
+    for transfer in transfers:
+        if exclude_transfer_id and transfer.id == exclude_transfer_id:
+            continue
+        for item in transfer.items:
+            key = (transfer.from_warehouse_id, item.product_id)
+            reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+
+    return reserved
+
+
+def validate_reservable_stock(
+    db: Session,
+    warehouse_id: int,
+    items: list,
+    program: str = DEFAULT_PROGRAM,
+    exclude_requisition_id: int | None = None,
+    exclude_transfer_id: int | None = None,
+) -> None:
+    """Prevent a new or edited workflow from consuming stock already reserved elsewhere."""
+    program_key = normalize_program(program)
+    requested: dict[int, float] = {}
+    for item in items:
+        product_id = int(getattr(item, "product_id", 0) or 0)
+        if product_id:
+            requested[product_id] = requested.get(product_id, 0) + float(getattr(item, "quantity", 0) or 0)
+
+    # Lock each affected balance in a stable order so simultaneous requests cannot over-reserve it.
+    balances: dict[int, StockBalance] = {}
+    for product_id in sorted(requested):
+        balances[product_id] = locked_stock_balance(db, warehouse_id, product_id, program_key)
+
+    reserved = reserved_stock_quantities(
+        db,
+        program_key,
+        exclude_requisition_id=exclude_requisition_id,
+        exclude_transfer_id=exclude_transfer_id,
+    )
+    for product_id, requested_qty in requested.items():
+        balance = balances[product_id]
+        held = float(reserved.get((warehouse_id, product_id), 0) or 0)
+        available = float(balance.quantity or 0) - held
+        if requested_qty > available + 1e-9:
+            product = require_product(db, product_id, program_key)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Insufficient available stock for {product_display_name(product)}. "
+                    f"Requested {requested_qty:g}, stock {float(balance.quantity or 0):g}, "
+                    f"reserved {held:g}, available {max(available, 0):g}."
+                ),
+            )
+
+
 def technician_balance(db: Session, technician_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> TechnicianBalance:
     program_key = normalize_program(program)
     row = (
@@ -2088,7 +2197,9 @@ def product_to_dict(row: Product) -> dict:
     }
 
 
-def balance_to_dict(row: StockBalance) -> dict:
+def balance_to_dict(row: StockBalance, reserved_quantity: float = 0) -> dict:
+    quantity = float(row.quantity or 0)
+    reserved = float(reserved_quantity or 0)
     return {
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "warehouse_id": row.warehouse_id,
@@ -2098,7 +2209,9 @@ def balance_to_dict(row: StockBalance) -> dict:
         "part_number": product_part_number(row.product.sku if row.product else "", row.product.part_number if row.product else ""),
         "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
-        "quantity": row.quantity,
+        "quantity": quantity,
+        "reserved_quantity": reserved,
+        "available_quantity": max(quantity - reserved, 0),
     }
 
 
@@ -2288,7 +2401,7 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
         if not item.product_id:
             raise HTTPException(status_code=400, detail=f"MR line {item.line_no} is not linked to a product")
         product = require_product(db, item.product_id, program_key)
-        balance = stock_balance(db, row.warehouse_id, item.product_id, program_key)
+        balance = locked_stock_balance(db, row.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
             material_name = product_display_name(product) or product.sku or f"product {product.id}"
@@ -3949,7 +4062,11 @@ def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     if allowed is not None:
         query = query.filter(StockBalance.warehouse_id.in_(allowed))
     rows = query.all()
-    return {"success": True, "balances": [balance_to_dict(r) for r in rows]}
+    reserved = reserved_stock_quantities(db, program_key)
+    return {
+        "success": True,
+        "balances": [balance_to_dict(r, reserved.get((r.warehouse_id, r.product_id), 0)) for r in rows],
+    }
 
 
 @app.get("/api/warehouse/stock-usage")
@@ -3965,6 +4082,7 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     if allowed is not None:
         balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
     balances = balances_query.all()
+    reserved_quantities = reserved_stock_quantities(db, program_key)
     received_totals = {
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
@@ -4017,6 +4135,8 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
         total_consumed = consumed_totals.get(key, 0)
         total_adjustment = adjustment_totals.get(key, 0)
         remaining = balance.quantity or 0
+        reserved_pending = float(reserved_quantities.get(key, 0) or 0)
+        available_stock = max(float(remaining or 0) - reserved_pending, 0)
         display_total = remaining + total_consumed
         denominator = display_total if display_total > 0 else total_received
         usage_percent = round((total_consumed / denominator) * 100, 2) if denominator else 0
@@ -4041,6 +4161,8 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
                 "total_adjustment": total_adjustment,
                 "remaining": remaining,
                 "wh_remaining": remaining,
+                "reserved_pending": reserved_pending,
+                "available_stock": available_stock,
                 "usage_percent": usage_percent,
                 "rollout_consumed_qty": rollout_consumed,
                 "remaining_after_rollout": remaining_after_rollout,
@@ -4062,7 +4184,7 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Inventory"
-    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Usage %"])
+    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Reserved Pending", "Available", "Usage %"])
     for row in rows:
         sheet.append(
             [
@@ -4075,6 +4197,8 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
                 row["total_consumed"],
                 row["rollout_consumed_qty"],
                 row["wh_remaining"],
+                row["reserved_pending"],
+                row["available_stock"],
                 row["usage_percent"] / 100,
             ]
         )
@@ -4086,9 +4210,9 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     sheet.column_dimensions["B"].width = 20
     sheet.column_dimensions["C"].width = 18
     sheet.column_dimensions["D"].width = 46
-    for column in ("E", "F", "G", "H", "I", "J"):
+    for column in ("E", "F", "G", "H", "I", "J", "K", "L"):
         sheet.column_dimensions[column].width = 16
-    for cell in sheet["J"][1:]:
+    for cell in sheet["L"][1:]:
         cell.number_format = "0.0%"
 
     output = io.BytesIO()
@@ -5455,6 +5579,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.warehouse_id, data.items, program_key)
 
     order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
@@ -5550,6 +5675,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.warehouse_id, data.items, program_key, exclude_requisition_id=row.id)
 
     row.creation_date = data.creation_date
     row.warehouse_id = data.warehouse_id
@@ -5627,6 +5753,7 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
         raise HTTPException(status_code=400, detail="From and To warehouse must be different")
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.from_warehouse_id, data.items, program_key)
 
     row = MaterialTransfer(
         program=program_key,
@@ -5649,12 +5776,6 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
 
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key)
-        available = stock_balance(db, data.from_warehouse_id, item.product_id, program_key).quantity or 0
-        if available < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {available}.",
-            )
         db.add(
             MaterialTransferItem(
                 transfer_id=row.id,
@@ -5721,16 +5842,11 @@ def resubmit_material_transfer(transfer_id: int, data: MaterialTransferIn, reque
         raise HTTPException(status_code=400, detail="From and To warehouse must be different")
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.from_warehouse_id, data.items, program_key, exclude_transfer_id=row.id)
 
     validated_items = []
     for item in data.items:
         product = require_product(db, item.product_id, program_key)
-        available = stock_balance(db, data.from_warehouse_id, item.product_id, program_key).quantity or 0
-        if available < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {available}.",
-            )
         validated_items.append((item, product))
 
     row.transfer_date = data.transfer_date or local_today()
@@ -5780,6 +5896,7 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be approved from status {row.status}")
+    validate_reservable_stock(db, row.from_warehouse_id, row.items, program_key, exclude_transfer_id=row.id)
     actor = request_actor(request)
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
@@ -5833,7 +5950,7 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
 
     for item in row.items:
         product = require_product(db, item.product_id, program_key)
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
+        from_balance = locked_stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
         if from_balance.quantity < item.quantity:
             raise HTTPException(
                 status_code=400,
@@ -5841,8 +5958,8 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
             )
 
     for item in row.items:
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
-        to_balance = stock_balance(db, row.to_warehouse_id, item.product_id, program_key)
+        from_balance = locked_stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
+        to_balance = locked_stock_balance(db, row.to_warehouse_id, item.product_id, program_key)
         from_balance.quantity -= item.quantity
         to_balance.quantity += item.quantity
         db.add(
@@ -5981,6 +6098,7 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft", "rejected"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be approved from status {row.status}")
+    validate_reservable_stock(db, row.warehouse_id, row.items, program_key, exclude_requisition_id=row.id)
     actor = request_actor(request)
     # All Approval users share the approval queue. Record the person who
     # completed the action instead of relying on the draft's placeholder name.
