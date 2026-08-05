@@ -1478,7 +1478,7 @@ let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
 const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2'],Misurata:['Maqawba']};
 const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
-  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes.'},
+  {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes.'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:421,targetHubBox:30,targetXbox:3,targetCableMeters:42895,targetUsers:3284,note:'X3 map update: -45 m cable and -9 SUB / END boxes. Current target: 42,895 m cable and 421 SUB / END boxes.'}
 ];
 const titles={dashboard:['WH Dashboard',''],setup:['Setup','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['Receive Inventory','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['Movements','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['Users','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
@@ -2352,7 +2352,15 @@ const scopedRows=rows.filter(r=>{
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
 const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area))),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
-const metric=rolloutMetricFromRows(scopedRows);
+const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const rawMetric=rolloutMetricFromRows(scopedRows);
+const metric={...rawMetric};
+if(plan){
+  metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
+  metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
+  metric.actualUsers=metric.distributionQty*8;
+}
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
 const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0)}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0}):rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
@@ -2360,7 +2368,6 @@ const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
 const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
 const boxScore=Math.min(100,(metric.totalBoxes/targetBoxes)*100);
 const productivity=(cableScore*.8)+(boxScore*.2);
-const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const targetUsers=Number(dashboardTarget.users||plan?.targetUsers||metric.actualUsers||1);
 const targetDistributionQty=Math.max(Math.round(targetUsers/8),1);
 const targetSubEndBox=Math.max(Number(dashboardTarget.subEndBox||plan?.targetSubEndBox||0),1);
