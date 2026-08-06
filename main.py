@@ -4104,19 +4104,6 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in consumed_query.group_by(StockMovement.warehouse_id, StockMovement.product_id).all()
     }
-    outbound_totals = {
-        (warehouse_id, product_id): total or 0
-        for warehouse_id, product_id, total in (
-            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-            .filter(
-                StockMovement.warehouse_id.isnot(None),
-                StockMovement.program == program_key,
-                StockMovement.movement_type.in_(["issue_to_technician", "transfer_out"]),
-            )
-            .group_by(StockMovement.warehouse_id, StockMovement.product_id)
-            .all()
-        )
-    }
     adjustment_totals = {
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
@@ -4146,7 +4133,6 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
         key = (balance.warehouse_id, balance.product_id)
         total_received = received_totals.get(key, 0)
         total_consumed = consumed_totals.get(key, 0)
-        total_outbound = outbound_totals.get(key, 0)
         total_adjustment = adjustment_totals.get(key, 0)
         remaining = balance.quantity or 0
         reserved_pending = float(reserved_quantities.get(key, 0) or 0)
@@ -4171,9 +4157,7 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
                 "unit": balance.product.unit if balance.product else "",
                 "total_received": display_total,
                 "received_movements": total_received,
-                "inbound_movements": total_received + max(total_adjustment, 0),
                 "total_consumed": total_consumed,
-                "outbound_movements": total_outbound + max(-total_adjustment, 0),
                 "total_adjustment": total_adjustment,
                 "remaining": remaining,
                 "wh_remaining": remaining,
