@@ -1863,7 +1863,7 @@ def rollout_entry_mode(data: dict) -> str:
         for _ in [0]
     )
     norm = rollout_norm(text_value)
-    if "accessor" in norm:
+    if "accessor" in norm or "pigtail" in norm:
         return "accessory"
     if "cable" in norm:
         return "cable"
