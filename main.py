@@ -49,6 +49,7 @@ from models import (
     ReceiveOrderItem,
     RolloutEntryCounter,
     RolloutRecord,
+    Site,
     StockBalance,
     StockMovement,
     Technician,
@@ -111,6 +112,8 @@ def ensure_optional_columns(target_engine=engine):
         statements = [
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS part_number VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisition_items ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
@@ -158,6 +161,8 @@ def ensure_optional_columns(target_engine=engine):
         statements = [
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN part_number VARCHAR DEFAULT ''",
+            "ALTER TABLE products ADD COLUMN vendor VARCHAR DEFAULT ''",
+            "ALTER TABLE material_requisition_items ADD COLUMN vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
@@ -216,7 +221,53 @@ PROGRAM_LABELS = {
     DEFAULT_PROGRAM: "FTTH",
     SINGLE_RAN_PROGRAM: "Single RAN",
 }
+
+
+def sync_single_ran_product_vendors():
+    for program_key, session_factory in all_sessionmakers():
+        if program_key != SINGLE_RAN_PROGRAM:
+            continue
+        db = session_factory()
+        try:
+            rows = (
+                db.query(Product, ReceiveOrder.supplier)
+                .join(ReceiveOrderItem, ReceiveOrderItem.product_id == Product.id)
+                .join(ReceiveOrder, ReceiveOrder.id == ReceiveOrderItem.receive_order_id)
+                .filter(Product.program == SINGLE_RAN_PROGRAM, ReceiveOrder.program == SINGLE_RAN_PROGRAM)
+                .order_by(ReceiveOrder.id.asc())
+                .all()
+            )
+            changed = 0
+            for product, supplier in rows:
+                vendor = str(supplier or "").strip()
+                if vendor and not str(product.vendor or "").strip():
+                    product.vendor = vendor
+                    changed += 1
+            requisition_items = (
+                db.query(MaterialRequisitionItem)
+                .join(MaterialRequisition, MaterialRequisition.id == MaterialRequisitionItem.requisition_id)
+                .join(Product, Product.id == MaterialRequisitionItem.product_id)
+                .filter(MaterialRequisition.program == SINGLE_RAN_PROGRAM)
+                .all()
+            )
+            for item in requisition_items:
+                vendor = str(item.product.vendor or "").strip() if item.product else ""
+                if vendor and not str(item.vendor or "").strip():
+                    item.vendor = vendor
+                    changed += 1
+            if changed:
+                db.commit()
+                logger.info("Single RAN product vendors populated for %s materials", changed)
+        except Exception:
+            db.rollback()
+            logger.exception("Single RAN product vendor population failed")
+        finally:
+            db.close()
+
+
+sync_single_ran_product_vendors()
 VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
+DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2")
 
 
 def raw_program_value(value: str = "") -> str:
@@ -234,6 +285,27 @@ def is_valid_program_value(value: str = "") -> bool:
 
 def is_single_ran(program: str = "") -> bool:
     return normalize_program(program) == SINGLE_RAN_PROGRAM
+
+
+def ensure_default_site_ids():
+    db = get_sessionmaker(DEFAULT_PROGRAM)()
+    try:
+        existing = {
+            row.name.strip().casefold()
+            for row in db.query(Site).filter(Site.program == DEFAULT_PROGRAM).all()
+        }
+        for name in DEFAULT_SITE_IDS:
+            if name.casefold() not in existing:
+                db.add(Site(program=DEFAULT_PROGRAM, name=name))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Default Site ID initialization failed")
+    finally:
+        db.close()
+
+
+ensure_default_site_ids()
 
 
 def program_filter(model, program: str = ""):
@@ -689,6 +761,11 @@ def transfer_source_warehouse_manager_emails(row: MaterialTransfer, db: Session)
     return active_user_emails(db, "warehouse manager", identifiers)
 
 
+def transfer_destination_warehouse_manager_emails(row: MaterialTransfer, db: Session) -> list[str]:
+    identifiers = [row.to_warehouse.name if row.to_warehouse else ""]
+    return active_user_emails(db, "warehouse manager", identifiers)
+
+
 def is_source_warehouse_manager(actor: str, row: MaterialTransfer, db: Session) -> bool:
     actor_key = normalize_usage_key(actor)
     warehouse_name = row.from_warehouse.name if row.from_warehouse else ""
@@ -814,6 +891,61 @@ def notify_transfer_created(row: MaterialTransfer, db: Session) -> None:
             "This is an automated notification from Global Technology Company.",
         ],
         "transfer_created_email",
+    )
+
+
+def notify_transfer_approved(row: MaterialTransfer, db: Session) -> None:
+    from_name = row.from_warehouse.name if row.from_warehouse else ""
+    to_name = row.to_warehouse.name if row.to_warehouse else ""
+    notify_transfer_email(
+        row,
+        db,
+        transfer_destination_warehouse_manager_emails(row, db),
+        f"Receiving action needed: Material Transfer {row.transfer_number}",
+        [
+            "Hello,",
+            "",
+            "A material transfer to your warehouse has been approved and is waiting for physical receiving confirmation.",
+            "",
+            f"Transfer No: {row.transfer_number}",
+            f"From Warehouse: {from_name or '-'}",
+            f"To Warehouse: {to_name or '-'}",
+            f"Approved by: {row.approver_name or '-'}",
+            "Status: Approved - waiting for your confirmation",
+            "",
+            "Please check the delivered materials, then sign in to the warehouse system and select Confirm.",
+            "Stock will move only after your confirmation.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "transfer_approved_destination_email",
+    )
+
+
+def notify_transfer_returned_for_edit(row: MaterialTransfer, db: Session) -> None:
+    from_name = row.from_warehouse.name if row.from_warehouse else ""
+    to_name = row.to_warehouse.name if row.to_warehouse else ""
+    notify_transfer_email(
+        row,
+        db,
+        requester_notification_emails(row, db),
+        f"Material Transfer {row.transfer_number} returned for edit",
+        [
+            "Hello,",
+            "",
+            "Your material transfer was returned for update.",
+            "",
+            f"Transfer No: {row.transfer_number}",
+            f"From Warehouse: {from_name or '-'}",
+            f"To Warehouse: {to_name or '-'}",
+            f"Return reason: {row.approver_comment or '-'}",
+            "Status: Returned for edit",
+            "",
+            "Please sign in to the warehouse system, update the transfer, and submit it again.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "transfer_returned_for_edit_email",
     )
 
 
@@ -1003,6 +1135,11 @@ class WarehouseIn(BaseModel):
     program: str = DEFAULT_PROGRAM
 
 
+class SiteIn(BaseModel):
+    name: str
+    program: str = DEFAULT_PROGRAM
+
+
 class TechnicianIn(BaseModel):
     name: str
     phone: str = ""
@@ -1016,6 +1153,7 @@ class ProductIn(BaseModel):
     category: str = ""
     name: str
     item_detail: str = ""
+    vendor: str = ""
     qr_code: str = ""
     unit: str = "PCS"
     tracking_type: Literal["bulk", "serialized"] = "bulk"
@@ -1094,6 +1232,7 @@ class MaterialRequisitionItemIn(BaseModel):
     part_nbr: str = ""
     model: str = ""
     description: str
+    vendor: str = ""
     uom: str = "PCS"
     quantity: float = Field(gt=0)
     remark: str = ""
@@ -1353,6 +1492,115 @@ def stock_balance(db: Session, warehouse_id: int, product_id: int, program: str 
         db.add(row)
         db.flush()
     return row
+
+
+def locked_stock_balance(db: Session, warehouse_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> StockBalance:
+    program_key = normalize_program(program)
+    stock_balance(db, warehouse_id, product_id, program_key)
+    db.flush()
+    return (
+        db.query(StockBalance)
+        .filter(
+            StockBalance.program == program_key,
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.product_id == product_id,
+        )
+        .with_for_update()
+        .one()
+    )
+
+
+RESERVING_REQUISITION_STATUSES = {"pending_approval", "approved", "signed"}
+RESERVING_TRANSFER_STATUSES = {"pending_approval", "approved"}
+
+
+def reserved_stock_quantities(
+    db: Session,
+    program: str = DEFAULT_PROGRAM,
+    exclude_requisition_id: int | None = None,
+    exclude_transfer_id: int | None = None,
+) -> dict[tuple[int, int], float]:
+    """Return quantities held by open MR and outbound TR workflows."""
+    program_key = normalize_program(program)
+    reserved: dict[tuple[int, int], float] = {}
+
+    requisitions = (
+        db.query(MaterialRequisition)
+        .options(selectinload(MaterialRequisition.items))
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.status.in_(RESERVING_REQUISITION_STATUSES),
+        )
+        .all()
+    )
+    for requisition in requisitions:
+        if exclude_requisition_id and requisition.id == exclude_requisition_id:
+            continue
+        for item in requisition.items:
+            if item.product_id:
+                key = (requisition.warehouse_id, item.product_id)
+                reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+
+    transfers = (
+        db.query(MaterialTransfer)
+        .options(selectinload(MaterialTransfer.items))
+        .filter(
+            MaterialTransfer.program == program_key,
+            MaterialTransfer.status.in_(RESERVING_TRANSFER_STATUSES),
+        )
+        .all()
+    )
+    for transfer in transfers:
+        if exclude_transfer_id and transfer.id == exclude_transfer_id:
+            continue
+        for item in transfer.items:
+            key = (transfer.from_warehouse_id, item.product_id)
+            reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+
+    return reserved
+
+
+def validate_reservable_stock(
+    db: Session,
+    warehouse_id: int,
+    items: list,
+    program: str = DEFAULT_PROGRAM,
+    exclude_requisition_id: int | None = None,
+    exclude_transfer_id: int | None = None,
+) -> None:
+    """Prevent a new or edited workflow from consuming stock already reserved elsewhere."""
+    program_key = normalize_program(program)
+    requested: dict[int, float] = {}
+    for item in items:
+        product_id = int(getattr(item, "product_id", 0) or 0)
+        if product_id:
+            requested[product_id] = requested.get(product_id, 0) + float(getattr(item, "quantity", 0) or 0)
+
+    # Lock each affected balance in a stable order so simultaneous requests cannot over-reserve it.
+    balances: dict[int, StockBalance] = {}
+    for product_id in sorted(requested):
+        balances[product_id] = locked_stock_balance(db, warehouse_id, product_id, program_key)
+
+    reserved = reserved_stock_quantities(
+        db,
+        program_key,
+        exclude_requisition_id=exclude_requisition_id,
+        exclude_transfer_id=exclude_transfer_id,
+    )
+    for product_id, requested_qty in requested.items():
+        balance = balances[product_id]
+        held = float(reserved.get((warehouse_id, product_id), 0) or 0)
+        available = float(balance.quantity or 0) - held
+        if requested_qty > available + 1e-9:
+            product = require_product(db, product_id, program_key)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Insufficient available stock for {product_display_name(product)}. "
+                    f"Requested {requested_qty:g}, stock {float(balance.quantity or 0):g}, "
+                    f"reserved {held:g}, available {max(available, 0):g}."
+                ),
+            )
 
 
 def technician_balance(db: Session, technician_id: int, product_id: int, program: str = DEFAULT_PROGRAM) -> TechnicianBalance:
@@ -1940,6 +2188,7 @@ def product_to_dict(row: Product) -> dict:
         "category": row.category,
         "name": material_display_name(row.name, row.sku),
         "item_detail": row.item_detail,
+        "vendor": row.vendor,
         "qr_code": row.qr_code,
         "unit": row.unit,
         "tracking_type": row.tracking_type,
@@ -1948,7 +2197,9 @@ def product_to_dict(row: Product) -> dict:
     }
 
 
-def balance_to_dict(row: StockBalance) -> dict:
+def balance_to_dict(row: StockBalance, reserved_quantity: float = 0) -> dict:
+    quantity = float(row.quantity or 0)
+    reserved = float(reserved_quantity or 0)
     return {
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "warehouse_id": row.warehouse_id,
@@ -1958,7 +2209,9 @@ def balance_to_dict(row: StockBalance) -> dict:
         "part_number": product_part_number(row.product.sku if row.product else "", row.product.part_number if row.product else ""),
         "product": product_display_name(row.product),
         "unit": row.product.unit if row.product else "",
-        "quantity": row.quantity,
+        "quantity": quantity,
+        "reserved_quantity": reserved,
+        "available_quantity": max(quantity - reserved, 0),
     }
 
 
@@ -2106,6 +2359,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
                 "part_nbr": item.part_nbr,
                 "model": item.model,
                 "description": item.description,
+                "vendor": item.vendor,
                 "uom": item.uom,
                 "quantity": item.quantity,
                 "remark": item.remark,
@@ -2147,7 +2401,7 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
         if not item.product_id:
             raise HTTPException(status_code=400, detail=f"MR line {item.line_no} is not linked to a product")
         product = require_product(db, item.product_id, program_key)
-        balance = stock_balance(db, row.warehouse_id, item.product_id, program_key)
+        balance = locked_stock_balance(db, row.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
             material_name = product_display_name(product) or product.sku or f"product {product.id}"
@@ -2384,6 +2638,7 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
         "receiver_title": row.receiver_title,
         "receiver_date": row.receiver_date,
         "receiver_comment": row.receiver_comment,
+        "return_reason": row.return_reason,
         "status": row.status,
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else "",
@@ -2421,6 +2676,24 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
     return normalize_usage_key(row.created_by) == viewer_key
 
 
+def canonical_area_name(value: str) -> str:
+    text_value = str(value or "").strip()
+    key = normalize_usage_key(text_value)
+    if key in {"haydamascus", "haydemascus", "haydemashq"}:
+        return "Hay Demascus"
+    if key in {"maqawba", "magawba"}:
+        return "Maqawba"
+    if key in {"hayalandalusz3", "hayalandaluszone3"}:
+        return "Hay Al Andalus Z3"
+    if key in {"hayandalus", "hayalandalus", "hayalandalusz2", "hayalandaluszone2"}:
+        return "Hay Al Andalus Z2"
+    return text_value
+
+
+def canonical_mr_history_area(value: str) -> str:
+    return canonical_area_name(value)
+
+
 def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
     item_count = len(row.items or [])
     total_quantity = sum(float(item.quantity or 0) for item in row.items)
@@ -2432,7 +2705,7 @@ def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
         "creation_date": row.creation_date,
         "warehouse": row.warehouse.name if row.warehouse else "",
         "warehouse_id": row.warehouse_id,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "requester_name": row.requester_name,
         "team_leader": row.team_leader,
@@ -2473,7 +2746,7 @@ def requisition_history_payload(
     visible_rows = [row for row in rows if user_can_view_requisition(row, viewer, role)]
     options = {
         "warehouses": sorted({str(row.warehouse.name if row.warehouse else "").strip() for row in visible_rows if str(row.warehouse.name if row.warehouse else "").strip()}),
-        "areas": sorted({str(row.site_id or "").strip() for row in visible_rows if str(row.site_id or "").strip()}),
+        "areas": sorted({canonical_mr_history_area(row.site_id) for row in visible_rows if str(row.site_id or "").strip()}),
         "technicians": sorted({str(row.team_leader or "").strip() for row in visible_rows if str(row.team_leader or "").strip()}),
         "requesters": sorted({str(row.requester_name or "").strip() for row in visible_rows if str(row.requester_name or "").strip()}),
         "statuses": sorted({str(row.status or "").strip() for row in visible_rows if str(row.status or "").strip()}),
@@ -2488,7 +2761,7 @@ def requisition_history_payload(
     for row in visible_rows:
         if not match_filter(warehouse, row.warehouse.name if row.warehouse else ""):
             continue
-        if not match_filter(area, row.site_id):
+        if not match_filter(area, canonical_mr_history_area(row.site_id)):
             continue
         if not match_filter(technician, row.team_leader):
             continue
@@ -2528,6 +2801,7 @@ def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
                 "product_id": item.product_id,
                 "part_nbr": item.part_nbr,
                 "description": item.description,
+                "vendor": str(item.product.vendor or "").strip() if item.product else "",
                 "uom": item.uom,
                 "quantity": item.quantity,
                 "remark": item.remark,
@@ -3008,6 +3282,99 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
     }
 
 
+@app.post("/api/warehouse/rollout-field-entry/hub-accessories")
+def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Requester", "Admin")
+
+    submission_key = str(first_value(data, "submission_key", default="") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{16,128}", submission_key):
+        raise HTTPException(status_code=400, detail="Invalid accessory submission key")
+
+    area = str(first_value(data, "Area", "area", default="") or "").strip()
+    xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default="") or "").strip()
+    hub_code = str(first_value(data, "hub_code", "hub", default="") or "").strip()
+    if not area or not xbox or not hub_code:
+        raise HTTPException(status_code=400, detail="Select Area, Related to XBOX, and Hub")
+
+    hub_matches = [
+        row
+        for row in rollout_reference_matches(area, xbox, hub_code, "box")
+        if "hub" in rollout_norm(row.get("box_type") or "")
+    ]
+    if not hub_matches:
+        raise HTTPException(status_code=400, detail="Selected Hub is not listed for this Area / XBOX")
+
+    allowed_materials = {
+        rollout_norm("S' type clamp"): "S' type clamp",
+        rollout_norm("Metal wedge clamping"): "Metal wedge clamping",
+        rollout_norm("Plastic Cable Storing Assembly"): "Plastic Cable Storing Assembly",
+        rollout_norm("Plum ring hook"): "Plum ring hook",
+        rollout_norm("Pole mounting assembly"): "Pole mounting assembly",
+    }
+    requested = first_value(data, "accessories", default=[])
+    if not isinstance(requested, list):
+        raise HTTPException(status_code=400, detail="Accessories must be a list")
+    accessories: list[tuple[str, float]] = []
+    seen_materials: set[str] = set()
+    for entry in requested:
+        if not isinstance(entry, dict):
+            continue
+        material = allowed_materials.get(rollout_norm(first_value(entry, "material", default="")))
+        quantity = safe_float(first_value(entry, "quantity", "actual", default=0))
+        if not material or quantity <= 0 or material in seen_materials:
+            continue
+        seen_materials.add(material)
+        accessories.append((material, quantity))
+    if not accessories:
+        raise HTTPException(status_code=400, detail="Enter at least one accessory quantity")
+
+    saved_rows: list[RolloutRecord] = []
+    entry_time = datetime.now(TRIPOLI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    user_notes = str(first_value(data, "Notes", "notes", default="") or "").strip()
+    hub_note = f"Hub: {hub_code}"
+    notes = f"{hub_note} | {user_notes}" if user_notes else hub_note
+    with ROLLOUT_SYNC_LOCK:
+        counter = rollout_entry_counter(db)
+        for index, (material, quantity) in enumerate(accessories, start=1):
+            item_submission_key = f"{submission_key}-ha-{index}"
+            existing = db.query(RolloutRecord).filter(RolloutRecord.submission_key == item_submission_key).first()
+            if existing is not None:
+                saved_rows.append(existing)
+                continue
+            payload = normalize_rollout_row(data)
+            payload.update(
+                {
+                    "ID": allocate_rollout_entry_id(db, counter),
+                    "submission_key": item_submission_key,
+                    "Related to XBOX": rollout_xbox_key(xbox),
+                    "item": "Hub Accessories",
+                    "material type": material,
+                    "actual": quantity,
+                    "stock remaining": 0,
+                    "entry time": entry_time,
+                    "cable code": "",
+                    "box code": "",
+                    "staus": str(first_value(data, "staus", "status", default="Done") or "Done"),
+                    "Notes": notes,
+                }
+            )
+            row, _ = upsert_rollout_record(payload, db)
+            saved_rows.append(row)
+        db.commit()
+        clear_warehouse_cache()
+        clear_rollout_db_cache()
+        for row in saved_rows:
+            db.refresh(row)
+
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {
+        "success": True,
+        "message": "Hub accessories saved",
+        "records": [row_to_record(row) for row in saved_rows],
+        "summary": rollout_entry_summary(records),
+    }
+
+
 @app.patch("/api/warehouse/rollout-field-entry/{record_id}")
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
@@ -3166,6 +3533,15 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: S
 @app.get("/api/warehouse/summary")
 def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    inventory_receive_total = (
+        db.query(func.coalesce(func.sum(StockMovement.quantity), 0))
+        .filter(
+            StockMovement.program == program_key,
+            StockMovement.movement_type == "receive",
+            StockMovement.note.like("Inventory receive:%"),
+        )
+        .scalar()
+    )
     return {
         "success": True,
         "program": program_key,
@@ -3174,6 +3550,7 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
         "products": db.query(Product).filter(Product.program == program_key).count(),
         "stock_movements": db.query(StockMovement).filter(StockMovement.program == program_key).count(),
         "open_serials": db.query(ProductSerial).filter(ProductSerial.program == program_key, ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
+        "inventory_receive_total": float(inventory_receive_total or 0),
     }
 
 
@@ -3210,6 +3587,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         "partial": light,
         "summary": warehouse_summary(program_key, db),
         "warehouses": list_warehouses(program_key, db)["warehouses"],
+        "sites": list_sites(program_key, db)["sites"],
         "technicians": list_technicians(program_key, db)["technicians"],
         "products": list_products(program_key, db)["products"],
         "stockBalances": stock["balances"],
@@ -3252,6 +3630,40 @@ def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_ses
     program_key = normalize_program(program)
     rows = db.query(Warehouse).filter(Warehouse.program == program_key).order_by(Warehouse.name).all()
     return {"success": True, "warehouses": [{"id": r.id, "program": program_key, "name": r.name, "location": r.location, "status": r.status} for r in rows]}
+
+
+@app.get("/api/warehouse/sites")
+def list_sites(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    rows = db.query(Site).filter(Site.program == program_key).order_by(Site.name).all()
+    return {"success": True, "sites": [{"id": r.id, "program": program_key, "name": r.name} for r in rows]}
+
+
+@app.post("/api/warehouse/sites")
+def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
+    program_key = normalize_program(data.program)
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Site ID is required")
+    row = Site(program=program_key, name=name)
+    db.add(row)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Site ID already exists") from exc
+    db.refresh(row)
+    clear_warehouse_cache()
+    return {"success": True, "site": {"id": row.id, "program": program_key, "name": row.name}}
+
+
+def resolved_site_name(db: Session, program: str, site_value: str) -> str:
+    value = str(site_value or "").strip()
+    if not value.isdigit():
+        return value
+    site = db.query(Site).filter(Site.id == int(value), Site.program == normalize_program(program)).first()
+    return site.name if site else value
 
 
 @app.post("/api/warehouse/warehouses")
@@ -3571,6 +3983,7 @@ def create_product(data: ProductIn, request: Request, db: Session = Depends(db_s
         category=data.category.strip(),
         name=name,
         item_detail=data.item_detail.strip(),
+        vendor=data.vendor.strip() if program_key == SINGLE_RAN_PROGRAM else "",
         qr_code=data.qr_code.strip(),
         unit=data.unit.strip() or "PCS",
         tracking_type=data.tracking_type,
@@ -3649,7 +4062,11 @@ def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     if allowed is not None:
         query = query.filter(StockBalance.warehouse_id.in_(allowed))
     rows = query.all()
-    return {"success": True, "balances": [balance_to_dict(r) for r in rows]}
+    reserved = reserved_stock_quantities(db, program_key)
+    return {
+        "success": True,
+        "balances": [balance_to_dict(r, reserved.get((r.warehouse_id, r.product_id), 0)) for r in rows],
+    }
 
 
 @app.get("/api/warehouse/stock-usage")
@@ -3665,6 +4082,7 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     if allowed is not None:
         balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
     balances = balances_query.all()
+    reserved_quantities = reserved_stock_quantities(db, program_key)
     received_totals = {
         (warehouse_id, product_id): total or 0
         for warehouse_id, product_id, total in (
@@ -3717,6 +4135,8 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
         total_consumed = consumed_totals.get(key, 0)
         total_adjustment = adjustment_totals.get(key, 0)
         remaining = balance.quantity or 0
+        reserved_pending = float(reserved_quantities.get(key, 0) or 0)
+        available_stock = max(float(remaining or 0) - reserved_pending, 0)
         display_total = remaining + total_consumed
         denominator = display_total if display_total > 0 else total_received
         usage_percent = round((total_consumed / denominator) * 100, 2) if denominator else 0
@@ -3741,6 +4161,8 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
                 "total_adjustment": total_adjustment,
                 "remaining": remaining,
                 "wh_remaining": remaining,
+                "reserved_pending": reserved_pending,
+                "available_stock": available_stock,
                 "usage_percent": usage_percent,
                 "rollout_consumed_qty": rollout_consumed,
                 "remaining_after_rollout": remaining_after_rollout,
@@ -3748,6 +4170,60 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
             }
         )
     return {"success": True, "usage": usage_rows}
+
+
+@app.get("/api/warehouse/inventory-export.xlsx")
+def export_inventory_excel(request: Request, warehouse: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(program)
+    selected_warehouse = warehouse.strip()
+    rows = list_stock_usage(request, program_key, db)["usage"]
+    if selected_warehouse:
+        rows = [row for row in rows if row["warehouse"] == selected_warehouse]
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory"
+    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Reserved Pending", "Available", "Usage %"])
+    for row in rows:
+        sheet.append(
+            [
+                row["warehouse"],
+                row["part_number"],
+                row["sku"],
+                row["product"],
+                row["unit"],
+                row["total_received"],
+                row["total_consumed"],
+                row["rollout_consumed_qty"],
+                row["wh_remaining"],
+                row["reserved_pending"],
+                row["available_stock"],
+                row["usage_percent"] / 100,
+            ]
+        )
+    for cell in sheet[1]:
+        cell.font = cell.font.copy(bold=True)
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.column_dimensions["A"].width = 22
+    sheet.column_dimensions["B"].width = 20
+    sheet.column_dimensions["C"].width = 18
+    sheet.column_dimensions["D"].width = 46
+    for column in ("E", "F", "G", "H", "I", "J", "K", "L"):
+        sheet.column_dimensions[column].width = 16
+    for cell in sheet["L"][1:]:
+        cell.number_format = "0.0%"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    suffix = re.sub(r"[^A-Za-z0-9_-]+", "-", selected_warehouse).strip("-") or "all-warehouses"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="inventory-{suffix}.xlsx"'},
+    )
 
 
 @app.get("/api/warehouse/technician-balances")
@@ -4005,17 +4481,13 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
             "events": [],
         }
 
-    product_key = canonical_material_key(product_display_name(selected) or selected.sku)
     events: list[dict] = []
     summary = {
         "total_received": 0,
         "mr_issued": 0,
         "tr_out": 0,
         "tr_in": 0,
-        "transferred": 0,
-        "net_transfer": 0,
         "returned": 0,
-        "rollout_used": 0,
         "current_stock": 0,
     }
 
@@ -4029,7 +4501,40 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         balances = [row for row in balances if row.warehouse_id in allowed]
-    stock_by_warehouse = [balance_to_dict(row) for row in balances]
+    stock_by_warehouse = [
+        {
+            "warehouse_id": row.warehouse_id,
+            "warehouse": row.warehouse.name if row.warehouse else "",
+            "unit": selected.unit or "PCS",
+            "current_stock": float(row.quantity or 0),
+            "total_received": 0,
+            "mr_issued": 0,
+            "tr_out": 0,
+            "tr_in": 0,
+            "returned": 0,
+        }
+        for row in balances
+    ]
+    warehouse_rows = {row["warehouse_id"]: row for row in stock_by_warehouse}
+
+    def warehouse_totals(warehouse_id: int | None, warehouse_name: str = "") -> dict | None:
+        if warehouse_id is None or (allowed is not None and warehouse_id not in allowed):
+            return None
+        if warehouse_id not in warehouse_rows:
+            warehouse_rows[warehouse_id] = {
+                "warehouse_id": warehouse_id,
+                "warehouse": warehouse_name,
+                "unit": selected.unit or "PCS",
+                "current_stock": 0,
+                "total_received": 0,
+                "mr_issued": 0,
+                "tr_out": 0,
+                "tr_in": 0,
+                "returned": 0,
+            }
+            stock_by_warehouse.append(warehouse_rows[warehouse_id])
+        return warehouse_rows[warehouse_id]
+
     summary["current_stock"] = sum(float(row.quantity or 0) for row in balances)
 
     receipts_query = (
@@ -4046,6 +4551,9 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         qty = sum(float(item.quantity or 0) for item in receipt.items if item.product_id == selected.id)
         if receipt.status == "confirmed":
             summary["total_received"] += qty
+            totals = warehouse_totals(receipt.warehouse_id, receipt.warehouse.name if receipt.warehouse else "")
+            if totals is not None:
+                totals["total_received"] += qty
         events.append(
             material_ledger_event(
                 date=receipt.receipt_date or (receipt.created_at.date().isoformat() if receipt.created_at else ""),
@@ -4073,19 +4581,22 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         qty = sum(float(item.quantity or 0) for item in requisition.items if item.product_id == selected.id)
         if requisition.status in {"issued", "signed"}:
             summary["mr_issued"] += qty
-        events.append(
-            material_ledger_event(
-                date=requisition.creation_date or (requisition.created_at.date().isoformat() if requisition.created_at else ""),
-                event_type="MR",
-                reference=requisition.order_number,
-                warehouse=requisition.warehouse.name if requisition.warehouse else "",
-                area=requisition.site_id or requisition.site_address,
-                qty=qty,
-                status=requisition.status,
-                actor=requisition.requester_name or requisition.created_by,
-                note=requisition.team_leader or requisition.receiver_name,
+            totals = warehouse_totals(requisition.warehouse_id, requisition.warehouse.name if requisition.warehouse else "")
+            if totals is not None:
+                totals["mr_issued"] += qty
+            events.append(
+                material_ledger_event(
+                    date=requisition.creation_date or (requisition.created_at.date().isoformat() if requisition.created_at else ""),
+                    event_type="MR",
+                    reference=requisition.order_number,
+                    warehouse=requisition.warehouse.name if requisition.warehouse else "",
+                    area=requisition.site_id or requisition.site_address,
+                    qty=qty,
+                    status=requisition.status,
+                    actor=requisition.requester_name or requisition.created_by,
+                    note=requisition.team_leader or requisition.receiver_name,
+                )
             )
-        )
 
     transfers_query = (
         db.query(MaterialTransfer)
@@ -4106,19 +4617,26 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         if transfer.status == "transferred":
             summary["tr_out"] += qty
             summary["tr_in"] += qty
-            summary["transferred"] += qty
-        common = {
-            "date": transfer.transfer_date or (transfer.created_at.date().isoformat() if transfer.created_at else ""),
-            "reference": transfer.transfer_number,
-            "from_wh": transfer.from_warehouse.name if transfer.from_warehouse else "",
-            "to_wh": transfer.to_warehouse.name if transfer.to_warehouse else "",
-            "qty": qty,
-            "status": transfer.status,
-            "actor": transfer.requester_name or transfer.created_by,
-            "note": transfer.reason or transfer.reference_no,
-        }
-        events.append(material_ledger_event(event_type="TR Out", warehouse=common["from_wh"], **common))
-        events.append(material_ledger_event(event_type="TR In", warehouse=common["to_wh"], **common))
+            from_name = transfer.from_warehouse.name if transfer.from_warehouse else ""
+            to_name = transfer.to_warehouse.name if transfer.to_warehouse else ""
+            from_totals = warehouse_totals(transfer.from_warehouse_id, from_name)
+            to_totals = warehouse_totals(transfer.to_warehouse_id, to_name)
+            if from_totals is not None:
+                from_totals["tr_out"] += qty
+            if to_totals is not None:
+                to_totals["tr_in"] += qty
+            common = {
+                "date": transfer.transfer_date or (transfer.created_at.date().isoformat() if transfer.created_at else ""),
+                "reference": transfer.transfer_number,
+                "from_wh": from_name,
+                "to_wh": to_name,
+                "qty": qty,
+                "status": transfer.status,
+                "actor": transfer.requester_name or transfer.created_by,
+                "note": transfer.reason or transfer.reference_no,
+            }
+            events.append(material_ledger_event(event_type="TR Out", warehouse=common["from_wh"], **common))
+            events.append(material_ledger_event(event_type="TR In", warehouse=common["to_wh"], **common))
 
     returns_query = (
         db.query(MaterialReturn)
@@ -4134,46 +4652,25 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         qty = sum(float(item.quantity or 0) for item in returned.items if item.product_id == selected.id)
         if returned.status == "confirmed":
             summary["returned"] += qty
-        events.append(
-            material_ledger_event(
-                date=returned.return_date or (returned.created_at.date().isoformat() if returned.created_at else ""),
-                event_type="RN",
-                reference=returned.return_number,
-                warehouse=returned.warehouse.name if returned.warehouse else "",
-                area=returned.site_id or returned.site_address,
-                qty=qty,
-                status=returned.status,
-                actor=returned.returned_by or returned.created_by,
-                note=returned.reason,
+            totals = warehouse_totals(returned.warehouse_id, returned.warehouse.name if returned.warehouse else "")
+            if totals is not None:
+                totals["returned"] += qty
+            events.append(
+                material_ledger_event(
+                    date=returned.return_date or (returned.created_at.date().isoformat() if returned.created_at else ""),
+                    event_type="RN",
+                    reference=returned.return_number,
+                    warehouse=returned.warehouse.name if returned.warehouse else "",
+                    area=returned.site_id or returned.site_address,
+                    qty=qty,
+                    status=returned.status,
+                    actor=returned.returned_by or returned.created_by,
+                    note=returned.reason,
+                )
             )
-        )
-
-    rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
-    for record in rollout_rows:
-        material = str(record.get("material type") or record.get("item") or "").strip()
-        if canonical_material_key(material) != product_key:
-            continue
-        actual = safe_float(record.get("actual"))
-        if actual <= 0:
-            continue
-        summary["rollout_used"] += actual
-        events.append(
-            material_ledger_event(
-                date=str(record.get("Date") or record.get("date") or "")[:10],
-                event_type="Rollout Used",
-                reference=str(record.get("ID") or record.get("id") or record.get("record_id") or ""),
-                area=str(record.get("Area") or record.get("area") or ""),
-                qty=actual,
-                status=str(record.get("status") or record.get("staus") or ""),
-                actor=str(record.get("Supervisor Name") or record.get("supervisor_name") or record.get("team leader") or ""),
-                note=str(record.get("item") or ""),
-            )
-        )
 
     events.sort(key=lambda row: (row.get("date") or "", row.get("reference") or "", row.get("type") or ""), reverse=True)
-    summary["net_transfer"] = summary["tr_in"] - summary["tr_out"]
-    summary["mr_vs_rollout"] = summary["mr_issued"] - summary["rollout_used"]
-    summary["variance_vs_rollout"] = summary["mr_vs_rollout"]
+    stock_by_warehouse.sort(key=lambda row: row["warehouse"])
     return {
         "success": True,
         "query": query,
@@ -4182,7 +4679,6 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         "summary": summary,
         "stock_by_warehouse": stock_by_warehouse,
         "events": events[:1000],
-        "rollout_source": rollout_source,
     }
 
 
@@ -4190,53 +4686,92 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
 def list_rollout_material_usage(request: Request, db: Session = Depends(db_session), force: bool = False, program: str = DEFAULT_PROGRAM):
     if is_single_ran(program):
         return {"success": True, "usage": [], "rollout_records": 0, "rollout_source": "disabled"}
+    program_key = normalize_program(program)
     rollout_rows, rollout_source = rollout_daily_progress_records(db, force=force)
-    rollout_area_usage: dict[tuple[str, str], float] = {}
-    rollout_material_usage: dict[str, float] = {}
+    grouped: dict[tuple[str, str], dict] = {}
+
+    def usage_row(area: str, material_key: str, material: str = "", sku: str = "") -> dict:
+        key = (area, material_key)
+        if key not in grouped:
+            grouped[key] = {
+                "area": area,
+                "material": material or material_key,
+                "sku": sku,
+                "mr_issued_qty": 0.0,
+                "rollout_used_qty": 0.0,
+                "warehouses": set(),
+            }
+        row = grouped[key]
+        if material and not row["material"]:
+            row["material"] = material
+        if sku and not row["sku"]:
+            row["sku"] = sku
+        return row
+
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    requisitions_query = (
+        db.query(MaterialRequisition)
+        .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product))
+        .filter(MaterialRequisition.program == program_key, MaterialRequisition.status.in_(["issued", "signed"]))
+        .order_by(MaterialRequisition.id.asc())
+    )
+    if allowed is not None:
+        requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    for requisition in requisitions_query.all():
+        area = canonical_area_name(requisition.site_id or requisition.site_address)
+        if not area:
+            continue
+        for item in requisition.items:
+            qty = float(item.quantity or 0)
+            material = product_display_name(item.product) if item.product else str(item.description or "")
+            material_key = canonical_material_key(material or (item.product.sku if item.product else ""))
+            if qty <= 0 or not material_key:
+                continue
+            row = usage_row(area, material_key, material, item.product.sku if item.product else item.model)
+            row["mr_issued_qty"] += qty
+            if requisition.warehouse and requisition.warehouse.name:
+                row["warehouses"].add(requisition.warehouse.name)
+
     for record in rollout_rows:
-        area = str(record.get("Area") or "").strip()
+        area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
         material = str(record.get("material type") or record.get("item") or "").strip()
         if not area or not material:
             continue
+        status = normalize_usage_key(str(record.get("status") or record.get("staus") or ""))
+        if status and status not in {"done", "completed", "installed"}:
+            continue
         actual = safe_float(record.get("actual"))
         material_key = canonical_material_key(material)
-        key = (normalize_usage_key(area), material_key)
-        rollout_area_usage[key] = rollout_area_usage.get(key, 0) + actual
-        rollout_material_usage[material_key] = rollout_material_usage.get(material_key, 0) + actual
-
-    mr_usage = list_technician_material_usage(request, program, db)["usage"]
-    rows = []
-    for row in mr_usage:
-        material = row["material"]
-        issued = row["mr_issued_qty"] or 0
-        if issued <= 0:
+        if actual <= 0 or not material_key:
             continue
-        material_key = canonical_material_key(material)
-        area_used = sum(
-            rollout_area_usage.get((area_key, material_key), 0)
-            for area_key in area_usage_keys(row.get("site_id", ""), row.get("site_address", ""))
-        )
-        material_used = rollout_material_usage.get(material_key, 0)
-        used = min(area_used, issued)
-        extra_used = max(area_used - issued, 0)
-        remaining = max(issued - used, 0)
-        if area_used > issued:
+        usage_row(area, material_key, material)["rollout_used_qty"] += actual
+
+    rows = []
+    for row in grouped.values():
+        issued = float(row["mr_issued_qty"] or 0)
+        installed = float(row["rollout_used_qty"] or 0)
+        difference = issued - installed
+        if installed > issued:
             usage_match = "over_mr"
-        elif area_used:
+        elif installed:
             usage_match = "area"
         else:
-            usage_match = "area_not_found" if material_used else "none"
+            usage_match = "none"
         rows.append(
             {
-                **row,
-                "rollout_used_qty": used,
-                "rollout_actual_qty": area_used,
-                "rollout_extra_qty": extra_used,
-                "remaining_after_rollout": remaining,
-                "usage_percent": (used / issued * 100) if issued else 0,
+                "area": row["area"],
+                "material": row["material"],
+                "sku": row["sku"],
+                "warehouse": ", ".join(sorted(row["warehouses"])),
+                "mr_issued_qty": issued,
+                "rollout_used_qty": installed,
+                "rollout_actual_qty": installed,
+                "remaining_after_rollout": difference,
+                "usage_percent": (installed / issued * 100) if issued else 0,
                 "usage_match": usage_match,
             }
         )
+    rows.sort(key=lambda row: (row["area"], row["material"], row["sku"]))
     return {"success": True, "usage": rows, "rollout_records": len(rollout_rows), "rollout_source": rollout_source}
 
 
@@ -4806,6 +5341,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
     db.add(row)
     db.flush()
     for index, item in enumerate(items, start=1):
+        product = db.get(Product, item.product_id) if item.product_id else None
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -4814,6 +5350,7 @@ def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int
                 part_nbr=item.part_nbr,
                 model=item.model,
                 description=item.description,
+                vendor=str(product.vendor or "").strip() if program_key == SINGLE_RAN_PROGRAM and product else "",
                 uom=item.uom,
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5036,11 +5573,13 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    data.site_id = resolved_site_name(db, program_key, data.site_id)
     warehouse = require_warehouse(db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.warehouse_id, data.items, program_key)
 
     order_number = next_material_requisition_number(db, warehouse, program_key)
     row = MaterialRequisition(
@@ -5077,6 +5616,16 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key) if item.product_id else None
+        item_vendor = item.vendor.strip()
+        if program_key == SINGLE_RAN_PROGRAM:
+            if product is None:
+                raise HTTPException(status_code=400, detail="Choose a Single RAN material from the search results")
+            product_vendor = str(product.vendor or "").strip()
+            if not item_vendor:
+                raise HTTPException(status_code=400, detail=f"Vendor is required for {product_display_name(product)}")
+            if product_vendor and item_vendor.casefold() != product_vendor.casefold():
+                raise HTTPException(status_code=400, detail=f"Vendor does not match {product_display_name(product)}")
+            item_vendor = product_vendor or item_vendor
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -5085,6 +5634,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
                 part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
+                vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5114,6 +5664,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    data.site_id = resolved_site_name(db, program_key, data.site_id)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
@@ -5124,6 +5675,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.warehouse_id, data.items, program_key, exclude_requisition_id=row.id)
 
     row.creation_date = data.creation_date
     row.warehouse_id = data.warehouse_id
@@ -5153,6 +5705,16 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key) if item.product_id else None
+        item_vendor = item.vendor.strip()
+        if program_key == SINGLE_RAN_PROGRAM:
+            if product is None:
+                raise HTTPException(status_code=400, detail="Choose a Single RAN material from the search results")
+            product_vendor = str(product.vendor or "").strip()
+            if not item_vendor:
+                raise HTTPException(status_code=400, detail=f"Vendor is required for {product_display_name(product)}")
+            if product_vendor and item_vendor.casefold() != product_vendor.casefold():
+                raise HTTPException(status_code=400, detail=f"Vendor does not match {product_display_name(product)}")
+            item_vendor = product_vendor or item_vendor
         db.add(
             MaterialRequisitionItem(
                 requisition_id=row.id,
@@ -5161,6 +5723,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
                 part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
+                vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
                 uom=item.uom or (product.unit if product else "PCS"),
                 quantity=item.quantity,
                 remark=item.remark,
@@ -5190,6 +5753,7 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
         raise HTTPException(status_code=400, detail="From and To warehouse must be different")
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.from_warehouse_id, data.items, program_key)
 
     row = MaterialTransfer(
         program=program_key,
@@ -5212,12 +5776,6 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
 
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key)
-        available = stock_balance(db, data.from_warehouse_id, item.product_id, program_key).quantity or 0
-        if available < item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient stock for {product_display_name(product)}. Requested {item.quantity}, available {available}.",
-            )
         db.add(
             MaterialTransferItem(
                 transfer_id=row.id,
@@ -5238,18 +5796,108 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
     return {"success": True, "transfer_number": row.transfer_number, "transfer": transfer_to_dict(row)}
 
 
+@app.post("/api/warehouse/material-transfers/{transfer_id}/return-for-edit")
+def return_material_transfer_for_edit(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Approval")
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be returned for edit from status {row.status}")
+    comment = data.comment.strip()
+    if not comment:
+        raise HTTPException(status_code=400, detail="Return reason is required")
+    actor = request_actor(request)
+    row.approver_name = actor or row.approver_name
+    row.approver_title = data.title or row.approver_title
+    row.approver_date = local_today()
+    row.approver_comment = comment
+    row.status = "returned_for_edit"
+    log_audit(db, "return_material_transfer_for_edit", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
+    db.commit()
+    db.refresh(row)
+    notify_transfer_returned_for_edit(row, db)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/resubmit")
+def resubmit_material_transfer(transfer_id: int, data: MaterialTransferIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    role_key = normalize_usage_key(user.role)
+    if role_key not in {"admin", "management"} and normalize_usage_key(row.created_by) != normalize_usage_key(request_actor(request)):
+        raise HTTPException(status_code=403, detail="You can only resubmit your own material transfers")
+    if row.status != "returned_for_edit":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be edited from status {row.status}")
+    if role_key == "requester":
+        require_warehouse(db, data.from_warehouse_id, program_key)
+    else:
+        require_warehouse_access(request, db, data.from_warehouse_id, program_key)
+    require_warehouse(db, data.to_warehouse_id, program_key)
+    if data.from_warehouse_id == data.to_warehouse_id:
+        raise HTTPException(status_code=400, detail="From and To warehouse must be different")
+    if not data.items:
+        raise HTTPException(status_code=400, detail="At least one item is required")
+    validate_reservable_stock(db, data.from_warehouse_id, data.items, program_key, exclude_transfer_id=row.id)
+
+    validated_items = []
+    for item in data.items:
+        product = require_product(db, item.product_id, program_key)
+        validated_items.append((item, product))
+
+    row.transfer_date = data.transfer_date or local_today()
+    row.from_warehouse_id = data.from_warehouse_id
+    row.to_warehouse_id = data.to_warehouse_id
+    row.reference_no = data.reference_no.strip()
+    row.reason = data.reason.strip()
+    row.requester_name = request_actor(request)
+    row.requester_title = data.requester_title.strip()
+    row.approver_name = data.approver_name.strip()
+    row.approver_title = data.approver_title.strip()
+    row.approver_date = ""
+    row.approver_comment = ""
+    row.receiver_name = data.receiver_name.strip()
+    row.receiver_date = ""
+    row.receiver_comment = ""
+    row.status = "pending_approval"
+
+    db.query(MaterialTransferItem).filter(MaterialTransferItem.transfer_id == row.id).delete()
+    for index, (item, product) in enumerate(validated_items, start=1):
+        db.add(
+            MaterialTransferItem(
+                transfer_id=row.id,
+                line_no=index,
+                product_id=item.product_id,
+                part_nbr=product_part_number(product.sku, product.part_number),
+                description=product_display_name(product),
+                uom=product.unit,
+                quantity=item.quantity,
+                remark=item.remark.strip(),
+            )
+        )
+
+    log_audit(db, "resubmit_material_transfer", "material_transfer", row.transfer_number, request_actor(request), data.model_dump())
+    db.commit()
+    db.refresh(row)
+    notify_transfer_created(row, db)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
 @app.post("/api/warehouse/material-transfers/{transfer_id}/approve")
 def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
+    require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be approved from status {row.status}")
+    validate_reservable_stock(db, row.from_warehouse_id, row.items, program_key, exclude_transfer_id=row.id)
     actor = request_actor(request)
-    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
-        raise HTTPException(status_code=403, detail="Only the source warehouse manager can approve this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
     row.approver_date = local_today()
@@ -5258,12 +5906,13 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
     log_audit(db, "approve_material_transfer", "material_transfer", row.transfer_number, actor or "approval", data.model_dump())
     db.commit()
     db.refresh(row)
+    notify_transfer_approved(row, db)
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-transfers/{transfer_id}/reject")
 def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Approval", "Warehouse Manager")
+    require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
     if row is None:
@@ -5271,8 +5920,6 @@ def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn
     if row.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Transfer cannot be rejected from status {row.status}")
     actor = request_actor(request)
-    if user.role.strip().lower() == "warehouse manager" and not is_source_warehouse_manager(actor, row, db):
-        raise HTTPException(status_code=403, detail="Only the source warehouse manager can reject this transfer")
     row.approver_name = actor or row.approver_name
     row.approver_title = data.title or row.approver_title
     row.approver_date = local_today()
@@ -5303,7 +5950,7 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
 
     for item in row.items:
         product = require_product(db, item.product_id, program_key)
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
+        from_balance = locked_stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
         if from_balance.quantity < item.quantity:
             raise HTTPException(
                 status_code=400,
@@ -5311,8 +5958,8 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
             )
 
     for item in row.items:
-        from_balance = stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
-        to_balance = stock_balance(db, row.to_warehouse_id, item.product_id, program_key)
+        from_balance = locked_stock_balance(db, row.from_warehouse_id, item.product_id, program_key)
+        to_balance = locked_stock_balance(db, row.to_warehouse_id, item.product_id, program_key)
         from_balance.quantity -= item.quantity
         to_balance.quantity += item.quantity
         db.add(
@@ -5451,6 +6098,7 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft", "rejected"}:
         raise HTTPException(status_code=400, detail=f"MR cannot be approved from status {row.status}")
+    validate_reservable_stock(db, row.warehouse_id, row.items, program_key, exclude_requisition_id=row.id)
     actor = request_actor(request)
     # All Approval users share the approval queue. Record the person who
     # completed the action instead of relying on the draft's placeholder name.
@@ -5492,19 +6140,26 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
 def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Approval")
     program_key = normalize_program(data.program)
     row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    if row.status != "approved":
+    role_key = normalize_usage_key(user.role)
+    returning_from_approval = role_key in {"approval", "approver"} and row.status == "pending_approval"
+    returning_from_warehouse = row.status == "approved"
+    if not returning_from_approval and not returning_from_warehouse:
         raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
-    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    if not returning_from_approval:
+        require_warehouse_access(request, db, row.warehouse_id, program_key)
     actor = request_actor(request)
+    row.receiver_name = actor or row.receiver_name
+    row.receiver_title = data.title or row.receiver_title
+    row.receiver_date = local_today()
     row.receiver_comment = data.comment
     row.return_reason = data.comment
     row.status = "returned_for_edit"
-    log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "warehouse", data.model_dump())
+    log_audit(db, "return_material_requisition_for_edit", "material_requisition", row.order_number, actor or "reviewer", data.model_dump())
     db.commit()
     db.refresh(row)
     notify_mr_returned_for_edit(row, db)
@@ -5515,7 +6170,12 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
 def issue_material_requisition(requisition_id: int, request: Request, data: MaterialRequisitionActionIn = MaterialRequisitionActionIn(), db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     require_warehouse_access(request, db, row.warehouse_id, program_key)
@@ -5568,6 +6228,8 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
 
     for item in data.items:
         product = require_product(db, item.product_id, program_key)
+        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+            product.vendor = data.supplier.strip()
         validate_serial_count(product, item.quantity, item.serial_numbers)
         stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
 
@@ -5635,6 +6297,7 @@ def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = 
             category=data.category.strip(),
             name=name,
             item_detail=name,
+            vendor=data.supplier.strip() if program_key == SINGLE_RAN_PROGRAM else "",
             qr_code=data.qr_code.strip(),
             unit=data.unit.strip() or "PCS",
             tracking_type="bulk",
@@ -5649,6 +6312,8 @@ def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = 
         product.unit = data.unit.strip() or product.unit or "PCS"
         product.qr_code = data.qr_code.strip() or product.qr_code
         product.category = data.category.strip() or product.category
+        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+            product.vendor = data.supplier.strip()
 
     order = ReceiveOrder(
         program=program_key,

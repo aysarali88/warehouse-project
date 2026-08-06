@@ -1,8 +1,10 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 
 
 class FieldEntryConcurrencyTests(unittest.TestCase):
@@ -12,10 +14,19 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         cls.db_file.close()
         os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{cls.db_file.name}"
         os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
-        global main, SessionLocal, RolloutRecord
+        global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem
         import main
         from database import SessionLocal
-        from models import RolloutRecord
+        from models import (
+            MaterialRequisition,
+            MaterialRequisitionItem,
+            MaterialTransfer,
+            MaterialTransferItem,
+            Product,
+            RolloutRecord,
+            StockBalance,
+            Warehouse,
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -63,3 +74,47 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertTrue(hubs)
         self.assertTrue(any(row["code"] == "H7" for row in hubs))
         self.assertTrue(any(row["code"] == "H10" for row in hubs))
+
+    def test_pending_mr_and_transfer_reserve_stock_before_confirmation(self):
+        db = SessionLocal()
+        warehouse = Warehouse(name="Reservation Test WH")
+        product = Product(sku="RESERVATION-TEST", name="Reservation test material")
+        db.add_all([warehouse, product])
+        db.flush()
+        db.add(StockBalance(warehouse_id=warehouse.id, product_id=product.id, quantity=50))
+
+        requisition = MaterialRequisition(
+            order_number="MR-RESERVATION-TEST",
+            warehouse_id=warehouse.id,
+            status="pending_approval",
+        )
+        transfer = MaterialTransfer(
+            transfer_number="TR-RESERVATION-TEST",
+            from_warehouse_id=warehouse.id,
+            to_warehouse_id=warehouse.id,
+            status="pending_approval",
+        )
+        db.add_all([requisition, transfer])
+        db.flush()
+        db.add_all([
+            MaterialRequisitionItem(requisition_id=requisition.id, product_id=product.id, quantity=40),
+            MaterialTransferItem(transfer_id=transfer.id, product_id=product.id, quantity=5),
+        ])
+        db.commit()
+
+        reserved = main.reserved_stock_quantities(db)
+        self.assertEqual(reserved[(warehouse.id, product.id)], 45)
+        main.validate_reservable_stock(
+            db,
+            warehouse.id,
+            [SimpleNamespace(product_id=product.id, quantity=5)],
+        )
+        with self.assertRaises(HTTPException) as error:
+            main.validate_reservable_stock(
+                db,
+                warehouse.id,
+                [SimpleNamespace(product_id=product.id, quantity=6)],
+            )
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("available 5", error.exception.detail)
+        db.close()

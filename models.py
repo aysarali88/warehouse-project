@@ -58,6 +58,16 @@ class Warehouse(Base):
     balances = relationship("StockBalance", back_populates="warehouse")
 
 
+class Site(Base):
+    __tablename__ = "sites"
+    __table_args__ = (UniqueConstraint("program", "name", name="uq_site_program_name"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class AppUser(Base):
     __tablename__ = "app_users"
 
@@ -112,6 +122,7 @@ class Product(Base):
     category = Column(String, default="")
     name = Column(String, nullable=False, index=True)
     item_detail = Column(String, default="")
+    vendor = Column(String, default="", index=True)
     qr_code = Column(String, default="")
     unit = Column(String, default="PCS")
     tracking_type = Column(String, default="bulk")
@@ -299,6 +310,7 @@ class MaterialRequisitionItem(Base):
     part_nbr = Column(String, default="")
     model = Column(String, default="")
     description = Column(Text, default="")
+    vendor = Column(String, default="")
     uom = Column(String, default="PCS")
     quantity = Column(Float, default=0)
     remark = Column(Text, default="")
