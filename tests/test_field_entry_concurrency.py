@@ -158,3 +158,50 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 13)
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="return_in").count(), 1)
         db.close()
+
+    def test_rollout_difference_excludes_confirmed_returns(self):
+        db = SessionLocal()
+        warehouse = Warehouse(name="Usage Return Test WH")
+        product = Product(sku="USAGE-RETURN-TEST", name="Metal wedge clamping")
+        db.add_all([warehouse, product])
+        db.flush()
+        requisition = MaterialRequisition(
+            order_number="MR-USAGE-RETURN-TEST",
+            warehouse_id=warehouse.id,
+            site_id="Maqawba",
+            status="issued",
+        )
+        db.add(requisition)
+        db.flush()
+        db.add(MaterialRequisitionItem(requisition_id=requisition.id, product_id=product.id, quantity=10))
+        db.add(RolloutRecord(record_id="RDP-USAGE-RETURN-TEST", area="Maqawba", material_type=product.name, actual=3, status="Done"))
+        db.commit()
+
+        requester_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Requester", name="Usage Requester", username="usage-requester", warehouse_name=""))
+        )
+        pending = main.create_material_return(
+            main.MaterialReturnIn(
+                warehouse_id=warehouse.id,
+                site_id="Maqawba",
+                returned_by="Usage Requester",
+                items=[main.MaterialReturnItemIn(product_id=product.id, quantity=2)],
+            ),
+            requester_request,
+            db,
+        )["return"]
+        manager_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Warehouse Manager", name="Usage Manager", username="usage-manager", warehouse_name=warehouse.name))
+        )
+        main.approve_material_return(pending["id"], main.MaterialRequisitionActionIn(actor="Usage Manager"), manager_request, db)
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""))
+        )
+        usage = main.list_rollout_material_usage(admin_request, db, program="FTTH")["usage"]
+        row = next(row for row in usage if row["sku"] == product.sku and row["area"] == "Maqawba")
+        self.assertEqual(row["mr_issued_qty"], 10)
+        self.assertEqual(row["rollout_used_qty"], 3)
+        self.assertEqual(row["returned_qty"], 2)
+        self.assertEqual(row["remaining_after_rollout"], 5)
+        db.close()

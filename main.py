@@ -4711,6 +4711,7 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
                 "sku": sku,
                 "mr_issued_qty": 0.0,
                 "rollout_used_qty": 0.0,
+                "returned_qty": 0.0,
                 "warehouses": set(),
             }
         row = grouped[key]
@@ -4744,6 +4745,29 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
             if requisition.warehouse and requisition.warehouse.name:
                 row["warehouses"].add(requisition.warehouse.name)
 
+    returns_query = (
+        db.query(MaterialReturn)
+        .options(joinedload(MaterialReturn.warehouse), selectinload(MaterialReturn.items).joinedload(MaterialReturnItem.product))
+        .filter(MaterialReturn.program == program_key, MaterialReturn.status == "confirmed")
+        .order_by(MaterialReturn.id.asc())
+    )
+    if allowed is not None:
+        returns_query = returns_query.filter(MaterialReturn.warehouse_id.in_(allowed))
+    for returned in returns_query.all():
+        area = canonical_area_name(returned.site_id or returned.site_address)
+        if not area:
+            continue
+        for item in returned.items:
+            qty = float(item.quantity or 0)
+            material = product_display_name(item.product) if item.product else str(item.description or "")
+            material_key = canonical_material_key(material or (item.product.sku if item.product else ""))
+            if qty <= 0 or not material_key:
+                continue
+            row = usage_row(area, material_key, material, item.product.sku if item.product else "")
+            row["returned_qty"] += qty
+            if returned.warehouse and returned.warehouse.name:
+                row["warehouses"].add(returned.warehouse.name)
+
     for record in rollout_rows:
         area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
         material = str(record.get("material type") or record.get("item") or "").strip()
@@ -4762,10 +4786,12 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
     for row in grouped.values():
         issued = float(row["mr_issued_qty"] or 0)
         installed = float(row["rollout_used_qty"] or 0)
-        difference = issued - installed
-        if installed > issued:
+        returned = float(row["returned_qty"] or 0)
+        difference = issued - installed - returned
+        net_issued = issued - returned
+        if difference < 0:
             usage_match = "over_mr"
-        elif installed:
+        elif installed or returned:
             usage_match = "area"
         else:
             usage_match = "none"
@@ -4777,9 +4803,10 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
                 "warehouse": ", ".join(sorted(row["warehouses"])),
                 "mr_issued_qty": issued,
                 "rollout_used_qty": installed,
+                "returned_qty": returned,
                 "rollout_actual_qty": installed,
                 "remaining_after_rollout": difference,
-                "usage_percent": (installed / issued * 100) if issued else 0,
+                "usage_percent": (installed / net_issued * 100) if net_issued > 0 else 0,
                 "usage_match": usage_match,
             }
         )
