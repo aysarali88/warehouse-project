@@ -4489,7 +4489,7 @@
       "Splitter": 2,
       "Box code": "H6-L3-S2",
       "Box type": "SUB BOX",
-      "Real length m": 150,
+      "Real length m": "",
       "Cable length m": 150,
       "Material type": "Single-Core Distribution Cable_150m"
     },
@@ -4505,7 +4505,7 @@
       "Splitter": 3,
       "Box code": "H6-L3-S3",
       "Box type": "SUB BOX",
-      "Real length m": 80,
+      "Real length m": "",
       "Cable length m": 80,
       "Material type": "Single-Core Distribution Cable_80m"
     },
@@ -4521,7 +4521,7 @@
       "Splitter": 4,
       "Box code": "H6-L3-S4",
       "Box type": "END BOX",
-      "Real length m": 80,
+      "Real length m": "",
       "Cable length m": 80,
       "Material type": "Single-Core Distribution Cable_80m"
     },
@@ -5500,22 +5500,6 @@
       "Real length m": 70,
       "Cable length m": 100,
       "Material type": "Single-Core Distribution Cable_100m"
-    },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X1",
-      "XBOX": "X-BOX1",
-      "Part": "Part01",
-      "Hub": "H11",
-      "Line": 3,
-      "Splitter": 4,
-      "Box code": "H11-L3-S4",
-      "Box type": "END BOX",
-      "Real length m": 37,
-      "Cable length m": 80,
-      "Material type": "Single-Core Distribution Cable_80m"
     },
     {
       "Area": "Maqawba",
