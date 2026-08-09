@@ -6070,22 +6070,7 @@
       "Cable length m": 100,
       "Material type": "Single-Core Distribution Cable_100m"
     },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X2",
-      "XBOX": "X-BOX2",
-      "Part": "Part01",
-      "Hub": "H2",
-      "Line": 2,
-      "Splitter": 4,
-      "Box code": "H2-L2-S4",
-      "Box type": "END BOX",
-      "Real length m": 8,
-      "Cable length m": 50,
-      "Material type": "Single-Core Distribution Cable_50m"
-    },
+
     {
       "Area": "Maqawba",
       "City": "Misurata",
