@@ -4172,6 +4172,18 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     return {"success": True, "usage": usage_rows}
 
 
+def user_can_view_material_return(row: MaterialReturn, viewer: str = "", role: str = "") -> bool:
+    role_key = normalize_usage_key(role)
+    viewer_key = normalize_usage_key(viewer)
+    if role_key in {"admin", "management"}:
+        return True
+    if role_key == "warehousemanager":
+        return warehouse_scope_matches(viewer, row.warehouse.name if row.warehouse else "")
+    if role_key == "requester":
+        return normalize_usage_key(row.returned_by) == viewer_key or normalize_usage_key(row.created_by) == viewer_key
+    return False
+
+
 @app.get("/api/warehouse/inventory-export.xlsx")
 def export_inventory_excel(request: Request, warehouse: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
@@ -5469,6 +5481,7 @@ def list_material_return_headers(limit: int = 50, program: str = DEFAULT_PROGRAM
 @app.get("/api/warehouse/material-returns")
 def list_material_returns(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    viewer, role = request_scope_viewer(request), current_user(request).role
     query = (
         db.query(MaterialReturn)
         .options(
@@ -5482,16 +5495,17 @@ def list_material_returns(request: Request, limit: int = 50, program: str = DEFA
     if allowed is not None:
         query = query.filter(MaterialReturn.warehouse_id.in_(allowed))
     rows = query.limit(min(limit, 200)).all()
-    return {"success": True, "returns": [material_return_to_dict(r) for r in rows]}
+    return {"success": True, "returns": [material_return_to_dict(r) for r in rows if user_can_view_material_return(r, viewer, role)]}
 
 
 @app.get("/api/warehouse/material-returns/{return_id}")
 def get_material_return(return_id: int, request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    row = db.query(MaterialReturn).filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key).first()
+    viewer, role = request_scope_viewer(request), current_user(request).role
+    row = db.query(MaterialReturn).options(joinedload(MaterialReturn.warehouse)).filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material return not found")
-    if allowed_warehouse_ids(request, db, program_key) is not None and row.warehouse_id not in allowed_warehouse_ids(request, db, program_key):
+    if not user_can_view_material_return(row, viewer, role):
         raise HTTPException(status_code=403, detail="Not allowed to view this material return")
     return {"success": True, "return": material_return_to_dict(row)}
 
@@ -5505,6 +5519,12 @@ def warehouse_notifications(request: Request, user: str = "", program: str = DEF
         db.query(MaterialTransfer)
         .options(joinedload(MaterialTransfer.from_warehouse), joinedload(MaterialTransfer.to_warehouse))
         .filter(MaterialTransfer.program == program_key, MaterialTransfer.status == "pending_approval")
+        .all()
+    )
+    pending_returns = (
+        db.query(MaterialReturn)
+        .options(joinedload(MaterialReturn.warehouse))
+        .filter(MaterialReturn.program == program_key, MaterialReturn.status == "pending_warehouse")
         .all()
     )
     user_key = normalize_usage_key(user)
@@ -5533,10 +5553,13 @@ def warehouse_notifications(request: Request, user: str = "", program: str = DEF
         if warehouse_scope_matches(user, row.from_warehouse.name if row.from_warehouse else "")
         or warehouse_scope_matches(user, row.to_warehouse.name if row.to_warehouse else "")
     )
+    pending_return_count = len(pending_returns) if not user_key else sum(
+        1 for row in pending_returns if warehouse_scope_matches(user, row.warehouse.name if row.warehouse else "")
+    )
     return {
         "success": True,
         "approval_count": approval_count + transfer_approval_count,
-        "warehouse_queue_count": approved_count + approved_transfer_count,
+        "warehouse_queue_count": approved_count + approved_transfer_count + pending_return_count,
     }
 
 
@@ -5999,11 +6022,13 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
 
 @app.post("/api/warehouse/material-returns")
 def create_material_return(data: MaterialReturnIn, request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Requester")
     program_key = normalize_program(data.program)
-    require_warehouse_access(request, db, data.warehouse_id, program_key)
+    require_warehouse(db, data.warehouse_id, program_key)
+    requester_submission = user.role.strip().lower() == "requester"
+    if not requester_submission:
+        require_warehouse_access(request, db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
-    data.received_by = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
 
@@ -6015,17 +6040,18 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
         site_address=data.site_address.strip(),
         warehouse_id=data.warehouse_id,
         returned_by=data.returned_by.strip(),
-        received_by=data.received_by.strip(),
+        received_by="" if requester_submission else data.created_by,
         reason=data.reason.strip(),
-        status="confirmed",
-        created_by=data.created_by.strip() or data.received_by.strip() or "manager",
+        status="pending_warehouse" if requester_submission else "confirmed",
+        created_by=data.created_by.strip() or "manager",
     )
     db.add(row)
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key)
-        stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
+        if not requester_submission:
+            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
         db.add(
             MaterialReturnItem(
                 return_id=row.id,
@@ -6039,23 +6065,92 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
                 remark=item.remark.strip(),
             )
         )
+        if not requester_submission:
+            db.add(
+                StockMovement(
+                    program=program_key,
+                    movement_type="return_in",
+                    product_id=item.product_id,
+                    warehouse_id=data.warehouse_id,
+                    quantity=item.quantity,
+                    reference=row.return_number,
+                    note=f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}",
+                    created_by=row.created_by,
+                )
+            )
+
+    log_audit(
+        db,
+        "submit_material_return" if requester_submission else "create_material_return",
+        "material_return",
+        row.return_number,
+        row.created_by,
+        data.model_dump(),
+    )
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "return_number": row.return_number, "return": material_return_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-returns/{return_id}/approve")
+def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    row = (
+        db.query(MaterialReturn)
+        .options(selectinload(MaterialReturn.items), joinedload(MaterialReturn.warehouse))
+        .filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material return not found")
+    if row.status != "pending_warehouse":
+        raise HTTPException(status_code=400, detail=f"Return cannot be approved from status {row.status}")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
+
+    actor = request_actor(request)
+    for item in row.items:
+        require_product(db, item.product_id, program_key)
+        locked_stock_balance(db, row.warehouse_id, item.product_id, program_key).quantity += item.quantity
         db.add(
             StockMovement(
                 program=program_key,
                 movement_type="return_in",
                 product_id=item.product_id,
-                warehouse_id=data.warehouse_id,
+                warehouse_id=row.warehouse_id,
                 quantity=item.quantity,
                 reference=row.return_number,
-                note=f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}",
-                created_by=row.created_by,
+                note=f"Approved return from site {row.site_id or row.site_address}: {item.condition or 'Good'}",
+                created_by=actor,
             )
         )
-
-    log_audit(db, "create_material_return", "material_return", row.return_number, row.created_by, data.model_dump())
+    row.received_by = actor
+    row.status = "confirmed"
+    log_audit(db, "approve_material_return", "material_return", row.return_number, actor, data.model_dump())
     db.commit()
     db.refresh(row)
-    return {"success": True, "return_number": row.return_number, "return": material_return_to_dict(row)}
+    return {"success": True, "return": material_return_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-returns/{return_id}/reject")
+def reject_material_return(return_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    row = db.query(MaterialReturn).options(joinedload(MaterialReturn.warehouse)).filter(
+        MaterialReturn.id == return_id,
+        MaterialReturn.program == program_key,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material return not found")
+    if row.status != "pending_warehouse":
+        raise HTTPException(status_code=400, detail=f"Return cannot be rejected from status {row.status}")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    row.status = "rejected"
+    row.received_by = request_actor(request)
+    log_audit(db, "reject_material_return", "material_return", row.return_number, request_actor(request), data.model_dump())
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "return": material_return_to_dict(row)}
 
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/signature")
