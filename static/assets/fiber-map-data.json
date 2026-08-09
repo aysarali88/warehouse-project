@@ -8108,54 +8108,9 @@
       "Cable length m": 150,
       "Material type": "Single-Core Distribution Cable_150m"
     },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X3",
-      "XBOX": "X-BOX3",
-      "Part": "Part01",
-      "Hub": "H3",
-      "Line": 3,
-      "Splitter": 2,
-      "Box code": "H3-L3-S2",
-      "Box type": "SUB BOX",
-      "Real length m": 22,
-      "Cable length m": 50,
-      "Material type": "Single-Core Distribution Cable_50m"
-    },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X3",
-      "XBOX": "X-BOX3",
-      "Part": "Part01",
-      "Hub": "H3",
-      "Line": 3,
-      "Splitter": 3,
-      "Box code": "H3-L3-S3",
-      "Box type": "SUB BOX",
-      "Real length m": 3,
-      "Cable length m": 5,
-      "Material type": "Single-Core Distribution Cable_5m"
-    },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X3",
-      "XBOX": "X-BOX3",
-      "Part": "Part01",
-      "Hub": "H3",
-      "Line": 3,
-      "Splitter": 4,
-      "Box code": "H3-L3-S4",
-      "Box type": "END BOX",
-      "Real length m": 33,
-      "Cable length m": 50,
-      "Material type": "Single-Core Distribution Cable_50m"
-    },
+
+
+
     {
       "Area": "Maqawba",
       "City": "Misurata",
@@ -8188,38 +8143,8 @@
       "Cable length m": 50,
       "Material type": "Single-Core Distribution Cable_50m"
     },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X3",
-      "XBOX": "X-BOX3",
-      "Part": "Part01",
-      "Hub": "H3",
-      "Line": 4,
-      "Splitter": 3,
-      "Box code": "H3-L4-S3",
-      "Box type": "SUB BOX",
-      "Real length m": 60,
-      "Cable length m": 80,
-      "Material type": "Single-Core Distribution Cable_80m"
-    },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X3",
-      "XBOX": "X-BOX3",
-      "Part": "Part01",
-      "Hub": "H3",
-      "Line": 4,
-      "Splitter": 4,
-      "Box code": "H3-L4-S4",
-      "Box type": "END BOX",
-      "Real length m": 6,
-      "Cable length m": 50,
-      "Material type": "Single-Core Distribution Cable_50m"
-    },
+
+
     {
       "Area": "Maqawba",
       "City": "Misurata",
