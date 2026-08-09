@@ -14,7 +14,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         cls.db_file.close()
         os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{cls.db_file.name}"
         os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
-        global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem
+        global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, StockMovement, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem
         import main
         from database import SessionLocal
         from models import (
@@ -25,6 +25,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             Product,
             RolloutRecord,
             StockBalance,
+            StockMovement,
             Warehouse,
         )
 
@@ -117,4 +118,43 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             )
         self.assertEqual(error.exception.status_code, 400)
         self.assertIn("available 5", error.exception.detail)
+        db.close()
+
+    def test_requester_return_waits_for_warehouse_manager_confirmation(self):
+        db = SessionLocal()
+        warehouse = Warehouse(name="Returns Test WH")
+        product = Product(sku="RETURN-TEST", name="Return test material")
+        db.add_all([warehouse, product])
+        db.flush()
+        db.add(StockBalance(warehouse_id=warehouse.id, product_id=product.id, quantity=10))
+        db.commit()
+
+        requester_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Requester", name="Requester", username="requester", warehouse_name=""))
+        )
+        pending = main.create_material_return(
+            main.MaterialReturnIn(
+                warehouse_id=warehouse.id,
+                returned_by="Requester",
+                items=[main.MaterialReturnItemIn(product_id=product.id, quantity=3)],
+            ),
+            requester_request,
+            db,
+        )["return"]
+        self.assertEqual(pending["status"], "pending_warehouse")
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 10)
+        self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"]).count(), 0)
+
+        manager_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Warehouse Manager", name="Warehouse Manager", username="manager", warehouse_name=warehouse.name))
+        )
+        confirmed = main.approve_material_return(
+            pending["id"],
+            main.MaterialRequisitionActionIn(actor="Warehouse Manager"),
+            manager_request,
+            db,
+        )["return"]
+        self.assertEqual(confirmed["status"], "confirmed")
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 13)
+        self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="return_in").count(), 1)
         db.close()
