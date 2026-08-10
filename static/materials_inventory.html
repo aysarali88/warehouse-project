@@ -1811,7 +1811,7 @@ if(box)box.innerHTML=latest&&latestItem?`<div class="mini-list">
 <div class="hint">تاريخ الاستلام: ${esc(latest.receipt_date||latest.created_at?.slice(0,10)||'')}<br>رقم الايصال: ${esc(latest.order_number)}<br>المورد: ${esc(latest.supplier||'')}</div>
 ${latestItem.qr_code?`<div class="hint">QR Code: ${esc(latestItem.qr_code)}</div>`:''}
 </div>`:'<div class="empty">لم يتم استلام مواد بعد</div>';
-const receiptRows=(wh.receipts||[]).flatMap(r=>(r.items||[]).map(item=>({source:'DB Receive',order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
+const receiptRows=(wh.receipts||[]).filter(r=>r.created_by!=='system_import').flatMap(r=>(r.items||[]).map(item=>({source:'DB Receive',order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
 const referenceRows=isSingleRan()?[]:(initialStockReference.rows||[]).map(r=>({source:'Initial Stock Reference',order_number:r.item||'final_WH_tmp.xlsx',receipt_date:'Reference',supplier:r.vendor,warehouse:r.warehouse,sku:r.sku,qr_code:'',name:r.item,quantity:r.quantity,unit:r.unit||'PCS'}));
 const allRows=receiptRows.concat(referenceRows);
 const vendorFilter=document.getElementById('receiveVendorFilter');
@@ -1832,7 +1832,7 @@ const activeVendor=vendorFilter?.value||'';
 const activeWh=whFilter?.value||'';
 const rows=allRows.filter(r=>(!activeVendor||String(r.supplier||'')===activeVendor)&&(!activeWh||String(r.warehouse||'')===activeWh));
 const summary=document.getElementById('receiveHistorySummary');
-if(summary)summary.textContent=isSingleRan()?`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · DB receive ${fmt(receiptRows.length)}`:`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · DB receive ${fmt(receiptRows.length)} · Initial reference ${fmt(referenceRows.length)} / ${fmt(initialStockReference.summary?.total_quantity||0)} PCS`;
+if(summary)summary.textContent=isSingleRan()?`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · DB receive ${fmt(receiptRows.length)}`:`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · final_WH_tmp.xlsx ${fmt(referenceRows.length)} lines · New DB receive ${fmt(receiptRows.length)}`;
 const history=document.getElementById('receiveHistory');
 if(history)history.innerHTML=rowsTable([['Source','source'],['التاريخ','receipt_date'],['رقم الايصال','order_number'],['Vendor','supplier'],['WH','warehouse'],['SKU','sku'],['QR Code','qr_code'],['اسم المادة','name'],['الكمية','quantity',(v)=>fmt(v)],['الوحدة','unit']],rows.slice(0,260));
 }
