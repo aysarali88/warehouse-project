@@ -5197,38 +5197,8 @@
       "Cable length m": 100,
       "Material type": "Single-Core Distribution Cable_100m"
     },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X1",
-      "XBOX": "X-BOX1",
-      "Part": "Part01",
-      "Hub": "H9",
-      "Line": 3,
-      "Splitter": 3,
-      "Box code": "H9-L3-S3",
-      "Box type": "SUB BOX",
-      "Real length m": "",
-      "Cable length m": "",
-      "Material type": ""
-    },
-    {
-      "Area": "Maqawba",
-      "City": "Misurata",
-      "Zone": "Maqawba",
-      "Related to XBOX": "X1",
-      "XBOX": "X-BOX1",
-      "Part": "Part01",
-      "Hub": "H9",
-      "Line": 3,
-      "Splitter": 4,
-      "Box code": "H9-L3-S4",
-      "Box type": "END BOX",
-      "Real length m": "",
-      "Cable length m": "",
-      "Material type": ""
-    },
+
+
     {
       "Area": "Maqawba",
       "City": "Misurata",
