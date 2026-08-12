@@ -74,6 +74,8 @@ ROLLOUT_DAILY_PROGRESS_GID = "440090582"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_LIVE_CSV_URL = f"https://docs.google.com/spreadsheets/d/{ROLLOUT_DAILY_PROGRESS_SHEET_ID}/gviz/tq?tqx=out:csv&gid={ROLLOUT_DAILY_PROGRESS_GID}"
 DEFAULT_ROLLOUT_DAILY_PROGRESS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI1yMD_QsfGAQY3IpwY9X9B3VBO59X_TEGKxUSMQ2S3ciCDbf3lPPGUyXuLrR5os9NI4SBwcyOTWt7/pub?gid=440090582&single=true&output=csv"
 FIBER_MAP_REFERENCE_PATH = "static/assets/fiber-map-data.json"
+INITIAL_STOCK_REFERENCE_PATH = "static/assets/initial-stock-reference.json"
+INITIAL_STOCK_REFERENCE_CACHE: list[dict] | None = None
 logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "warehouse_session"
 SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "8"))
@@ -4476,6 +4478,21 @@ def material_ledger_event(
     }
 
 
+def initial_stock_reference_rows() -> list[dict]:
+    """Return the FTTH opening stock imported from final_WH_tmp.xlsx."""
+    global INITIAL_STOCK_REFERENCE_CACHE
+    if INITIAL_STOCK_REFERENCE_CACHE is not None:
+        return INITIAL_STOCK_REFERENCE_CACHE
+    try:
+        with open(INITIAL_STOCK_REFERENCE_PATH, "r", encoding="utf-8") as source:
+            data = json.load(source)
+        INITIAL_STOCK_REFERENCE_CACHE = list(data.get("rows") or [])
+    except (OSError, ValueError, TypeError):
+        logger.exception("Unable to load initial warehouse stock reference")
+        INITIAL_STOCK_REFERENCE_CACHE = []
+    return INITIAL_STOCK_REFERENCE_CACHE
+
+
 @app.get("/api/warehouse/material-ledger")
 def material_ledger(request: Request, query: str = "", product_id: int = 0, force: bool = False, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
@@ -4549,11 +4566,47 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
 
     summary["current_stock"] = sum(float(row.quantity or 0) for row in balances)
 
+    # The legacy system_import orders are retained in the database temporarily,
+    # but the dashboard must use final_WH_tmp.xlsx as its opening-stock source.
+    if not is_single_ran(program_key):
+        warehouses_by_key = {
+            normalize_usage_key(row.name): row
+            for row in db.query(Warehouse).filter(Warehouse.program == program_key).all()
+        }
+        selected_sku = normalize_usage_key(selected.sku)
+        for reference in initial_stock_reference_rows():
+            if normalize_usage_key(reference.get("sku")) != selected_sku:
+                continue
+            warehouse = warehouses_by_key.get(normalize_usage_key(reference.get("warehouse")))
+            if warehouse is None or (allowed is not None and warehouse.id not in allowed):
+                continue
+            qty = safe_float(reference.get("quantity"))
+            summary["total_received"] += qty
+            totals = warehouse_totals(warehouse.id, warehouse.name)
+            if totals is not None:
+                totals["total_received"] += qty
+            events.append(
+                material_ledger_event(
+                    date="Reference",
+                    event_type="Initial Stock",
+                    reference="final_WH_tmp.xlsx",
+                    warehouse=warehouse.name,
+                    qty=qty,
+                    status="confirmed",
+                    actor="Reference",
+                    note=reference.get("vendor") or "",
+                )
+            )
+
     receipts_query = (
         db.query(ReceiveOrder)
         .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items))
         .join(ReceiveOrderItem, ReceiveOrderItem.receive_order_id == ReceiveOrder.id)
-        .filter(ReceiveOrderItem.product_id == selected.id, ReceiveOrder.program == program_key)
+        .filter(
+            ReceiveOrderItem.product_id == selected.id,
+            ReceiveOrder.program == program_key,
+            ReceiveOrder.created_by != "system_import",
+        )
         .order_by(ReceiveOrder.id.asc())
     )
     if allowed is not None:
