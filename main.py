@@ -1932,6 +1932,12 @@ def rollout_code_reference_rows() -> list[dict]:
         code = str(first_value(row, "Box code", "box code", default="") or "").strip()
         add(row, code, "box", "box", str(first_value(row, "Box type", "box type", default="") or "").strip())
         add(row, code, "cable", "drop")
+        # An XBOX is the root node for its map rows and has no dedicated box
+        # row. Add it explicitly so teams can record its installation.
+        xbox_code = str(first_value(row, "Related to XBOX", "related to xbox", "XBOX", "xbox", default="") or "").strip()
+        if xbox_code:
+            xbox_row = {**row, "Box type": "XBOX", "Material type": "XBOX"}
+            add(xbox_row, xbox_code, "box", "xbox", "XBOX")
         # Hubs are the parent node of the SUB/END box rows in the map data;
         # they do not have their own Box code row. Expose one HubBox code for
         # each area/XBOX so it can be selected during field entry.
