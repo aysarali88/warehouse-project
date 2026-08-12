@@ -128,6 +128,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS notes VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS submission_key VARCHAR DEFAULT ''",
+            "ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS source_item_id INTEGER",
         ]
         statements.extend([f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
         statements.extend(
@@ -157,6 +158,7 @@ def ensure_optional_columns(target_engine=engine):
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_rollout_records_submission_key ON rollout_records (submission_key) WHERE submission_key <> ''",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_return_movement_source ON stock_movements (program, movement_type, source_item_id) WHERE movement_type = 'return_in' AND source_item_id IS NOT NULL",
             ]
         )
     else:
@@ -177,6 +179,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE rollout_records ADD COLUMN cable_route VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN notes VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN submission_key VARCHAR DEFAULT ''",
+            "ALTER TABLE stock_movements ADD COLUMN source_item_id INTEGER",
         ]
         statements.extend([f"ALTER TABLE {table} ADD COLUMN program VARCHAR NOT NULL DEFAULT 'FTTH'" for table in program_tables])
         statements.extend(
@@ -198,6 +201,7 @@ def ensure_optional_columns(target_engine=engine):
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_transfer_program_number ON material_transfers (program, transfer_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_material_return_program_number ON material_returns (program, return_number)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_rollout_records_submission_key ON rollout_records (submission_key) WHERE submission_key <> ''",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_return_movement_source ON stock_movements (program, movement_type, source_item_id) WHERE movement_type = 'return_in' AND source_item_id IS NOT NULL",
             ]
         )
     with target_engine.begin() as conn:
@@ -6186,6 +6190,7 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
         db.query(MaterialReturn)
         .options(selectinload(MaterialReturn.items), joinedload(MaterialReturn.warehouse))
         .filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key)
+        .with_for_update()
         .first()
     )
     if row is None:
@@ -6206,6 +6211,7 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                 warehouse_id=row.warehouse_id,
                 quantity=item.quantity,
                 reference=row.return_number,
+                source_item_id=item.id,
                 note=f"Approved return from site {row.site_id or row.site_address}: {item.condition or 'Good'}",
                 created_by=actor,
             )
