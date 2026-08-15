@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -56,6 +56,23 @@ class FiberMapArea(Base):
     end_date = Column(String, default="")
     target_users = Column(Integer, default=0)
     design_data = Column(Text, nullable=False)
+    created_by = Column(String, default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FiberMapSchematic(Base):
+    __tablename__ = "fiber_map_schematics"
+    __table_args__ = (
+        UniqueConstraint("program", "area", "sheet_name", name="uq_fiber_map_schematic_program_area_sheet"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    area = Column(String, nullable=False, index=True)
+    xbox = Column(String, default="", index=True)
+    sheet_name = Column(String, nullable=False)
+    content_type = Column(String, default="image/png", nullable=False)
+    image_data = Column(LargeBinary, nullable=False)
     created_by = Column(String, default="system")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
