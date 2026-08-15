@@ -191,6 +191,7 @@ class StockMovement(Base):
     quantity = Column(Float, nullable=False)
     serial_number = Column(String, default="")
     reference = Column(String, default="", index=True)
+    source_item_id = Column(Integer, nullable=True, index=True)
     note = Column(Text, default="")
     created_by = Column(String, default="system")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
