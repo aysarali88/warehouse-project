@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import close_all_sessions
 from fastapi import HTTPException
 
 
@@ -31,6 +32,8 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        main.clear_rollout_db_cache()
+        close_all_sessions()
         main.engine.dispose()
         os.unlink(cls.db_file.name)
 
@@ -204,4 +207,55 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(row["rollout_used_qty"], 3)
         self.assertEqual(row["returned_qty"], 2)
         self.assertEqual(row["remaining_after_rollout"], 5)
+        db.close()
+
+    def test_rollout_usage_sources_match_the_reported_area_and_material_total(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.commit()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-SOURCE-1",
+                area="Maqawba",
+                related_to_xbox="X1",
+                material_type="Metal wedge clamping",
+                actual=7,
+                status="Done",
+                notes="Hub: H1",
+            ),
+            RolloutRecord(
+                record_id="RDP-SOURCE-2",
+                area="Maqawba",
+                related_to_xbox="X1",
+                material_type="Metal wedge clamping",
+                actual=5,
+                status="Done",
+                notes="Hub: H2",
+            ),
+            RolloutRecord(
+                record_id="RDP-SOURCE-OTHER-AREA",
+                area="Hay Demashq",
+                related_to_xbox="X1",
+                material_type="Metal wedge clamping",
+                actual=99,
+                status="Done",
+                notes="Hub: H1",
+            ),
+        ])
+        db.commit()
+        main.clear_rollout_db_cache()
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""))
+        )
+        details = main.list_rollout_material_usage_details(
+            admin_request,
+            area="Maqawba",
+            material="ITC3301-P1_03",
+            db=db,
+            program="FTTH",
+        )
+        self.assertEqual(details["total"], 12)
+        self.assertEqual([row["id"] for row in details["records"]], ["RDP-SOURCE-1", "RDP-SOURCE-2"])
+        self.assertEqual([row["hub"] for row in details["records"]], ["H1", "H2"])
         db.close()

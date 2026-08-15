@@ -4860,11 +4860,12 @@ def canonical_material_key(value: str) -> str:
         "hubbox": ["hubbox", "fat2811sh4b"],
         "atb": ["atb", "e00atb101"],
         "bigtail": ["bigtail", "pigtail", "l0524vdd"],
+        # Check the longer P1_03 SKU first; it starts with the legacy P1 SKU.
+        "metalwedgeclamping": ["metalwedgeclamping", "itc3301p103"],
         "plumringhook": ["plumringhook", "itc3301p1"],
         "stypeclamp": ["stypeclamp", "itc3103a1"],
         "polemountingassembly": ["polemountingassembly", "e00dkba04"],
         "plasticcablestoringassembly": ["plasticcablestoringassembly", "itc2102p2"],
-        "metalwedgeclamping": ["metalwedgeclamping", "itc3301p103"],
     }
     for canonical, values in aliases.items():
         if any(alias in key for alias in values):
@@ -5351,6 +5352,56 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
         )
     rows.sort(key=lambda row: (row["area"], row["material"], row["sku"]))
     return {"success": True, "usage": rows, "rollout_records": len(rollout_rows), "rollout_source": rollout_source}
+
+
+@app.get("/api/warehouse/rollout-material-usage/details")
+def list_rollout_material_usage_details(
+    request: Request,
+    area: str = "",
+    material: str = "",
+    db: Session = Depends(db_session),
+    program: str = DEFAULT_PROGRAM,
+):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    if is_single_ran(program):
+        return {"success": True, "records": [], "total": 0, "source": "disabled"}
+
+    area_key = canonical_area_name(area)
+    material_key = canonical_material_key(material)
+    if not area_key or not material_key:
+        raise HTTPException(status_code=400, detail="Area and material are required")
+
+    rollout_rows, source = rollout_daily_progress_records(db, force=False)
+    records = []
+    for record in rollout_records_for_session(request, rollout_rows):
+        record_area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
+        record_material = str(record.get("material type") or record.get("item") or "").strip()
+        status = normalize_usage_key(str(record.get("status") or record.get("staus") or ""))
+        actual = safe_float(record.get("actual"))
+        if (
+            record_area != area_key
+            or canonical_material_key(record_material) != material_key
+            or (status and status not in {"done", "completed", "installed"})
+            or actual <= 0
+        ):
+            continue
+        notes = str(record.get("Notes") or record.get("notes") or "").strip()
+        hub_match = re.search(r"\bhub\s*:\s*([^|,;]+)", notes, re.IGNORECASE)
+        records.append(
+            {
+                "id": str(record.get("ID") or ""),
+                "date": str(record.get("Date") or ""),
+                "area": str(record.get("Area") or record.get("area") or ""),
+                "xbox": str(record.get("Related to XBOX") or record.get("related_to_xbox") or ""),
+                "hub": hub_match.group(1).strip() if hub_match else "",
+                "material": record_material,
+                "actual": actual,
+                "notes": notes,
+            }
+        )
+
+    records.sort(key=lambda row: (row["date"], row["xbox"], row["hub"], row["id"]))
+    return {"success": True, "source": source, "total": sum(row["actual"] for row in records), "records": records}
 
 
 @app.get("/api/warehouse/movements")
