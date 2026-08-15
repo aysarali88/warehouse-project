@@ -66,6 +66,15 @@ ROLLOUT_DB_CACHE_TTL = 30
 ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
 ROLLOUT_ENTRY_ID_CACHE_TTL = 30
 ROLLOUT_CODE_REFERENCE_CACHE: list[dict] | None = None
+
+# Hay Demashq has no uploaded fiber map yet. These approved HUB codes keep
+# Hub Accessories entry available while preserving Area/XBOX validation.
+ROLLOUT_MANUAL_HUBS = {
+    "haydemashq": {
+        "X1": [f"H{number}" for number in range(1, 11)],
+        "X2": [f"H{number}" for number in range(1, 6)],
+    }
+}
 ROLLOUT_SYNC_TTL_SECONDS = int(os.getenv("ROLLOUT_SYNC_TTL_SECONDS", "900"))
 ROLLOUT_LAST_SYNC_AT = 0.0
 ROLLOUT_SYNC_LOCK = Lock()
@@ -1970,6 +1979,12 @@ def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str) -
     ]
 
 
+def rollout_manual_hub_allowed(area: str, xbox: str, hub_code: str) -> bool:
+    area_hubs = ROLLOUT_MANUAL_HUBS.get(rollout_area_key(area), {})
+    allowed_hubs = area_hubs.get(rollout_xbox_key(xbox), [])
+    return rollout_code_key(hub_code) in {rollout_code_key(code) for code in allowed_hubs}
+
+
 def rollout_record_code_type(row: RolloutRecord) -> str:
     if str(row.cable_code or "").strip():
         return "cable"
@@ -3313,7 +3328,7 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
         for row in rollout_reference_matches(area, xbox, hub_code, "box")
         if "hub" in rollout_norm(row.get("box_type") or "")
     ]
-    if not hub_matches:
+    if not hub_matches and not rollout_manual_hub_allowed(area, xbox, hub_code):
         raise HTTPException(status_code=400, detail="Selected Hub is not listed for this Area / XBOX")
 
     allowed_materials = {
