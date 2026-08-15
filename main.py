@@ -6081,7 +6081,12 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
     data.site_id = resolved_site_name(db, program_key, data.site_id)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if user.role.strip().lower() != "admin" and normalize_usage_key(row.created_by) != normalize_usage_key(request_actor(request)):
@@ -6216,7 +6221,12 @@ def create_material_transfer(data: MaterialTransferIn, request: Request, db: Ses
 def return_material_transfer_for_edit(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
@@ -6241,7 +6251,12 @@ def return_material_transfer_for_edit(transfer_id: int, data: MaterialRequisitio
 def resubmit_material_transfer(transfer_id: int, data: MaterialTransferIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     role_key = normalize_usage_key(user.role)
@@ -6307,7 +6322,12 @@ def resubmit_material_transfer(transfer_id: int, data: MaterialTransferIn, reque
 def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
@@ -6330,7 +6350,12 @@ def approve_material_transfer(transfer_id: int, data: MaterialRequisitionActionI
 def reject_material_transfer(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialTransfer).filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key).first()
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material transfer not found")
     if row.status != "pending_approval":
@@ -6583,7 +6608,12 @@ def sign_material_requisition(requisition_id: int, data: MaterialRequisitionSign
 def approve_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft", "rejected"}:
@@ -6610,7 +6640,12 @@ def approve_material_requisition(requisition_id: int, data: MaterialRequisitionA
 def reject_material_requisition(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status not in {"pending_approval", "draft"}:
@@ -6632,7 +6667,12 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Approval")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialRequisition).filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key).first()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     role_key = normalize_usage_key(user.role)
