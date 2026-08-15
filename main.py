@@ -13,6 +13,9 @@ import time
 import urllib.parse
 import urllib.request
 import ssl
+import posixpath
+import zipfile
+from xml.etree import ElementTree
 from threading import Lock
 import bcrypt
 from datetime import datetime, timezone, timedelta
@@ -35,6 +38,7 @@ from models import (
     AppSession,
     AppUser,
     FiberMapArea,
+    FiberMapSchematic,
     IssueOrder,
     IssueOrderItem,
     MaterialRequisition,
@@ -1894,7 +1898,7 @@ def rollout_entry_mode(data: dict) -> str:
 
 
 def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> dict:
-    data: dict = {"boxes": [], "routes": [], "area_plans": []}
+    data: dict = {"boxes": [], "routes": [], "area_plans": [], "schematics": []}
     try:
         with open(FIBER_MAP_REFERENCE_PATH, "r", encoding="utf-8") as handle:
             source = json.load(handle)
@@ -1929,6 +1933,13 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
                 "dynamic": True,
             }
         )
+    data["schematics"] = [
+        {"area": row.area, "xbox": row.xbox, "sheet_name": row.sheet_name}
+        for row in db.query(FiberMapSchematic)
+        .filter(FiberMapSchematic.program == normalize_program(program))
+        .order_by(FiberMapSchematic.area, FiberMapSchematic.xbox, FiberMapSchematic.sheet_name)
+        .all()
+    ]
     return data
 
 
@@ -2075,6 +2086,81 @@ def area_builder_sheet_parts(workbook) -> dict[tuple[str, str], str]:
     return parts
 
 
+def area_builder_schematic_xbox(sheet_name: str) -> str:
+    match = re.match(r"^\s*X\s*-?\s*(\d+)\s+H\s*\d+(?:\s*-\s*H\s*\d+)?\s*$", sheet_name, flags=re.I)
+    return f"X{int(match.group(1))}" if match else ""
+
+
+def area_builder_zip_target(source_path: str, target: str) -> str:
+    return posixpath.normpath(posixpath.join(posixpath.dirname(source_path), target)).lstrip("/")
+
+
+def area_builder_relationships(archive: zipfile.ZipFile, part_path: str) -> dict[str, str]:
+    rel_path = posixpath.join(posixpath.dirname(part_path), "_rels", f"{posixpath.basename(part_path)}.rels")
+    if rel_path not in archive.namelist():
+        return {}
+    root = ElementTree.fromstring(archive.read(rel_path))
+    rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+    return {
+        item.attrib.get("Id", ""): area_builder_zip_target(part_path, item.attrib.get("Target", ""))
+        for item in root.findall(f"{rel_ns}Relationship")
+        if item.attrib.get("Id") and item.attrib.get("Target")
+    }
+
+
+def area_builder_schematic_content_type(path: str) -> str:
+    extension = posixpath.splitext(path.lower())[1]
+    return {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}.get(extension, "image/png")
+
+
+def extract_area_builder_schematics(contents: bytes) -> list[dict]:
+    """Extract the original diagram image from each named schematic tab, if present."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(contents)) as archive:
+            names = set(archive.namelist())
+            workbook_path = "xl/workbook.xml"
+            if workbook_path not in names:
+                return []
+            workbook_root = ElementTree.fromstring(archive.read(workbook_path))
+            workbook_rels = area_builder_relationships(archive, workbook_path)
+            main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+            drawing_main_ns = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+            found: list[dict] = []
+            for sheet in workbook_root.findall(f".//{main_ns}sheet"):
+                sheet_name = str(sheet.attrib.get("name") or "").strip()
+                xbox = area_builder_schematic_xbox(sheet_name)
+                sheet_relation = sheet.attrib.get(f"{rel_ns}id", "")
+                sheet_path = workbook_rels.get(sheet_relation, "")
+                if not xbox or not sheet_path or sheet_path not in names:
+                    continue
+                sheet_rels = area_builder_relationships(archive, sheet_path)
+                drawing_path = next((path for path in sheet_rels.values() if path.startswith("xl/drawings/")), "")
+                if not drawing_path or drawing_path not in names:
+                    continue
+                drawing_rels = area_builder_relationships(archive, drawing_path)
+                drawing_root = ElementTree.fromstring(archive.read(drawing_path))
+                embeds = [
+                    item.attrib.get(f"{rel_ns}embed", "")
+                    for item in drawing_root.findall(f".//{drawing_main_ns}blip")
+                ]
+                image_path = next((drawing_rels.get(embed, "") for embed in embeds if drawing_rels.get(embed, "") in names), "")
+                if not image_path:
+                    continue
+                found.append(
+                    {
+                        "sheet_name": sheet_name,
+                        "xbox": xbox,
+                        "content_type": area_builder_schematic_content_type(image_path),
+                        "image_data": archive.read(image_path),
+                    }
+                )
+            return found
+    except (OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
+        logger.warning("Workbook diagrams could not be extracted; using the interactive map preview")
+        return []
+
+
 def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
     if not contents:
         raise HTTPException(status_code=400, detail="Choose an Excel workbook first")
@@ -2218,6 +2304,33 @@ def fiber_map_reference(request: Request, db: Session = Depends(db_session)):
     return {"success": True, **load_fiber_map_reference(db, program_key)}
 
 
+@app.get("/api/warehouse/fiber-map-schematic")
+def fiber_map_schematic(
+    request: Request,
+    area: str = "",
+    sheet: str = "",
+    db: Session = Depends(db_session),
+):
+    current_user(request)
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    row = (
+        db.query(FiberMapSchematic)
+        .filter(
+            FiberMapSchematic.program == program_key,
+            func.lower(FiberMapSchematic.area) == str(area or "").strip().lower(),
+            FiberMapSchematic.sheet_name == str(sheet or "").strip(),
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Map schematic not found")
+    return Response(
+        content=row.image_data,
+        media_type=row.content_type or "image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 @app.post("/api/warehouse/area-builder/preview")
 async def preview_area_builder(
     request: Request,
@@ -2234,11 +2347,21 @@ async def preview_area_builder(
     area_name, city_name, start, end, users = area_builder_metadata(area, city, start_date, end_date, target_users)
     if not str(workbook.filename or "").lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Upload an .xlsx workbook")
-    payload = build_area_map_from_workbook(await workbook.read(), area_name, city_name)
+    contents = await workbook.read()
+    payload = build_area_map_from_workbook(contents, area_name, city_name)
+    schematics = extract_area_builder_schematics(contents)
     return {
         "success": True,
         "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users},
         **payload,
+        "schematics": [
+            {
+                "sheet_name": row["sheet_name"],
+                "xbox": row["xbox"],
+                "image_url": f"data:{row['content_type']};base64,{base64.b64encode(row['image_data']).decode('ascii')}",
+            }
+            for row in schematics
+        ],
         "preview": {"boxes": payload["boxes"][:12], "routes": payload["routes"][:12]},
     }
 
@@ -2267,7 +2390,10 @@ async def publish_area_builder(
     existing = load_fiber_map_reference(db, program_key)
     if any(rollout_area_key(first_value(row, "Area", "Zone", default="")) == rollout_area_key(area_name) for row in existing.get("boxes") or []):
         raise HTTPException(status_code=409, detail="This area already exists. Use the map editor for changes to an existing area.")
-    payload = build_area_map_from_workbook(await workbook.read(), area_name, city_name)
+    contents = await workbook.read()
+    payload = build_area_map_from_workbook(contents, area_name, city_name)
+    schematics = extract_area_builder_schematics(contents)
+    actor = request_actor(request)
     saved = FiberMapArea(
         program=program_key,
         area=area_name,
@@ -2276,15 +2402,27 @@ async def publish_area_builder(
         end_date=end,
         target_users=users,
         design_data=json.dumps({"boxes": payload["boxes"], "routes": payload["routes"]}, ensure_ascii=False),
-        created_by=request_actor(request),
+        created_by=actor,
     )
     db.add(saved)
+    for schematic in schematics:
+        db.add(
+            FiberMapSchematic(
+                program=program_key,
+                area=area_name,
+                xbox=schematic["xbox"],
+                sheet_name=schematic["sheet_name"],
+                content_type=schematic["content_type"],
+                image_data=schematic["image_data"],
+                created_by=actor,
+            )
+        )
     if not db.query(Site).filter(Site.program == program_key, func.lower(Site.name) == area_name.lower()).first():
         db.add(Site(program=program_key, name=area_name))
-    log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, request_actor(request), {"city": city_name, **payload["summary"]})
+    log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, "schematics": len(schematics), **payload["summary"]})
     db.commit()
     clear_rollout_db_cache()
-    return {"success": True, "message": f"{area_name} was published", "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users}, **payload}
+    return {"success": True, "message": f"{area_name} was published", "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users}, "schematics": [{"sheet_name": row["sheet_name"], "xbox": row["xbox"]} for row in schematics], **payload}
 
 
 def rollout_manual_hub_allowed(area: str, xbox: str, hub_code: str) -> bool:
