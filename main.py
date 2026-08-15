@@ -3537,20 +3537,6 @@ def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGR
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
 
-    # Accessory entries are regular Field Entry records, but place them on a
-    # dedicated worksheet too so supervisors can review Hub-by-Hub quantities.
-    accessory_rows = [
-        row for row in rows
-        if rollout_norm(row.get("item")) in {"hubaccessory", "hubaccessories"}
-    ]
-    if accessory_rows:
-        accessories_sheet = workbook.create_sheet("Hub Accessories")
-        accessories_sheet.append(headers)
-        for row in accessory_rows:
-            accessories_sheet.append([row.get(header, "") for header in headers])
-        accessories_sheet.freeze_panes = "A2"
-        accessories_sheet.auto_filter.ref = accessories_sheet.dimensions
-
     for index, header in enumerate(headers, start=1):
         values = [header] + [str(row.get(header, "") or "") for row in rows[:250]]
         sheet.column_dimensions[chr(64 + index) if index <= 26 else "A"].width = min(42, max(12, max(len(value) for value in values) + 2))
