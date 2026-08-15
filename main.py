@@ -2058,6 +2058,23 @@ def area_builder_line_number(value) -> int:
     return int(match.group(1)) if match else area_builder_number(value)
 
 
+def area_builder_sheet_parts(workbook) -> dict[tuple[str, str], str]:
+    """Use optional schematic tab names as the explicit visual grouping."""
+    parts: dict[tuple[str, str], str] = {}
+    for sheet_name in workbook.sheetnames:
+        match = re.match(r"^\s*X\s*-?\s*(\d+)\s+H\s*(\d+)(?:\s*-\s*H\s*(\d+))?\s*$", sheet_name, flags=re.I)
+        if not match:
+            continue
+        xbox = f"X{int(match.group(1))}"
+        hubs = [f"H{int(match.group(2))}"]
+        if match.group(3):
+            hubs.append(f"H{int(match.group(3))}")
+        label = f"{xbox} {'-'.join(hubs)}"
+        for hub in hubs:
+            parts[(xbox, hub)] = label
+    return parts
+
+
 def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
     if not contents:
         raise HTTPException(status_code=400, detail="Choose an Excel workbook first")
@@ -2081,6 +2098,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
 
     boxes: list[dict] = []
     routes: list[dict] = []
+    sheet_parts = area_builder_sheet_parts(workbook)
     seen_boxes: set[tuple[str, str]] = set()
     seen_routes: set[tuple[str, str]] = set()
     hubs: set[tuple[str, str]] = set()
@@ -2111,7 +2129,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
                 "Zone": area,
                 "Related to XBOX": xbox,
                 "XBOX": xbox,
-                "Part": f"Part{((int(re.search(r'\d+', hub).group()) - 1) // 2) + 1:02d}",
+                "Part": sheet_parts.get((xbox, hub), f"Part{((int(re.search(r'\d+', hub).group()) - 1) // 2) + 1:02d}"),
                 "Hub": hub,
                 "Line": line,
                 "Splitter": 8 if is_end else 9,
@@ -2151,7 +2169,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
                 "Zone": area,
                 "Related to XBOX": xbox,
                 "XBOX": xbox,
-                "Part": f"Part{((int(re.search(r'\d+', target).group()) - 1) // 2) + 1:02d}",
+                "Part": sheet_parts.get((xbox, target), f"Part{((int(re.search(r'\d+', target).group()) - 1) // 2) + 1:02d}"),
                 "Route code": route_code,
                 "Route from": source,
                 "Route to": target,
