@@ -2341,6 +2341,7 @@ function setRolloutDashboardFilter(key,value){
 }
 function renderRolloutDailyProgress(){
 const rows=wh.rolloutDailyProgress||[];
+ensureRolloutDashboardDesignReference();
 const stats=document.getElementById('rolloutDailyStats');
 const table=document.getElementById('rolloutDailyKpi');
 if(!stats||!table)return;
@@ -2366,9 +2367,9 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area))),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rolloutDashboardMetricRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)),area)),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const rawMetric=rolloutMetricFromRows(scopedRows);
+const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
 const metric={...rawMetric};
 if(plan){
   metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
@@ -2602,6 +2603,16 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&session&&
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
 
+function ensureRolloutDashboardDesignReference(){
+  if(warehouseFiberReference||warehouseFiberReferenceLoading)return;
+  warehouseFiberReferenceLoading=true;
+  fetch('/static/assets/fiber-map-data.json',{cache:'no-store'})
+    .then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()})
+    .then(data=>{warehouseFiberReference=data})
+    .catch(()=>{})
+    .finally(()=>{warehouseFiberReferenceLoading=false;renderRolloutDailyProgress()});
+}
+
 function wfmValue(row,names){
   const wanted=(Array.isArray(names)?names:[names]).map(v=>String(v).toLowerCase());
   const key=Object.keys(row||{}).find(k=>wanted.includes(String(k).toLowerCase()));
@@ -2682,6 +2693,38 @@ function wfmParts(area,xbox){
   const groups=new Map();
   [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
   return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length)
+}
+function rolloutDashboardMetricRows(rows,area){
+  if(!warehouseFiberReference||normalizeText(area)==='allareas')return rows;
+  const parts=wfmParts(area,'');
+  if(!parts.length)return rows;
+  const boxCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
+  parts.forEach(part=>{
+    const xbox=wfmXboxKey(part.xbox);
+    xboxCodes.add(xbox);
+    (part.boxRows||[]).forEach(row=>{
+      const code=wfmCodeKey(wfmValue(row,['Box code']));
+      if(code)boxCodes.add(`${xbox}|${code}`);
+      const hub=wfmCodeKey(wfmValue(row,['Hub']));
+      if(hub)hubCodes.add(`${xbox}|${hub}`);
+    });
+    (part.routeRows||[]).forEach(row=>{
+      const code=wfmCodeKey(wfmValue(row,['Route code']));
+      if(code)routeCodes.add(`${xbox}|${code}`);
+    });
+  });
+  return (rows||[]).filter(row=>{
+    const material=normalizeText(wfmText(row));
+    const xbox=wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']));
+    const boxCode=wfmCodeKey(wfmValue(row,['box code','Box code']));
+    const cableCode=wfmCodeKey(wfmValue(row,['cable code','Cable code']));
+    if(material.includes('hubbox'))return !boxCode||hubCodes.has(`${xbox}|${boxCode}`);
+    if(material.includes('xbox'))return !boxCode||xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox);
+    if(material.includes('subbox')||material.includes('endbox'))return !boxCode||boxCodes.has(`${xbox}|${boxCode}`);
+    if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))return !cableCode||boxCodes.has(`${xbox}|${cableCode}`);
+    if(material.includes('4corecable'))return !cableCode||routeCodes.has(`${xbox}|${cableCode}`);
+    return true;
+  });
 }
 function wfmDynamicRows(part){
   const pairs=new Map();(part.routeRows||[]).forEach(row=>{const from=String(wfmValue(row,['Route from'])).match(/^H(\d+)$/i),to=String(wfmValue(row,['Route to'])).match(/^H(\d+)$/i);if(from&&to)pairs.set(Number(from[1]),Number(to[1]))});const used=new Set(),rows=[];
