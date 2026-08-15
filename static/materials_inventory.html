@@ -1660,6 +1660,7 @@ async function publishAreaBuilder(){
     const review=document.getElementById('areaBuilderReview');if(review)review.innerHTML=`<div><strong>Area published</strong><small>${esc(data.message)}. It is now available in the Map and Field Entry.</small></div>`;
     toast(data.message);
   }catch(error){toast(error.message)}finally{const button=document.getElementById('areaBuilderPublishButton');if(button)button.disabled=false}
+}
 function api(path,opts={}){
   path=withProgramQuery(path);
   const isForm=opts.body instanceof FormData;
