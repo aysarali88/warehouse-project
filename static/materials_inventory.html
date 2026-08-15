@@ -1490,7 +1490,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:377,targetHubBox:27,targetXbox:3,targetCableMeters:48129,targetUsers:3016,note:''},
-  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:398,targetHubBox:30,targetXbox:3,targetCableMeters:41140,targetUsers:3104,adjustmentCableMeters:-1755,adjustmentSubEndBox:-23,note:'Map revision across X1, X2, and X3: 35 boxes removed (20 SUB, 15 END), 12 added (6 SUB, 6 END), net -23. Cable design: 2,250 m removed and 495 m added, net -1,755 m. Current target: 41,140 m cable, 398 SUB / END boxes, and 388 Single-Core Distribution cables (3,104 users).'}
+  {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:398,targetHubBox:30,targetXbox:3,targetCableMeters:40800,targetUsers:3152,note:'Dashboard targets use the active Maqawba fiber-map design. Actuals use completed Field Entry records that match an active map code.'}
 ];
 const titles={dashboard:['WH Dashboard',''],setup:['Setup','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['Receive Inventory','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['Movements','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['Users','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
 function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -2699,13 +2699,15 @@ function rolloutDashboardMetricRows(rows,area){
   if(!warehouseFiberReference||normalizeText(area)==='allareas')return rows;
   const parts=wfmParts(area,'');
   if(!parts.length)return rows;
-  const boxCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
+  const enforceExactMaqawbaMetrics=normalizeText(area)==='maqawba';
+  const boxCodes=new Set(),distributionCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
   parts.forEach(part=>{
     const xbox=wfmXboxKey(part.xbox);
     xboxCodes.add(xbox);
     (part.boxRows||[]).forEach(row=>{
       const code=wfmCodeKey(wfmValue(row,['Box code']));
       if(code)boxCodes.add(`${xbox}|${code}`);
+      if(code&&Number(wfmValue(row,['Cable length m']))>0)distributionCodes.add(`${xbox}|${code}`);
       const hub=wfmCodeKey(wfmValue(row,['Hub']));
       if(hub)hubCodes.add(`${xbox}|${hub}`);
     });
@@ -2714,18 +2716,37 @@ function rolloutDashboardMetricRows(rows,area){
       if(code)routeCodes.add(`${xbox}|${code}`);
     });
   });
-  return (rows||[]).filter(row=>{
+  const filtered=(rows||[]).filter(row=>{
     const material=normalizeText(wfmText(row));
     const xbox=wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']));
     const boxCode=wfmCodeKey(wfmValue(row,['box code','Box code']));
     const cableCode=wfmCodeKey(wfmValue(row,['cable code','Cable code']));
-    if(material.includes('hubbox'))return !boxCode||hubCodes.has(`${xbox}|${boxCode}`);
-    if(material.includes('xbox'))return !boxCode||xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox);
-    if(material.includes('subbox')||material.includes('endbox'))return !boxCode||boxCodes.has(`${xbox}|${boxCode}`);
-    if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))return !cableCode||boxCodes.has(`${xbox}|${cableCode}`);
-    if(material.includes('4corecable'))return !cableCode||routeCodes.has(`${xbox}|${cableCode}`);
+    if(material.includes('hubbox'))return enforceExactMaqawbaMetrics?hubCodes.has(`${xbox}|${boxCode}`):!boxCode||hubCodes.has(`${xbox}|${boxCode}`);
+    if(material.includes('xbox'))return enforceExactMaqawbaMetrics?xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox):!boxCode||xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox);
+    if(material.includes('subbox')||material.includes('endbox'))return enforceExactMaqawbaMetrics?boxCodes.has(`${xbox}|${boxCode}`):!boxCode||boxCodes.has(`${xbox}|${boxCode}`);
+    if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))return enforceExactMaqawbaMetrics?distributionCodes.has(`${xbox}|${cableCode}`):!cableCode||boxCodes.has(`${xbox}|${cableCode}`);
+    if(material.includes('4corecable'))return enforceExactMaqawbaMetrics?routeCodes.has(`${xbox}|${cableCode}`):!cableCode||routeCodes.has(`${xbox}|${cableCode}`);
     return true;
   });
+  if(!enforceExactMaqawbaMetrics)return filtered;
+  const unique=new Map();
+  filtered.forEach((row,index)=>{
+    const material=normalizeText(wfmText(row));
+    const xbox=wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']));
+    const boxCode=wfmCodeKey(wfmValue(row,['box code','Box code']));
+    const cableCode=wfmCodeKey(wfmValue(row,['cable code','Cable code']));
+    let key='';
+    if(material.includes('hubbox'))key=`hub|${xbox}|${boxCode}`;
+    else if(material.includes('xbox'))key=`xbox|${xbox}`;
+    else if(material.includes('subbox')||material.includes('endbox'))key=`box|${xbox}|${boxCode}`;
+    else if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))key=`distribution|${xbox}|${cableCode}`;
+    else if(material.includes('4corecable'))key=`fourcore|${xbox}|${cableCode}`;
+    if(!key){unique.set(`other|${index}`,row);return}
+    const previous=unique.get(key);
+    const stamp=value=>`${String(wfmValue(value,['Date','date'])||'')}${String(wfmValue(value,['entry time','entry_time'])||'')}${String(wfmValue(value,['ID','id'])||'')}`;
+    if(!previous||stamp(row)>=stamp(previous))unique.set(key,row);
+  });
+  return [...unique.values()];
 }
 function wfmDynamicRows(part){
   const pairs=new Map();(part.routeRows||[]).forEach(row=>{const from=String(wfmValue(row,['Route from'])).match(/^H(\d+)$/i),to=String(wfmValue(row,['Route to'])).match(/^H(\d+)$/i);if(from&&to)pairs.set(Number(from[1]),Number(to[1]))});const used=new Set(),rows=[];
