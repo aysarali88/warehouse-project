@@ -597,7 +597,7 @@ body.sr-program .login-logo img{
 .fiber-map-pdf-page{width:1200px;background:#fff;color:#0a335d}.fiber-map-pdf-page header{border-bottom:2px solid #0b81b8;margin-bottom:14px;padding:0 0 12px}.fiber-map-pdf-page h1{margin:0;color:#0b4d95;font-size:28px}.fiber-map-pdf-page p{margin:5px 0 0;color:#38556f;font-size:14px;font-weight:700}.fiber-map-pdf-legend{display:flex;gap:18px;margin-top:10px;color:#38556f;font-size:12px;font-weight:800}.fiber-map-pdf-page .map-card{border:0;background:#fff}.fiber-map-pdf-page .fiber-map-svg{width:1200px;max-width:none;min-width:0}.fiber-map-svg .map-entry-target{cursor:pointer}.fiber-map-svg .map-entry-target:hover{filter:drop-shadow(0 0 5px rgba(11,129,184,.55))}
 #topStockOut .chart-row b{white-space:normal;line-height:1.25}
 #topStockOut .chart-row b small{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:800}
-.area-builder-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.area-builder-actions .btn[disabled]{opacity:.45;cursor:not-allowed}.area-builder-review-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}.area-builder-review-table th,.area-builder-review-table td{padding:7px;border-bottom:1px solid var(--line);text-align:left}.area-builder-review-table th{color:#075b78;background:#edf8fa}
+.area-builder-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.area-builder-actions .btn[disabled]{opacity:.45;cursor:not-allowed}.area-builder-review-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}.area-builder-review-table th,.area-builder-review-table td{padding:7px;border-bottom:1px solid var(--line);text-align:left}.area-builder-review-table th{color:#075b78;background:#edf8fa}.area-builder-map-preview{margin-top:14px;border:1px solid #c8e3e7;border-radius:8px;background:#fff;padding:14px}.area-builder-map-preview.hidden{display:none}.area-builder-map-preview h3{margin:0;color:#075b78;font-size:17px}.area-builder-map-preview p{margin:5px 0 12px;color:var(--muted);font-size:12px;font-weight:800}.area-builder-map-preview .map-stage{overflow:auto}.area-builder-map-preview .fiber-map-svg{width:2400px;max-width:none;min-width:1500px}
 </style>
 <style>
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1059,6 +1059,7 @@ body.sr-program .login-logo img{
             </div>
         </div>
       </div>
+      <div class="area-builder-map-preview hidden" id="areaBuilderMapPreview"></div>
     </div>
   </section>
 
@@ -1637,7 +1638,7 @@ async function previewAreaBuilder(){
 }
 function buildAreaBuilderPreview(){
   if(!areaBuilderPreviewState){toast('Review the workbook first');return}
-  const review=document.getElementById('areaBuilderReview');if(!review)return;
+  const preview=document.getElementById('areaBuilderMapPreview');if(!preview)return;
   const area=areaBuilderPreviewState.area?.name||'';
   const previewData={boxes:areaBuilderPreviewState.boxes||[],routes:areaBuilderPreviewState.routes||[]};
   const previousReference=warehouseFiberReference;
@@ -1645,7 +1646,8 @@ function buildAreaBuilderPreview(){
     warehouseFiberReference=previewData;
     const xboxes=[...new Set(previewData.boxes.map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
     const parts=xboxes.flatMap(xbox=>wfmParts(area,xbox));
-    review.innerHTML=`<div><strong>Map preview</strong><small>This is a draft generated from the workbook. It has not been published.</small></div><div class="map-stage">${parts.map(part=>wfmRenderPart(part,[])).join('')}</div>`;
+    preview.classList.remove('hidden');
+    preview.innerHTML=`<h3>Map preview</h3><p>This is a draft generated from the workbook. It has not been published.</p><div class="map-stage">${parts.map(part=>wfmRenderPart(part,[])).join('')}</div>`;
   }finally{warehouseFiberReference=previousReference}
   toast('Map preview built from the workbook design');
 }
