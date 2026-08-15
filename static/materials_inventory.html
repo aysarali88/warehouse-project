@@ -2537,7 +2537,9 @@ const targetSubEndBox=Math.max(Number(dashboardTarget.subEndBox||plan?.targetSub
 const targetHubBox=Math.max(Number(dashboardTarget.hubBox||plan?.targetHubBox||0),1);
 const targetXbox=Math.max(Number(dashboardTarget.xbox||plan?.targetXbox||0),1);
 const usersPct=Math.min(100,(metric.actualUsers/Math.max(targetUsers,1))*100);
-const latest=metric.latestDate||[...rows].map(r=>String(r.Date||'').slice(0,10)).filter(Boolean).sort().pop()||'';
+  // A new area must not inherit the latest Field Entry date from another area.
+  // Until it has its own completed record, show its configured project start.
+  const latest=metric.latestDate||rolloutDashboardFilters.date||plan?.start||rolloutTimelineToday();
 const timelineStart=plan?.start||ROLLOUT_DASHBOARD_PLAN.map(p=>p.start).sort()[0]||latest;
 const timelineEnd=plan?.end||ROLLOUT_DASHBOARD_PLAN.map(p=>p.end).sort().pop()||latest;
 const totalDays=rolloutDaysInclusive(timelineStart,timelineEnd);
