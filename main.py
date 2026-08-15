@@ -34,6 +34,7 @@ from models import (
     AuditLog,
     AppSession,
     AppUser,
+    FiberMapArea,
     IssueOrder,
     IssueOrderItem,
     MaterialRequisition,
@@ -65,7 +66,7 @@ ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
 ROLLOUT_DB_CACHE_TTL = 30
 ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
 ROLLOUT_ENTRY_ID_CACHE_TTL = 30
-ROLLOUT_CODE_REFERENCE_CACHE: list[dict] | None = None
+ROLLOUT_CODE_REFERENCE_CACHE: dict[str, list[dict]] = {}
 
 # Hay Demashq has no uploaded fiber map yet. These approved HUB codes keep
 # Hub Accessories entry available while preserving Area/XBOX validation.
@@ -1480,6 +1481,7 @@ def clear_rollout_db_cache():
     global ROLLOUT_DB_CACHE, ROLLOUT_ENTRY_ID_CACHE
     ROLLOUT_DB_CACHE = None
     ROLLOUT_ENTRY_ID_CACHE = None
+    ROLLOUT_CODE_REFERENCE_CACHE.clear()
 
 
 def log_audit(db: Session, action: str, entity_type: str, entity_id: str, actor: str, details: dict):
@@ -1891,25 +1893,51 @@ def rollout_entry_mode(data: dict) -> str:
     return ""
 
 
-def load_fiber_map_reference() -> dict:
+def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> dict:
+    data: dict = {"boxes": [], "routes": [], "area_plans": []}
     try:
         with open(FIBER_MAP_REFERENCE_PATH, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-            if isinstance(data, dict):
-                return data
+            source = json.load(handle)
+            if isinstance(source, dict):
+                data["boxes"] = list(source.get("boxes") or [])
+                data["routes"] = list(source.get("routes") or [])
     except FileNotFoundError:
         logger.warning("Fiber map reference not found: %s", FIBER_MAP_REFERENCE_PATH)
     except Exception:
         logger.exception("Could not read fiber map reference")
-    return {"boxes": [], "routes": []}
+    if db is None:
+        return data
+    for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
+        try:
+            payload = json.loads(saved_area.design_data or "{}")
+        except (TypeError, ValueError):
+            logger.warning("Ignoring unreadable saved fiber map for %s", saved_area.area)
+            continue
+        data["boxes"].extend(payload.get("boxes") or [])
+        data["routes"].extend(payload.get("routes") or [])
+        data["area_plans"].append(
+            {
+                "city": saved_area.city,
+                "area": saved_area.area,
+                "start": saved_area.start_date,
+                "end": saved_area.end_date,
+                "targetSubEndBox": len(payload.get("boxes") or []),
+                "targetHubBox": len({(rollout_xbox_key(row.get("Related to XBOX")), str(row.get("Hub") or "").strip()) for row in payload.get("boxes") or [] if row.get("Hub")}),
+                "targetXbox": len({rollout_xbox_key(row.get("Related to XBOX")) for row in payload.get("boxes") or [] if row.get("Related to XBOX")}),
+                "targetCableMeters": sum(safe_float(row.get("Cable length m")) for row in payload.get("boxes") or []),
+                "targetUsers": saved_area.target_users,
+                "dynamic": True,
+            }
+        )
+    return data
 
 
-def rollout_code_reference_rows() -> list[dict]:
-    global ROLLOUT_CODE_REFERENCE_CACHE
-    if ROLLOUT_CODE_REFERENCE_CACHE is not None:
-        return ROLLOUT_CODE_REFERENCE_CACHE
+def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
+    program_key = normalize_program(program)
+    if program_key in ROLLOUT_CODE_REFERENCE_CACHE:
+        return ROLLOUT_CODE_REFERENCE_CACHE[program_key]
 
-    ref = load_fiber_map_reference()
+    ref = load_fiber_map_reference(db, program_key)
     rows: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
 
@@ -1961,22 +1989,282 @@ def rollout_code_reference_rows() -> list[dict]:
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
         add(row, code, "cable", "route")
-    ROLLOUT_CODE_REFERENCE_CACHE = rows
-    return ROLLOUT_CODE_REFERENCE_CACHE
+    ROLLOUT_CODE_REFERENCE_CACHE[program_key] = rows
+    return rows
 
 
-def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str) -> list[dict]:
+def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str, db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
     area_key = rollout_area_key(area)
     xbox_key = rollout_xbox_key(xbox)
     code_key = rollout_code_key(code)
     return [
         row
-        for row in rollout_code_reference_rows()
+        for row in rollout_code_reference_rows(db, program)
         if row["type"] == code_type
         and rollout_area_key(row.get("area")) == area_key
         and rollout_xbox_key(row.get("xbox")) == xbox_key
         and rollout_code_key(row.get("code")) == code_key
     ]
+
+
+def area_builder_header_key(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str]) -> list[dict]:
+    if sheet_name not in workbook.sheetnames:
+        raise HTTPException(status_code=400, detail=f"Workbook is missing the '{sheet_name}' sheet")
+    sheet = workbook[sheet_name]
+    header_row = None
+    header_map: dict[str, int] = {}
+    for index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+        candidate = {area_builder_header_key(value): column for column, value in enumerate(row) if area_builder_header_key(value)}
+        if required_headers.issubset(candidate):
+            header_row = index
+            header_map = candidate
+            break
+        if index >= 25:
+            break
+    if header_row is None:
+        raise HTTPException(status_code=400, detail=f"Could not find the required columns in '{sheet_name}'")
+
+    rows: list[dict] = []
+    for values in sheet.iter_rows(min_row=header_row + 1, values_only=True):
+        item = {
+            header: values[column] if column < len(values) else ""
+            for header, column in header_map.items()
+        }
+        if any(str(value or "").strip() for value in item.values()):
+            rows.append(item)
+    return rows
+
+
+def area_builder_hub_code(value) -> str:
+    match = re.search(r"\b(H\s*\d+)\b", str(value or "").upper())
+    return re.sub(r"\s+", "", match.group(1)) if match else ""
+
+
+def area_builder_xbox_code(value) -> str:
+    match = re.search(r"\bX\s*-?\s*BOX\s*0*(\d+)\b|\bX\s*0*(\d+)\b", str(value or "").upper())
+    return f"X{int(match.group(1) or match.group(2))}" if match else ""
+
+
+def area_builder_number(value) -> int:
+    return max(0, int(round(safe_float(value))))
+
+
+def area_builder_line_number(value) -> int:
+    match = re.search(r"\bL\s*(\d+)\b", str(value or ""), flags=re.I)
+    return int(match.group(1)) if match else area_builder_number(value)
+
+
+def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
+    if not contents:
+        raise HTTPException(status_code=400, detail="Choose an Excel workbook first")
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Workbook must be 5 MB or smaller")
+    try:
+        workbook = load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="The workbook could not be read. Upload the approved .xlsx layout.") from exc
+
+    hub_rows = area_builder_sheet_rows(
+        workbook,
+        "Hub Index",
+        {"xbox", "hub", "from", "tohub", "qlcactualm", "qlcpreconm"},
+    )
+    cable_rows = area_builder_sheet_rows(
+        workbook,
+        "Cable Data",
+        {"subbox", "hub", "xbox", "line", "sequence", "actuallengthm", "preconlengthm", "splitter"},
+    )
+
+    boxes: list[dict] = []
+    routes: list[dict] = []
+    seen_boxes: set[tuple[str, str]] = set()
+    seen_routes: set[tuple[str, str]] = set()
+    hubs: set[tuple[str, str]] = set()
+    xboxes: set[str] = set()
+    distribution_meters = 0
+    core_meters = 0
+
+    for row in cable_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        hub = area_builder_hub_code(row.get("hub"))
+        line = area_builder_line_number(row.get("line"))
+        sequence = area_builder_number(row.get("sequence"))
+        planned = area_builder_number(row.get("preconlengthm"))
+        actual = area_builder_number(row.get("actuallengthm"))
+        splitter = str(row.get("splitter") or "").replace(" ", "")
+        if not xbox or not hub or line < 1 or sequence < 1 or planned < 1:
+            raise HTTPException(status_code=400, detail="Cable Data contains a row without XBOX, HUB, line, sequence, or planned length")
+        code = f"{hub}-L{line}-S{sequence}"
+        box_key = (xbox, code)
+        if box_key in seen_boxes:
+            raise HTTPException(status_code=400, detail=f"Cable Data contains the code {code} more than once for {xbox}")
+        seen_boxes.add(box_key)
+        is_end = "1:8" in splitter or "1x8" in splitter.lower()
+        boxes.append(
+            {
+                "Area": area,
+                "City": city,
+                "Zone": area,
+                "Related to XBOX": xbox,
+                "XBOX": xbox,
+                "Part": f"Part{((int(re.search(r'\d+', hub).group()) - 1) // 2) + 1:02d}",
+                "Hub": hub,
+                "Line": line,
+                "Splitter": 8 if is_end else 9,
+                "Box code": code,
+                "Box type": "END BOX" if is_end else "SUB BOX",
+                "Real length m": actual,
+                "Cable length m": planned,
+                "Material type": f"Single-Core Distribution Cable_{planned}m",
+            }
+        )
+        hubs.add((xbox, hub))
+        xboxes.add(xbox)
+        distribution_meters += planned
+
+    for row in hub_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        # Each Hub Index row describes the cable that ends at its own Hub.
+        # "To Hub" is a topology hint for the next node, not this cable's end.
+        target = area_builder_hub_code(row.get("hub"))
+        source_value = str(row.get("from") or "").strip()
+        source = area_builder_xbox_code(source_value) or area_builder_hub_code(source_value)
+        planned = area_builder_number(row.get("qlcpreconm"))
+        actual = area_builder_number(row.get("qlcactualm"))
+        if not xbox or not target or not source or planned < 1:
+            raise HTTPException(status_code=400, detail="Hub Index contains a row without XBOX, From, To Hub, or planned length")
+        route_code = f"{source}-{target}"
+        route_key = (xbox, route_code)
+        if route_key in seen_routes:
+            raise HTTPException(status_code=400, detail=f"Hub Index contains the route {route_code} more than once for {xbox}")
+        seen_routes.add(route_key)
+        routes.append(
+            {
+                "Area": area,
+                "City": city,
+                "Zone": area,
+                "Related to XBOX": xbox,
+                "XBOX": xbox,
+                "Part": f"Part{((int(re.search(r'\d+', target).group()) - 1) // 2) + 1:02d}",
+                "Route code": route_code,
+                "Route from": source,
+                "Route to": target,
+                "Real length m": actual,
+                "Cable length m": planned,
+                "Material type": f"4-coreCable_{planned}m",
+            }
+        )
+        xboxes.add(xbox)
+        core_meters += planned
+
+    if not boxes or not routes:
+        raise HTTPException(status_code=400, detail="The workbook must contain both Cable Data and Hub Index records")
+    return {
+        "boxes": boxes,
+        "routes": routes,
+        "summary": {
+            "xboxes": len(xboxes),
+            "hubs": len(hubs),
+            "sub_end_boxes": len(boxes),
+            "distribution_meters": distribution_meters,
+            "core_meters": core_meters,
+            "total_cable_meters": distribution_meters + core_meters,
+        },
+    }
+
+
+def area_builder_metadata(area: str, city: str, start_date: str, end_date: str, target_users: int) -> tuple[str, str, str, str, int]:
+    area_name = str(area or "").strip()
+    city_name = str(city or "").strip()
+    if not area_name or not city_name:
+        raise HTTPException(status_code=400, detail="Enter both Area name and City")
+    try:
+        start = datetime.fromisoformat(str(start_date or "")).date()
+        end = datetime.fromisoformat(str(end_date or "")).date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Enter valid start and end dates") from exc
+    if end < start:
+        raise HTTPException(status_code=400, detail="End date cannot be before start date")
+    return area_name, city_name, start.isoformat(), end.isoformat(), max(0, int(target_users or 0))
+
+
+@app.get("/api/warehouse/fiber-map-reference")
+def fiber_map_reference(request: Request, db: Session = Depends(db_session)):
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    return {"success": True, **load_fiber_map_reference(db, program_key)}
+
+
+@app.post("/api/warehouse/area-builder/preview")
+async def preview_area_builder(
+    request: Request,
+    area: str = Form(""),
+    city: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    target_users: int = Form(0),
+    workbook: UploadFile = File(...),
+):
+    require_roles(request, "Admin")
+    if is_single_ran(getattr(request.state, "program", DEFAULT_PROGRAM)):
+        raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
+    area_name, city_name, start, end, users = area_builder_metadata(area, city, start_date, end_date, target_users)
+    if not str(workbook.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Upload an .xlsx workbook")
+    payload = build_area_map_from_workbook(await workbook.read(), area_name, city_name)
+    return {
+        "success": True,
+        "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users},
+        **payload,
+        "preview": {"boxes": payload["boxes"][:12], "routes": payload["routes"][:12]},
+    }
+
+
+@app.post("/api/warehouse/area-builder/publish")
+async def publish_area_builder(
+    request: Request,
+    area: str = Form(""),
+    city: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    target_users: int = Form(0),
+    confirmed: str = Form(""),
+    workbook: UploadFile = File(...),
+    db: Session = Depends(db_session),
+):
+    require_roles(request, "Admin")
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    if is_single_ran(program_key):
+        raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
+    if str(confirmed).strip().lower() != "publish":
+        raise HTTPException(status_code=400, detail="Confirm publishing before creating the area")
+    area_name, city_name, start, end, users = area_builder_metadata(area, city, start_date, end_date, target_users)
+    if not str(workbook.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Upload an .xlsx workbook")
+    existing = load_fiber_map_reference(db, program_key)
+    if any(rollout_area_key(first_value(row, "Area", "Zone", default="")) == rollout_area_key(area_name) for row in existing.get("boxes") or []):
+        raise HTTPException(status_code=409, detail="This area already exists. Use the map editor for changes to an existing area.")
+    payload = build_area_map_from_workbook(await workbook.read(), area_name, city_name)
+    saved = FiberMapArea(
+        program=program_key,
+        area=area_name,
+        city=city_name,
+        start_date=start,
+        end_date=end,
+        target_users=users,
+        design_data=json.dumps({"boxes": payload["boxes"], "routes": payload["routes"]}, ensure_ascii=False),
+        created_by=request_actor(request),
+    )
+    db.add(saved)
+    if not db.query(Site).filter(Site.program == program_key, func.lower(Site.name) == area_name.lower()).first():
+        db.add(Site(program=program_key, name=area_name))
+    log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, request_actor(request), {"city": city_name, **payload["summary"]})
+    db.commit()
+    clear_rollout_db_cache()
+    return {"success": True, "message": f"{area_name} was published", "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users}, **payload}
 
 
 def rollout_manual_hub_allowed(area: str, xbox: str, hub_code: str) -> bool:
@@ -3125,7 +3413,7 @@ def rollout_entry_reference(
         ]
     latest = list(reversed(latest_records))[: min(max(limit, 1), 200)]
 
-    refs = rollout_code_reference_rows()
+    refs = rollout_code_reference_rows(db, getattr(request.state, "program", DEFAULT_PROGRAM))
     areas_map: dict[str, dict] = {}
     xboxes_map: dict[str, set[str]] = {}
     for row in refs:
@@ -3220,7 +3508,7 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
     if code_type in {"cable", "box"}:
         if not raw_code:
             raise HTTPException(status_code=400, detail="Select a code from the list")
-        matches = rollout_reference_matches(area, xbox, raw_code, code_type)
+        matches = rollout_reference_matches(area, xbox, raw_code, code_type, db, getattr(request.state, "program", DEFAULT_PROGRAM))
         if not matches:
             raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
 
@@ -3325,7 +3613,7 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
 
     hub_matches = [
         row
-        for row in rollout_reference_matches(area, xbox, hub_code, "box")
+        for row in rollout_reference_matches(area, xbox, hub_code, "box", db, getattr(request.state, "program", DEFAULT_PROGRAM))
         if "hub" in rollout_norm(row.get("box_type") or "")
     ]
     if not hub_matches and not rollout_manual_hub_allowed(area, xbox, hub_code):
@@ -3427,7 +3715,7 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     if code_type in {"cable", "box"}:
         if not raw_code:
             raise HTTPException(status_code=400, detail="Select a code from the list")
-        matches = rollout_reference_matches(area, xbox, raw_code, code_type)
+        matches = rollout_reference_matches(area, xbox, raw_code, code_type, db, getattr(request.state, "program", DEFAULT_PROGRAM))
         if not matches:
             raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
 

@@ -44,6 +44,22 @@ class RolloutEntryCounter(Base):
     next_value = Column(Integer, nullable=False)
 
 
+class FiberMapArea(Base):
+    __tablename__ = "fiber_map_areas"
+    __table_args__ = (UniqueConstraint("program", "area", name="uq_fiber_map_area_program_area"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    area = Column(String, nullable=False, index=True)
+    city = Column(String, default="")
+    start_date = Column(String, default="")
+    end_date = Column(String, default="")
+    target_users = Column(Integer, default=0)
+    design_data = Column(Text, nullable=False)
+    created_by = Column(String, default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Warehouse(Base):
     __tablename__ = "warehouses"
     __table_args__ = (UniqueConstraint("program", "name", name="uq_warehouse_program_name"),)

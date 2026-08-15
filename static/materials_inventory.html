@@ -597,6 +597,7 @@ body.sr-program .login-logo img{
 .fiber-map-pdf-page{width:1200px;background:#fff;color:#0a335d}.fiber-map-pdf-page header{border-bottom:2px solid #0b81b8;margin-bottom:14px;padding:0 0 12px}.fiber-map-pdf-page h1{margin:0;color:#0b4d95;font-size:28px}.fiber-map-pdf-page p{margin:5px 0 0;color:#38556f;font-size:14px;font-weight:700}.fiber-map-pdf-legend{display:flex;gap:18px;margin-top:10px;color:#38556f;font-size:12px;font-weight:800}.fiber-map-pdf-page .map-card{border:0;background:#fff}.fiber-map-pdf-page .fiber-map-svg{width:1200px;max-width:none;min-width:0}.fiber-map-svg .map-entry-target{cursor:pointer}.fiber-map-svg .map-entry-target:hover{filter:drop-shadow(0 0 5px rgba(11,129,184,.55))}
 #topStockOut .chart-row b{white-space:normal;line-height:1.25}
 #topStockOut .chart-row b small{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:800}
+.area-builder-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.area-builder-actions .btn[disabled]{opacity:.45;cursor:not-allowed}.area-builder-review-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}.area-builder-review-table th,.area-builder-review-table td{padding:7px;border-bottom:1px solid var(--line);text-align:left}.area-builder-review-table th{color:#075b78;background:#edf8fa}
 </style>
 <style>
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1047,10 +1048,15 @@ body.sr-program .login-logo img{
         </div>
         <div class="card">
           <h3>Design Summary</h3>
-          <div class="area-builder-summary">
-            <div><span>XBOX</span><strong>-</strong></div><div><span>HUB</span><strong>-</strong></div><div><span>SUB / END</span><strong>-</strong></div><div><span>Distribution</span><strong>-</strong></div><div><span>4-core</span><strong>-</strong></div>
-          </div>
-          <div class="area-builder-file" style="margin-top:14px"><div><strong>Workbook review</strong><small>The review and publish controls will use the approved Excel layout shown in this workspace.</small></div></div>
+            <div class="area-builder-summary">
+              <div><span>XBOX</span><strong id="areaBuilderXbox">-</strong></div><div><span>HUB</span><strong id="areaBuilderHub">-</strong></div><div><span>SUB / END</span><strong id="areaBuilderSubEnd">-</strong></div><div><span>Distribution</span><strong id="areaBuilderDistribution">-</strong></div><div><span>4-core</span><strong id="areaBuilderCore">-</strong></div>
+            </div>
+            <div class="area-builder-file" id="areaBuilderReview" style="margin-top:14px"><div><strong>Workbook review</strong><small>Upload the approved Excel layout, then review the generated codes before publishing.</small></div></div>
+            <div class="area-builder-actions">
+              <button class="btn soft" type="button" id="areaBuilderReviewButton" onclick="previewAreaBuilder()">Review workbook</button>
+              <button class="btn soft" type="button" id="areaBuilderPreviewButton" onclick="buildAreaBuilderPreview()" disabled>Build map preview</button>
+              <button class="btn primary" type="button" id="areaBuilderPublishButton" onclick="publishAreaBuilder()" disabled>Publish area</button>
+            </div>
         </div>
       </div>
     </div>
@@ -1592,6 +1598,68 @@ function programLogoAlt(){return PROGRAM_LOGO_ALTS[normalizeProgram(currentProgr
 function withProgramQuery(path){if(!String(path||'').startsWith('/api/warehouse'))return path;const [base,hash='']=String(path).split('#');const [url,query='']=base.split('?');const params=new URLSearchParams(query);if(!params.has('program'))params.set('program',normalizeProgram(currentProgram));return url+'?'+params.toString()+(hash?'#'+hash:'')}
 function scopedJsonBody(body){if(!body||typeof body!=='string')return body;try{const data=JSON.parse(body);if(data&&typeof data==='object'&&!Array.isArray(data)&&!data.program){data.program=normalizeProgram(currentProgram);return JSON.stringify(data)}}catch(e){}return body}
 async function refreshCsrfToken(){const res=await fetch('/api/auth/me',{cache:'no-store',credentials:'same-origin'});const data=await res.json().catch(()=>({}));if(!res.ok||!data.csrf_token)return false;csrfToken=data.csrf_token;session=data.user||session;return true}
+let areaBuilderPreviewState=null;
+function areaBuilderFormData(confirmed=''){
+  const file=document.getElementById('areaBuilderWorkbook')?.files?.[0];
+  if(!file)throw new Error('Choose the structured Excel workbook first');
+  const data=new FormData();
+  data.append('area',document.getElementById('areaBuilderName').value.trim());
+  data.append('city',document.getElementById('areaBuilderCity').value.trim());
+  data.append('start_date',document.getElementById('areaBuilderStart').value);
+  data.append('end_date',document.getElementById('areaBuilderEnd').value);
+  data.append('target_users',document.getElementById('areaBuilderUsers').value||'0');
+  data.append('workbook',file);
+  if(confirmed)data.append('confirmed',confirmed);
+  return data;
+}
+function renderAreaBuilderSummary(summary={}){
+  const set=(id,value,suffix='')=>{const el=document.getElementById(id);if(el)el.textContent=value===undefined||value===null?'-':fmt(value)+suffix};
+  set('areaBuilderXbox',summary.xboxes);set('areaBuilderHub',summary.hubs);set('areaBuilderSubEnd',summary.sub_end_boxes);set('areaBuilderDistribution',summary.distribution_meters,' m');set('areaBuilderCore',summary.core_meters,' m');
+}
+function areaBuilderReviewHtml(data,full=false){
+  const preview=data.preview||data;
+  const routes=preview.routes||[];const boxes=preview.boxes||[];
+  const rows=(full?[...routes,...boxes]:[...routes.slice(0,5),...boxes.slice(0,7)]).map(row=>{
+    const code=row['Route code']||row['Box code']||'';const type=row['Route code']?'4-core route':row['Box type']||'Box';
+    return `<tr><td>${esc(code)}</td><td>${esc(type)}</td><td>${fmt(row['Cable length m']||0)} m</td></tr>`;
+  }).join('');
+  return `<div><strong>${full?'Map preview':'Workbook checked'}</strong><small>${fmt(data.summary?.xboxes||0)} XBOX, ${fmt(data.summary?.hubs||0)} HUB, ${fmt(data.summary?.sub_end_boxes||0)} SUB / END. Total design cable: ${fmt(data.summary?.total_cable_meters||0)} m.</small><table class="area-builder-review-table"><thead><tr><th>Code</th><th>Type</th><th>Design length</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function previewAreaBuilder(){
+  try{
+    const button=document.getElementById('areaBuilderReviewButton');if(button)button.disabled=true;
+    const data=await api('/api/warehouse/area-builder/preview',{method:'POST',body:areaBuilderFormData()});
+    areaBuilderPreviewState=data;renderAreaBuilderSummary(data.summary);
+    const review=document.getElementById('areaBuilderReview');if(review)review.innerHTML=areaBuilderReviewHtml(data);
+    document.getElementById('areaBuilderPreviewButton').disabled=false;document.getElementById('areaBuilderPublishButton').disabled=false;
+    toast('Workbook checked. Review the generated design before publishing.');
+  }catch(error){toast(error.message)}finally{const button=document.getElementById('areaBuilderReviewButton');if(button)button.disabled=false}
+}
+function buildAreaBuilderPreview(){
+  if(!areaBuilderPreviewState){toast('Review the workbook first');return}
+  const review=document.getElementById('areaBuilderReview');if(!review)return;
+  const area=areaBuilderPreviewState.area?.name||'';
+  const previewData={boxes:areaBuilderPreviewState.boxes||[],routes:areaBuilderPreviewState.routes||[]};
+  const previousReference=warehouseFiberReference;
+  try{
+    warehouseFiberReference=previewData;
+    const xboxes=[...new Set(previewData.boxes.map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
+    const parts=xboxes.flatMap(xbox=>wfmParts(area,xbox));
+    review.innerHTML=`<div><strong>Map preview</strong><small>This is a draft generated from the workbook. It has not been published.</small></div><div class="map-stage">${parts.map(part=>wfmRenderPart(part,[])).join('')}</div>`;
+  }finally{warehouseFiberReference=previousReference}
+  toast('Map preview built from the workbook design');
+}
+async function publishAreaBuilder(){
+  if(!areaBuilderPreviewState){toast('Review the workbook first');return}
+  const area=document.getElementById('areaBuilderName').value.trim();
+  if(!confirm(`Publish ${area} to the live map and Field Entry? This creates a new area.`))return;
+  try{
+    const button=document.getElementById('areaBuilderPublishButton');if(button)button.disabled=true;
+    const data=await api('/api/warehouse/area-builder/publish',{method:'POST',body:areaBuilderFormData('publish')});
+    warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true);
+    const review=document.getElementById('areaBuilderReview');if(review)review.innerHTML=`<div><strong>Area published</strong><small>${esc(data.message)}. It is now available in the Map and Field Entry.</small></div>`;
+    toast(data.message);
+  }catch(error){toast(error.message)}finally{const button=document.getElementById('areaBuilderPublishButton');if(button)button.disabled=false}
 function api(path,opts={}){
   path=withProgramQuery(path);
   const isForm=opts.body instanceof FormData;
@@ -1689,15 +1757,15 @@ function serialLines(id){return document.getElementById(id).value.split(/\r?\n/)
 function clearWarehouseBootstrapCache(){clearWarehouseLocalCaches()}
 function chooseProgramBeforeLogin(program){currentProgram=normalizeProgram(program);localStorage.setItem('warehouseProgram',currentProgram);const mrLinesBox=document.getElementById('mrLines');if(mrLinesBox)mrLinesBox.innerHTML='';applyProgramBranding();document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden');setTimeout(()=>document.getElementById('loginUser')?.focus(),50)}
 function backToProgramChoice(){loginPass.value='';currentProgram='FTTH';localStorage.removeItem('warehouseProgram');applyProgramBranding();document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
-async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse()}catch(e){toast(e.message)}}
+async function loginApp(){try{const data=await api('/api/auth/login',{method:'POST',body:JSON.stringify({username:loginUser.value.trim(),password:loginPass.value,program:normalizeProgram(currentProgram)})});clearWarehouseBootstrapCache();session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);localStorage.setItem('warehouseProgram',currentProgram);activeUser=session.name;activeRole=session.role;activeWarehouseAssignment=session.warehouse_name||'';loginPass.value='';applyAuthState();await loadWarehouse();warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true)}catch(e){toast(e.message)}}
 async function logoutApp(){try{await api('/api/auth/logout',{method:'POST'})}catch(e){}localStorage.removeItem('warehouseSession');localStorage.removeItem('warehouseProgram');clearWarehouseBootstrapCache();session=null;csrfToken='';activeUser='';activeRole='';activeWarehouseAssignment='';currentProgram='FTTH';applyProgramBranding();document.body.classList.remove('awaiting-program');document.getElementById('appShell').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('programScreen').classList.remove('hidden')}
-async function restoreServerSession(){localStorage.removeItem('warehouseSession');try{const data=await api('/api/auth/me');session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);applyAuthState();await loadWarehouse()}catch(e){session=null;csrfToken='';applyAuthState()}}
+async function restoreServerSession(){localStorage.removeItem('warehouseSession');try{const data=await api('/api/auth/me');session=data.user;csrfToken=data.csrf_token||'';currentProgram=normalizeProgram(session.program||currentProgram);applyAuthState();await loadWarehouse();warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true)}catch(e){session=null;csrfToken='';applyAuthState()}}
 function uiState(){try{return JSON.parse(localStorage.getItem(UI_STATE_KEY)||'{}')}catch(e){return{}}}
 function saveUiState(patch){localStorage.setItem(UI_STATE_KEY,JSON.stringify({...uiState(),...patch}))}
 function pageLinkState(){const view=document.querySelector('.nav button.active')?.dataset.view||'dashboard';const params=new URLSearchParams();if(view==='rolloutDaily'&&!isSingleRan()){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab!=='kpi')params.set('tab',tab);if(tab==='map'){if(warehouseFiberSelectedArea)params.set('area',warehouseFiberSelectedArea);if(warehouseFiberSelectedScope)params.set('xbox',warehouseFiberSelectedScope)}}return `#${view}${params.size?`?${params}`:''}`}
 function updatePageLink(){const next=pageLinkState();if(location.hash!==next)history.replaceState(null,'',next)}
 function applyPageLink(){const raw=location.hash.replace(/^#/,'');if(!raw)return;const [view,query='']=raw.split('?');const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;const params=new URLSearchParams(query);if(view==='rolloutDaily'){warehouseFiberSelectedArea=params.get('area')||'';warehouseFiberSelectedScope=params.get('xbox')||''}switchView(view,false,false);if(view==='rolloutDaily'&&!isSingleRan()){const tab=params.get('tab');if(['kpi','compare','map','report','operations','entry'].includes(tab))switchRolloutDailyTab(tab,false,false);if((tab||'kpi')==='map')renderRolloutMapPanel()}}
-async function switchProgram(program){if(!isAdmin()){toast('Admin only');return}const next=normalizeProgram(program);currentProgram=next;localStorage.setItem('warehouseProgram',next);clearWarehouseBootstrapCache();currentEditingMrId=null;currentEditingTransferId=null;const mrLinesBox=document.getElementById('mrLines');if(mrLinesBox)mrLinesBox.innerHTML='';const transferLinesBox=document.getElementById('transferLines');if(transferLinesBox)transferLinesBox.innerHTML='';setCurrentUserFromSession();applyPermissions();toast('Loading '+programLabel()+' warehouse...');await loadWarehouse();switchView('dashboard')}
+async function switchProgram(program){if(!isAdmin()){toast('Admin only');return}const next=normalizeProgram(program);currentProgram=next;localStorage.setItem('warehouseProgram',next);clearWarehouseBootstrapCache();currentEditingMrId=null;currentEditingTransferId=null;const mrLinesBox=document.getElementById('mrLines');if(mrLinesBox)mrLinesBox.innerHTML='';const transferLinesBox=document.getElementById('transferLines');if(transferLinesBox)transferLinesBox.innerHTML='';setCurrentUserFromSession();applyPermissions();toast('Loading '+programLabel()+' warehouse...');await loadWarehouse();warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true);switchView('dashboard')}
 function switchView(view,persist=true,syncLink=true){if(view==='setup'&&!isAdmin())view='dashboard';if(view==='rolloutDaily'&&isSingleRan()){clearSingleRanRolloutState(false);view='dashboard'}const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return false;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(persist)saveUiState({view});if(syncLink)updatePageLink();if(view==='receive')refreshReceiptsFast();if(view==='mr')refreshMrsFast();if(view==='mrHistory')loadMrHistory(false);if(view==='scans')historyScanFocus();if(view==='rolloutDaily')refreshRolloutDailyProgress(false);return true}
 function roleKey(){return normalizeText(userRole())}
 function isSingleRan(){return normalizeProgram(currentProgram)==='SINGLE_RAN'}
@@ -2681,14 +2749,24 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&session&&
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
 
-function ensureRolloutDashboardDesignReference(){
-  if(warehouseFiberReference||warehouseFiberReferenceLoading)return;
+function applyFiberMapReference(data){
+  warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
+  (warehouseFiberReference.area_plans||[]).forEach(plan=>{
+    const city=String(plan.city||'').trim(),area=String(plan.area||'').trim();if(!city||!area)return;
+    if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
+    if(!ROLLOUT_DASHBOARD_AREAS[city].some(value=>wfmMapAreaKey(value)===wfmMapAreaKey(area)))ROLLOUT_DASHBOARD_AREAS[city].push(area);
+    const index=ROLLOUT_DASHBOARD_PLAN.findIndex(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area));
+    if(index>=0)ROLLOUT_DASHBOARD_PLAN.splice(index,1,{...ROLLOUT_DASHBOARD_PLAN[index],...plan,city,area});else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
+    const xboxes=[...new Set((warehouseFiberReference.boxes||[]).filter(row=>wfmMapAreaMatches(row,area)).map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
+    xboxes.forEach(xbox=>{const id=`${wfmMapAreaKey(area).replace(/[^a-z0-9]+/g,'-')}-${xbox.toLowerCase()}`;if(!WFM_MAP_SCOPES.some(scope=>scope.id===id))WFM_MAP_SCOPES.push({id,title:`${area} - X-BOX${xbox.replace(/^X/,'')}`,area,xbox})});
+  });
+}
+async function ensureRolloutDashboardDesignReference(force=false){
+  if((warehouseFiberReference&&!force)||warehouseFiberReferenceLoading)return warehouseFiberReference;
   warehouseFiberReferenceLoading=true;
-  fetch('/static/assets/fiber-map-data.json',{cache:'no-store'})
-    .then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()})
-    .then(data=>{warehouseFiberReference=data})
-    .catch(()=>{})
-    .finally(()=>{warehouseFiberReferenceLoading=false;renderRolloutDailyProgress()});
+  try{const data=await api('/api/warehouse/fiber-map-reference');applyFiberMapReference(data);return warehouseFiberReference}
+  catch(error){return null}
+  finally{warehouseFiberReferenceLoading=false;renderRolloutDailyProgress()}
 }
 
 function wfmValue(row,names){
@@ -2948,7 +3026,7 @@ function renderRolloutMapPanel(){
   if(!selectedArea){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>Fiber Map</h3><p>Select an area to load the complete area map.</p></div>${controls}</div><div class="map-note">No map loaded. Select an area first.</div></div>`;return}
   const selectedScope=scopes.find(scope=>scope.id===warehouseFiberSelectedScope);const page=selectedScope||{title:`${selectedArea} - Select XBOX`,area:selectedArea,xbox:'',all:false};
   if(!selectedScope){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>Select one XBOX to load the map smoothly.</p></div>${controls}</div><div class="map-list">${scopes.map(scope=>`<button class="map-list-row" type="button" onclick="wfmSelectMapXbox('${esc(scope.id)}')"><b>${esc(scope.xbox)}</b><span>${esc(scope.title||scope.area)}</span><span class="map-status ok">Open</span></button>`).join('')||'<div class="map-note">No XBOX maps found for this area.</div>'}</div></div>`;return}
-  if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){warehouseFiberReferenceLoading=true;fetch('/static/assets/fiber-map-data.json',{cache:'no-store'}).then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>{warehouseFiberReference=data}).catch(error=>{box.innerHTML=`<div class="map-note">${esc(error.message)}</div>`}).finally(()=>{warehouseFiberReferenceLoading=false;if(warehouseFiberReference)renderRolloutMapPanel()})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
+  if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){ensureRolloutDashboardDesignReference().then(data=>{if(data)renderRolloutMapPanel();else box.innerHTML='<div class="map-note">Map reference could not be loaded.</div>'})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
   const parts=page.all?scopes.flatMap(scope=>wfmParts(scope.area,scope.xbox)):wfmParts(page.area,page.xbox),rows=wh.rolloutDailyProgress||[],counts=wfmMapCounts(parts,rows);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox==='ALL'?'All XBOXes':page.xbox)} · live status from Rollout Daily Progress</p></div>${controls}</div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows)).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
 }
 const baseRenderRolloutDailyProgress=renderRolloutDailyProgress;
