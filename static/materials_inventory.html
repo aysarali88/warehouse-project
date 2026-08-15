@@ -2700,14 +2700,13 @@ function rolloutDashboardMetricRows(rows,area){
   const parts=wfmParts(area,'');
   if(!parts.length)return rows;
   const enforceExactMaqawbaMetrics=normalizeText(area)==='maqawba';
-  const boxCodes=new Set(),distributionCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
+  const boxCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
   parts.forEach(part=>{
     const xbox=wfmXboxKey(part.xbox);
     xboxCodes.add(xbox);
     (part.boxRows||[]).forEach(row=>{
       const code=wfmCodeKey(wfmValue(row,['Box code']));
       if(code)boxCodes.add(`${xbox}|${code}`);
-      if(code&&Number(wfmValue(row,['Cable length m']))>0)distributionCodes.add(`${xbox}|${code}`);
       const hub=wfmCodeKey(wfmValue(row,['Hub']));
       if(hub)hubCodes.add(`${xbox}|${hub}`);
     });
@@ -2724,29 +2723,11 @@ function rolloutDashboardMetricRows(rows,area){
     if(material.includes('hubbox'))return enforceExactMaqawbaMetrics?hubCodes.has(`${xbox}|${boxCode}`):!boxCode||hubCodes.has(`${xbox}|${boxCode}`);
     if(material.includes('xbox'))return enforceExactMaqawbaMetrics?xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox):!boxCode||xboxCodes.has(xbox)&&wfmCodeKey(boxCode)===wfmCodeKey(xbox);
     if(material.includes('subbox')||material.includes('endbox'))return enforceExactMaqawbaMetrics?boxCodes.has(`${xbox}|${boxCode}`):!boxCode||boxCodes.has(`${xbox}|${boxCode}`);
-    if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))return enforceExactMaqawbaMetrics?distributionCodes.has(`${xbox}|${cableCode}`):!cableCode||boxCodes.has(`${xbox}|${cableCode}`);
+    if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))return enforceExactMaqawbaMetrics?boxCodes.has(`${xbox}|${cableCode}`):!cableCode||boxCodes.has(`${xbox}|${cableCode}`);
     if(material.includes('4corecable'))return enforceExactMaqawbaMetrics?routeCodes.has(`${xbox}|${cableCode}`):!cableCode||routeCodes.has(`${xbox}|${cableCode}`);
     return true;
   });
-  if(!enforceExactMaqawbaMetrics)return filtered;
-  const unique=new Map();
-  filtered.forEach((row,index)=>{
-    const material=normalizeText(wfmText(row));
-    const xbox=wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']));
-    const boxCode=wfmCodeKey(wfmValue(row,['box code','Box code']));
-    const cableCode=wfmCodeKey(wfmValue(row,['cable code','Cable code']));
-    let key='';
-    if(material.includes('hubbox'))key=`hub|${xbox}|${boxCode}`;
-    else if(material.includes('xbox'))key=`xbox|${xbox}`;
-    else if(material.includes('subbox')||material.includes('endbox'))key=`box|${xbox}|${boxCode}`;
-    else if(material.includes('singlecoredistributioncable')||material.includes('distributioncable'))key=`distribution|${xbox}|${cableCode}`;
-    else if(material.includes('4corecable'))key=`fourcore|${xbox}|${cableCode}`;
-    if(!key){unique.set(`other|${index}`,row);return}
-    const previous=unique.get(key);
-    const stamp=value=>`${String(wfmValue(value,['Date','date'])||'')}${String(wfmValue(value,['entry time','entry_time'])||'')}${String(wfmValue(value,['ID','id'])||'')}`;
-    if(!previous||stamp(row)>=stamp(previous))unique.set(key,row);
-  });
-  return [...unique.values()];
+  return filtered;
 }
 function wfmDynamicRows(part){
   const pairs=new Map();(part.routeRows||[]).forEach(row=>{const from=String(wfmValue(row,['Route from'])).match(/^H(\d+)$/i),to=String(wfmValue(row,['Route to'])).match(/^H(\d+)$/i);if(from&&to)pairs.set(Number(from[1]),Number(to[1]))});const used=new Set(),rows=[];
