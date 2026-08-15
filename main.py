@@ -273,7 +273,7 @@ def sync_single_ran_product_vendors():
 
 sync_single_ran_product_vendors()
 VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
-DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2")
+DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2", "Ras A Tota")
 
 
 def raw_program_value(value: str = "") -> str:
