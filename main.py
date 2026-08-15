@@ -2132,7 +2132,9 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         # "To Hub" is a topology hint for the next node, not this cable's end.
         target = area_builder_hub_code(row.get("hub"))
         source_value = str(row.get("from") or "").strip()
-        source = area_builder_xbox_code(source_value) or area_builder_hub_code(source_value)
+        # A value such as "X1-H1" identifies H1 as the preceding hub. Prefer
+        # that hub over the XBOX prefix so H1-to-H2 remains connected.
+        source = area_builder_hub_code(source_value) or area_builder_xbox_code(source_value)
         planned = area_builder_number(row.get("qlcpreconm"))
         actual = area_builder_number(row.get("qlcactualm"))
         if not xbox or not target or not source or planned < 1:
