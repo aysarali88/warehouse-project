@@ -2867,7 +2867,9 @@ function wfmCableState(part,rows,code,expectedLength,kind){
   return{status:matches.length?'mismatch':'missing',rows:matches,routeLabel:wfmRouteLabel(matches)};
 }
 function rolloutMapCableProgressMetric(area,rows){
-  if(!warehouseFiberReference||normalizeText(area)==='allareas')return null;
+  // Maqawba is maintained from the live map design. Older completed areas
+  // keep their approved dashboard targets and Field Entry aggregation.
+  if(!warehouseFiberReference||normalizeText(area)!==normalizeText('Maqawba'))return null;
   const parts=wfmParts(area,'');
   if(!parts.length)return null;
   const metric={targetMeters:0,installedMeters:0,missingMeters:0,mismatchMeters:0,codes:0};
