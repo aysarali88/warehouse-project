@@ -2754,6 +2754,7 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
             {
                 "product_id": item.product_id,
                 "sku": product.sku if product else "",
+                "part_number": product_part_number(product.sku if product else "", product.part_number if product else ""),
                 "name": product_display_name(product),
                 "unit": product.unit if product else "",
                 "qr_code": product.qr_code if product else "",

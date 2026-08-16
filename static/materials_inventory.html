@@ -1073,6 +1073,7 @@ body.sr-program .login-logo img{
           <div class="field"><label>Vendor</label><input id="receiveSupplier" placeholder="اسم المورد"></div>
           <div class="field"><label>WH</label><select id="receiveWarehouse"></select></div>
           <div class="field"><label>SKU</label><input id="receiveSku" placeholder="E00ATB101"></div>
+          <div class="field"><label>Part #</label><input id="receivePartNumber" dir="ltr" placeholder="Part number"></div>
           <div class="field"><label>QR Code</label><input id="receiveQr" placeholder="اختياري"></div>
           <div class="field full"><label>اسم المادة</label><input id="receiveMaterialName" placeholder="ATB / Cable / Box"></div>
           <div class="field"><label>الكمية</label><input id="receiveQty" type="number" min="1" value="1"></div>
@@ -1969,12 +1970,12 @@ const latest=(wh.receipts||[])[0];
 const latestItem=latest?.items?.[0]||null;
 const box=document.getElementById('lastReceivedItem');
 if(box)box.innerHTML=latest&&latestItem?`<div class="mini-list">
-<div class="mini-row"><div><b>${esc(latestItem.name)}</b><small>${esc(latestItem.sku)} · ${esc(latest.warehouse)}</small></div><strong>${fmt(latestItem.quantity)} ${esc(latestItem.unit)}</strong></div>
+<div class="mini-row"><div><b>${esc(latestItem.name)}</b><small>${esc(latestItem.sku)}${latestItem.part_number?` · Part # ${esc(latestItem.part_number)}`:''} · ${esc(latest.warehouse)}</small></div><strong>${fmt(latestItem.quantity)} ${esc(latestItem.unit)}</strong></div>
 <div class="hint">تاريخ الاستلام: ${esc(latest.receipt_date||latest.created_at?.slice(0,10)||'')}<br>رقم الايصال: ${esc(latest.order_number)}<br>المورد: ${esc(latest.supplier||'')}</div>
 ${latestItem.qr_code?`<div class="hint">QR Code: ${esc(latestItem.qr_code)}</div>`:''}
 </div>`:'<div class="empty">لم يتم استلام مواد بعد</div>';
-const receiptRows=(wh.receipts||[]).filter(r=>r.created_by!=='system_import').flatMap(r=>(r.items||[]).map(item=>({source:'DB Receive',order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
-const referenceRows=isSingleRan()?[]:(initialStockReference.rows||[]).map(r=>({source:'Initial Stock Reference',order_number:r.item||'final_WH_tmp.xlsx',receipt_date:'Reference',supplier:r.vendor,warehouse:r.warehouse,sku:r.sku,qr_code:'',name:r.item,quantity:r.quantity,unit:r.unit||'PCS'}));
+const receiptRows=(wh.receipts||[]).filter(r=>r.created_by!=='system_import').flatMap(r=>(r.items||[]).map(item=>({source:'DB Receive',order_number:r.order_number,receipt_date:r.receipt_date||r.created_at?.slice(0,10)||'',supplier:r.supplier,warehouse:r.warehouse,part_number:item.part_number||'',sku:item.sku,qr_code:item.qr_code,name:item.name,quantity:item.quantity,unit:item.unit})));
+const referenceRows=isSingleRan()?[]:(initialStockReference.rows||[]).map(r=>({source:'Initial Stock Reference',order_number:r.item||'final_WH_tmp.xlsx',receipt_date:'Reference',supplier:r.vendor,warehouse:r.warehouse,part_number:r.part_number||'',sku:r.sku,qr_code:'',name:r.item,quantity:r.quantity,unit:r.unit||'PCS'}));
 const allRows=receiptRows.concat(referenceRows);
 const vendorFilter=document.getElementById('receiveVendorFilter');
 const whFilter=document.getElementById('receiveWhFilter');
@@ -1996,7 +1997,7 @@ const rows=allRows.filter(r=>(!activeVendor||String(r.supplier||'')===activeVend
 const summary=document.getElementById('receiveHistorySummary');
 if(summary)summary.textContent=isSingleRan()?`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · DB receive ${fmt(receiptRows.length)}`:`Showing ${fmt(rows.length)} of ${fmt(allRows.length)} lines · final_WH_tmp.xlsx ${fmt(referenceRows.length)} lines · New DB receive ${fmt(receiptRows.length)}`;
 const history=document.getElementById('receiveHistory');
-if(history)history.innerHTML=rowsTable([['Source','source'],['التاريخ','receipt_date'],['رقم الايصال','order_number'],['Vendor','supplier'],['WH','warehouse'],['SKU','sku'],['QR Code','qr_code'],['اسم المادة','name'],['الكمية','quantity',(v)=>fmt(v)],['الوحدة','unit']],rows.slice(0,260));
+if(history)history.innerHTML=rowsTable([['Source','source'],['التاريخ','receipt_date'],['رقم الايصال','order_number'],['Vendor','supplier'],['WH','warehouse'],['Part #','part_number'],['SKU','sku'],['QR Code','qr_code'],['اسم المادة','name'],['الكمية','quantity',(v)=>fmt(v)],['الوحدة','unit']],rows.slice(0,260));
 }
 function initReceiveDefaults(){const d=document.getElementById('receiveDate');if(d&&!d.value)d.value=today();const u=document.getElementById('receiveUnit');if(u&&!u.value)u.value='PCS'}
 function returnProductOptionHtml(selected=''){const rows=[...wh.products].sort((a,b)=>String(a.name).localeCompare(String(b.name)));return '<option value="">اختر المادة</option>'+rows.map(p=>`<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})</option>`).join('')}
@@ -2031,13 +2032,13 @@ syncWarehouseLater();
 async function receiveInventory(){
 try{
 const qty=Number(receiveQty.value||0);
-const body={receipt_date:receiveDate.value,receipt_number:receiveReceipt.value.trim(),supplier:receiveSupplier.value.trim(),warehouse_id:Number(receiveWarehouse.value),sku:receiveSku.value.trim(),name:receiveMaterialName.value.trim(),quantity:qty,unit:receiveUnit.value.trim()||'PCS',qr_code:receiveQr.value.trim(),created_by:activeUser||'manager'};
+const body={receipt_date:receiveDate.value,receipt_number:receiveReceipt.value.trim(),supplier:receiveSupplier.value.trim(),warehouse_id:Number(receiveWarehouse.value),sku:receiveSku.value.trim(),part_number:receivePartNumber.value.trim(),name:receiveMaterialName.value.trim(),quantity:qty,unit:receiveUnit.value.trim()||'PCS',qr_code:receiveQr.value.trim(),created_by:activeUser||'manager'};
 if(!body.warehouse_id){toast('اختر المستودع');return}
 if(!body.sku){toast('اكتب SKU');return}
 if(!body.name){toast('اكتب اسم المادة');return}
 if(!qty||qty<=0){toast('اكتب كمية صحيحة');return}
 const r=await api('/api/warehouse/receive-inventory',{method:'POST',body:JSON.stringify(body)});
-receiveReceipt.value='';receiveSku.value='';receiveQr.value='';receiveMaterialName.value='';receiveQty.value=1;
+receiveReceipt.value='';receiveSku.value='';receivePartNumber.value='';receiveQr.value='';receiveMaterialName.value='';receiveQty.value=1;
 clearWarehouseBootstrapCache();
 toast('تمت إضافة المخزون: '+r.order_number);
 await loadWarehouse();
