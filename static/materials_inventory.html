@@ -2535,10 +2535,11 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>({name:area,...rolloutMetricFromRows(rolloutDashboardMetricRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)),area)),target:rolloutTargetFor(rolloutDashboardFilters.city,area)})).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);return{name:area,...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters,target:{...target,cableMeters:mapCable?mapCable.targetMeters:target.cableMeters}}}).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
-const metric={...rawMetric};
+const mapCable=rolloutMapCableProgressMetric(rolloutDashboardFilters.area,scopedRows);
+const metric={...rawMetric,cableMeters:mapCable?mapCable.installedMeters:rawMetric.cableMeters};
 if(plan){
   metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
   metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
@@ -2546,7 +2547,8 @@ if(plan){
   metric.actualUsers=metric.distributionQty*8;
 }
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
-const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0)}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0}):rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const baseDashboardTarget=rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0)}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0}):{...baseDashboardTarget,cableMeters:mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters};
 const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
 const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
 const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
@@ -2863,6 +2865,35 @@ function wfmCableState(part,rows,code,expectedLength,kind){
   const matches=wfmRowsForCode(part,rows,code,kind);
   if(matches.some(row=>wfmLength(row)===Number(expectedLength||0)))return{status:'installed',rows:matches,routeLabel:wfmRouteLabel(matches)};
   return{status:matches.length?'mismatch':'missing',rows:matches,routeLabel:wfmRouteLabel(matches)};
+}
+function rolloutMapCableProgressMetric(area,rows){
+  if(!warehouseFiberReference||normalizeText(area)==='allareas')return null;
+  const parts=wfmParts(area,'');
+  if(!parts.length)return null;
+  const metric={targetMeters:0,installedMeters:0,missingMeters:0,mismatchMeters:0,codes:0};
+  const seen=new Set();
+  const add=(part,ref,codeField,kind)=>{
+    const code=String(wfmValue(ref,[codeField])||'').trim();
+    const length=Number(wfmValue(ref,['Cable length m'])||0);
+    const key=`${wfmXboxKey(part.xbox)}|${kind}|${wfmCodeKey(code)}`;
+    if(!code||length<=0||seen.has(key))return;
+    seen.add(key);
+    metric.targetMeters+=length;
+    metric.codes+=1;
+    const state=wfmCableState(part,rows,code,length,kind).status;
+    // A blue segment is physically entered against the map code. Keep it in
+    // rollout progress, while the map continues to flag the length mismatch.
+    if(state==='missing')metric.missingMeters+=length;
+    else{
+      metric.installedMeters+=length;
+      if(state==='mismatch')metric.mismatchMeters+=length;
+    }
+  };
+  parts.forEach(part=>{
+    (part.boxRows||[]).forEach(ref=>add(part,ref,'Box code','distribution'));
+    (part.routeRows||[]).forEach(ref=>add(part,ref,'Route code','fourcore'));
+  });
+  return metric;
 }
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
 function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
