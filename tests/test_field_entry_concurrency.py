@@ -162,6 +162,60 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="return_in").count(), 1)
         db.close()
 
+    def test_receiving_warehouse_can_return_approved_transfer_without_stock_movement(self):
+        db = SessionLocal()
+        source = Warehouse(name="Transfer Source WH")
+        destination = Warehouse(name="Transfer Destination WH")
+        product = Product(sku="TRANSFER-RETURN-TEST", name="Transfer return test material")
+        db.add_all([source, destination, product])
+        db.flush()
+        db.add(StockBalance(warehouse_id=source.id, product_id=product.id, quantity=10))
+        transfer = MaterialTransfer(
+            transfer_number="TR-RETURN-TEST",
+            from_warehouse_id=source.id,
+            to_warehouse_id=destination.id,
+            requester_name="Transfer Requester",
+            status="approved",
+            created_by="transfer-requester",
+        )
+        db.add(transfer)
+        db.flush()
+        db.add(MaterialTransferItem(transfer_id=transfer.id, product_id=product.id, quantity=4))
+        db.commit()
+
+        receiving_manager = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(
+                    role="Warehouse Manager",
+                    name="Receiving Manager",
+                    username="receiving-manager",
+                    warehouse_name=destination.name,
+                )
+            )
+        )
+        returned = main.return_material_transfer_by_destination(
+            transfer.id,
+            main.MaterialRequisitionActionIn(actor="Receiving Manager", comment="Quantity needs correction"),
+            receiving_manager,
+            db,
+        )["transfer"]
+        self.assertEqual(returned["status"], "returned_for_edit")
+        self.assertEqual(returned["receiver_name"], "Receiving Manager")
+        self.assertEqual(returned["receiver_comment"], "Quantity needs correction")
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=source.id, product_id=product.id).one().quantity, 10)
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=destination.id, product_id=product.id).count(), 0)
+        self.assertEqual(db.query(StockMovement).filter_by(reference=transfer.transfer_number).count(), 0)
+
+        with self.assertRaises(HTTPException) as error:
+            main.return_material_transfer_by_destination(
+                transfer.id,
+                main.MaterialRequisitionActionIn(actor="Receiving Manager", comment="Second attempt"),
+                receiving_manager,
+                db,
+            )
+        self.assertEqual(error.exception.status_code, 400)
+        db.close()
+
     def test_rollout_difference_excludes_confirmed_returns(self):
         db = SessionLocal()
         warehouse = Warehouse(name="Usage Return Test WH")

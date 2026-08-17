@@ -969,6 +969,35 @@ def notify_transfer_returned_for_edit(row: MaterialTransfer, db: Session) -> Non
     )
 
 
+def notify_transfer_returned_by_destination(row: MaterialTransfer, db: Session) -> None:
+    from_name = row.from_warehouse.name if row.from_warehouse else ""
+    to_name = row.to_warehouse.name if row.to_warehouse else ""
+    notify_transfer_email(
+        row,
+        db,
+        requester_notification_emails(row, db),
+        f"Material Transfer {row.transfer_number} returned by receiving warehouse",
+        [
+            "Hello,",
+            "",
+            "Your approved material transfer was returned by the receiving warehouse before confirmation.",
+            "No stock was moved.",
+            "",
+            f"Transfer No: {row.transfer_number}",
+            f"From Warehouse: {from_name or '-'}",
+            f"To Warehouse: {to_name or '-'}",
+            f"Returned by: {row.receiver_name or '-'}",
+            f"Return reason: {row.receiver_comment or '-'}",
+            "Status: Returned for edit",
+            "",
+            "Please sign in to the warehouse system, update the transfer, and submit it again for approval.",
+            "",
+            "This is an automated notification from Global Technology Company.",
+        ],
+        "transfer_returned_by_destination_email",
+    )
+
+
 def notify_mr_created(row: MaterialRequisition, db: Session) -> None:
     warehouse_name = row.warehouse.name if row.warehouse else ""
     lines = [
@@ -6469,6 +6498,44 @@ def return_material_transfer_for_edit(transfer_id: int, data: MaterialRequisitio
     db.commit()
     db.refresh(row)
     notify_transfer_returned_for_edit(row, db)
+    return {"success": True, "transfer": transfer_to_dict(row)}
+
+
+@app.post("/api/warehouse/material-transfers/{transfer_id}/return-by-destination")
+def return_material_transfer_by_destination(transfer_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    row = (
+        db.query(MaterialTransfer)
+        .filter(MaterialTransfer.id == transfer_id, MaterialTransfer.program == program_key)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material transfer not found")
+    if row.status != "approved":
+        raise HTTPException(status_code=400, detail=f"Transfer cannot be returned from status {row.status}")
+    require_warehouse_access(request, db, row.to_warehouse_id, program_key)
+    comment = data.comment.strip()
+    if not comment:
+        raise HTTPException(status_code=400, detail="Return reason is required")
+
+    actor = request_actor(request)
+    row.receiver_name = actor or row.receiver_name
+    row.receiver_date = local_today()
+    row.receiver_comment = comment
+    row.status = "returned_for_edit"
+    log_audit(
+        db,
+        "return_material_transfer_by_destination",
+        "material_transfer",
+        row.transfer_number,
+        actor or "warehouse_manager",
+        data.model_dump(),
+    )
+    db.commit()
+    db.refresh(row)
+    notify_transfer_returned_by_destination(row, db)
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
