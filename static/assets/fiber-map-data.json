@@ -23943,13 +23943,13 @@
       "XBOX": "X-BOX2",
       "Part": "x2",
       "Hub": "H6",
-      "Line": 4,
-      "Splitter": 2,
-      "Box code": "H6-L4-S2",
+      "Line": 1,
+      "Splitter": 4,
+      "Box code": "H6-L1-S4",
       "Box type": "END BOX",
-      "Real length m": 80,
-      "Cable length m": 100,
-      "Material type": "Single-Core Distribution Cable_100m"
+      "Real length m": 0,
+      "Cable length m": 50,
+      "Material type": "Single-Core Distribution Cable_50m"
     }
   ],
   "routes": [
