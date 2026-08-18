@@ -3871,10 +3871,28 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
 
-    area = str(row.area or "").strip()
-    xbox = str(row.related_to_xbox or "").strip()
+    date = str(first_value(data, "Date", "date", default=row.date) or "").strip()
+    supervisor_name = str(first_value(data, "Supervisor Name", "supervisor_name", default=row.supervisor_name) or "").strip()
+    team_leader = str(first_value(data, "team leader", "team_leader", default=row.team_leader) or "").strip()
+    city = str(first_value(data, "city", "City", default=row.city) or "").strip()
+    area = str(first_value(data, "Area", "area", default=row.area) or "").strip()
+    activity = str(first_value(data, "Activity", "activity", default=row.activity) or "").strip()
+    xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default=row.related_to_xbox) or "").strip()
     item = str(first_value(data, "item", "Item", default=row.item) or "").strip()
     material_type = str(first_value(data, "material type", "Material Type", "material_type", default=row.material_type) or "").strip()
+    mount_type = str(first_value(data, "mount type", "Mount Type", "mount_type", default=row.mount_type) or "").strip()
+    item_serial = str(first_value(data, "item serial", "Item Serial", "item_serial", default=row.item_serial) or "").strip()
+    planned_quantity = safe_float(first_value(data, "planed quantity", "planned quantity", "planned_quantity", default=row.planned_quantity))
+    actual = safe_float(first_value(data, "actual", "Actual", default=row.actual))
+    stock_remaining = safe_float(first_value(data, "stock remaining", "stock_remaining", default=row.stock_remaining))
+    status = str(first_value(data, "staus", "status", "Status", default=row.status) or "").strip()
+    laser = str(first_value(data, "laser", "Laser", default=row.laser) or "").strip()
+    acceptance = str(first_value(data, "acceptance", "Acceptance", default=row.acceptance) or "").strip()
+    scan = str(first_value(data, "scan", "Scan", default=row.scan) or "").strip()
+    labeling = str(first_value(data, "labeling", "Labeling", default=row.labeling) or "").strip()
+    olt = str(first_value(data, "OLT", "olt", default=row.olt) or "").strip()
+    cable_route = str(first_value(data, "Cable route", "cable route", "cable_route", default=row.cable_route) or "").strip()
+    notes = str(first_value(data, "Notes", "notes", default=row.notes) or "").strip()
     code_type = rollout_entry_mode({"code_type": first_value(data, "code_type", "type", default=""), "item": item, "material_type": material_type})
     raw_code = str(first_value(data, "code", "Cable Code", "cable code", "cable_code", "Box Code", "box code", "box_code", default="") or "").strip()
 
@@ -3882,6 +3900,8 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
         raise HTTPException(status_code=400, detail="This record has no Area or Related to XBOX")
     if code_type not in {"cable", "box", "accessory"}:
         raise HTTPException(status_code=400, detail="Select a material type")
+    if actual <= 0:
+        raise HTTPException(status_code=400, detail="Actual quantity must be greater than zero")
 
     matches: list[dict] = []
     duplicates: list[RolloutRecord] = []
@@ -3932,29 +3952,39 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     if warnings and not first_value(data, "confirm_warnings", "confirmed", default=False):
         return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
 
-    before = {
-        "item": row.item,
-        "material_type": row.material_type,
-        "cable_code": row.cable_code,
-        "box_code": row.box_code,
-    }
+    before = row_to_record(row)
+    row.date = date
+    row.supervisor_name = supervisor_name
+    row.team_leader = team_leader
+    row.city = city
+    row.area = area
+    row.activity = activity
+    row.related_to_xbox = xbox
     row.item = item
     row.material_type = material_type
+    row.mount_type = mount_type
+    row.item_serial = item_serial
+    row.planned_quantity = planned_quantity
+    row.actual = actual
+    row.stock_remaining = stock_remaining
+    row.status = status
+    row.laser = laser
+    row.acceptance = acceptance
+    row.scan = scan
+    row.labeling = labeling
+    row.olt = olt
+    row.cable_route = cable_route
+    row.notes = notes
     row.cable_code = raw_code if code_type == "cable" else ""
     row.box_code = raw_code if code_type == "box" else ""
-    after = {
-        "item": row.item,
-        "material_type": row.material_type,
-        "cable_code": row.cable_code,
-        "box_code": row.box_code,
-    }
+    after = row_to_record(row)
     log_audit(
         db,
         "edit_rollout_field_entry",
         "rollout_record",
         row.record_id,
-        str(first_value(data, "actor", default="") or ""),
-        {"program": DEFAULT_PROGRAM, "before": before, "after": after},
+        request_actor(request),
+        {"program": request.state.program, "before": before, "after": after},
     )
     db.commit()
     clear_warehouse_cache()

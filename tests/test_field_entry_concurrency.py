@@ -259,3 +259,86 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in details["records"]], ["RDP-SOURCE-1", "RDP-SOURCE-2"])
         self.assertEqual([row["hub"] for row in details["records"]], ["H1", "H2"])
         db.close()
+
+    def test_admin_can_edit_all_field_entry_columns_without_changing_audit_identity(self):
+        db = SessionLocal()
+        record = RolloutRecord(
+            record_id="RDP-FULL-EDIT-TEST",
+            date="2026-08-18",
+            supervisor_name="Before supervisor",
+            team_leader="Before leader",
+            city="Misurata",
+            area="Maqawba",
+            activity="Installation",
+            related_to_xbox="X1",
+            item="Accessories",
+            material_type="Plum ring hook",
+            mount_type="Pole",
+            item_serial="OLD",
+            planned_quantity=1,
+            actual=1,
+            stock_remaining=10,
+            status="Done",
+            laser="No",
+            acceptance="No",
+            scan="No",
+            labeling="No",
+            olt="OLD-OLT",
+            cable_route="Aerial",
+            notes="Before notes",
+            entry_time="2026-08-18 08:00:00",
+        )
+        db.add(record)
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Server Admin", username="admin", warehouse_name=""),
+                program="FTTH",
+            )
+        )
+        result = main.edit_rollout_field_entry(
+            record.record_id,
+            {
+                "Date": "2026-08-19",
+                "supervisor_name": "After supervisor",
+                "team_leader": "After leader",
+                "city": "Tripoli",
+                "Area": "Maqawba",
+                "Activity": "Testing",
+                "related_to_xbox": "X1",
+                "item": "Accessories",
+                "material_type": "Metal wedge clamping",
+                "mount_type": "Wall",
+                "item_serial": "NEW",
+                "planned_quantity": 8,
+                "actual": 7,
+                "stock_remaining": 3,
+                "status": "In Progress",
+                "laser": "Yes",
+                "acceptance": "Yes",
+                "scan": "Yes",
+                "labeling": "Yes",
+                "olt": "NEW-OLT",
+                "cable_route": "Underground",
+                "notes": "After notes",
+                "code_type": "accessory",
+                "code": "",
+                "actor": "Spoofed actor",
+            },
+            request,
+            db,
+        )
+        updated = db.query(RolloutRecord).filter_by(record_id=record.record_id).one()
+        self.assertTrue(result["success"])
+        self.assertEqual(updated.entry_time, "2026-08-18 08:00:00")
+        self.assertEqual(updated.supervisor_name, "After supervisor")
+        self.assertEqual(updated.team_leader, "After leader")
+        self.assertEqual(updated.city, "Tripoli")
+        self.assertEqual(updated.activity, "Testing")
+        self.assertEqual(updated.mount_type, "Wall")
+        self.assertEqual(updated.item_serial, "NEW")
+        self.assertEqual(updated.actual, 7)
+        self.assertEqual(updated.stock_remaining, 3)
+        self.assertEqual(updated.notes, "After notes")
+        main.clear_rollout_db_cache()
+        db.close()
