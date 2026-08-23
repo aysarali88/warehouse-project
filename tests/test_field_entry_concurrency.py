@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -312,6 +313,143 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(details["total"], 12)
         self.assertEqual([row["id"] for row in details["records"]], ["RDP-SOURCE-1", "RDP-SOURCE-2"])
         self.assertEqual([row["hub"] for row in details["records"]], ["H1", "H2"])
+        db.close()
+
+    def test_rollout_dashboard_summary_groups_records_without_loading_full_rows(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-SUMMARY-1",
+                date="2026-08-23",
+                city="Misurata",
+                area="Maqawba",
+                item="Cable",
+                material_type="Single-Core Distribution Cable_80m",
+                team_leader="Team A",
+                related_to_xbox="X1",
+                cable_code="H1-L1-S1",
+                actual=1,
+            ),
+            RolloutRecord(
+                record_id="RDP-SUMMARY-2",
+                date="2026-08-23",
+                city="Misurata",
+                area="Maqawba",
+                item="Cable",
+                material_type="Single-Core Distribution Cable_80m",
+                team_leader="Team A",
+                related_to_xbox="X1",
+                cable_code="H1-L1-S1",
+                actual=2,
+            ),
+            RolloutRecord(
+                record_id="RDP-SUMMARY-3",
+                date="2026-08-24",
+                city="Misurata",
+                area="Ras A Tota",
+                item="SUB BOX",
+                material_type="SUB BOX",
+                team_leader="Team B",
+                related_to_xbox="X2",
+                actual=1,
+            ),
+        ])
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""),
+                program="FTTH",
+            )
+        )
+
+        result = main.rollout_dashboard_summary(request, program="FTTH", db=db)
+
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["metrics"]["database_rows_loaded"], 2)
+        self.assertEqual(result["metrics"]["rows_returned"], 2)
+        self.assertEqual(result["metrics"]["full_record_rows_avoided"], 3)
+        self.assertEqual(result["records"][0]["actual"], 3)
+        self.assertEqual(result["records"][0]["cable code"], "H1-L1-S1")
+        self.assertGreater(result["metrics"]["estimated_payload_bytes"], 0)
+        full_payload_bytes = len(json.dumps(
+            {"records": [main.row_to_record(row) for row in db.query(RolloutRecord).all()]},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"))
+        self.assertLess(result["metrics"]["estimated_payload_bytes"], full_payload_bytes)
+        db.close()
+
+    def test_warehouse_bootstrap_excludes_rollout_payloads(self):
+        """Warehouse startup must not transfer the Rollout record dataset."""
+        db = SessionLocal()
+        main.WAREHOUSE_CACHE.clear()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""),
+                program="FTTH",
+            )
+        )
+
+        result = main.warehouse_bootstrap(request, light=True, program="FTTH", db=db)
+
+        self.assertFalse({"rolloutRecords", "rolloutUsage", "rolloutDailyProgress", "rolloutSource"} & set(result))
+        db.close()
+
+    def test_rollout_dashboard_summary_enforces_warehouse_scope_and_roles(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-SCOPE-MAQAWBA",
+                date="2026-08-23",
+                city="Misurata",
+                area="Maqawba",
+                item="Cable",
+                material_type="Single-Core Distribution Cable_80m",
+                related_to_xbox="X1",
+                cable_code="H1-L1-S1",
+                actual=1,
+            ),
+            RolloutRecord(
+                record_id="RDP-SCOPE-OTHER",
+                date="2026-08-23",
+                city="Tripoli",
+                area="Hay Al Andalus Zone 3",
+                item="Cable",
+                material_type="Single-Core Distribution Cable_80m",
+                related_to_xbox="X1",
+                cable_code="H1-L1-S1",
+                actual=1,
+            ),
+        ])
+        db.commit()
+
+        manager_request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(
+                    role="Warehouse Manager",
+                    name="Maqawba Manager",
+                    username="maqawba-manager",
+                    warehouse_name="Maqawba",
+                ),
+                program="FTTH",
+            )
+        )
+        result = main.rollout_dashboard_summary(manager_request, program="FTTH", db=db)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(len(result["records"]), 1)
+        self.assertEqual(result["records"][0]["Area"], "Maqawba")
+
+        technician_request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Technician", name="Technician", username="tech", warehouse_name="Maqawba"),
+                program="FTTH",
+            )
+        )
+        with self.assertRaises(HTTPException) as error:
+            main.rollout_dashboard_summary(technician_request, program="FTTH", db=db)
+        self.assertEqual(error.exception.status_code, 403)
         db.close()
 
     def test_admin_can_edit_all_field_entry_columns_without_changing_audit_identity(self):
