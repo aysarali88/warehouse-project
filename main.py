@@ -3544,6 +3544,76 @@ def list_rollout_daily_progress(request: Request, limit: int = 500, refresh: str
     }
 
 
+@app.get("/api/warehouse/rollout-dashboard-summary")
+def rollout_dashboard_summary(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    """Return only the grouped values used by the Rollout KPI dashboard."""
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    if is_single_ran(program):
+        return {"success": True, "source": "disabled", "count": 0, "records": [], "summary_only": True}
+
+    grouped_rows = (
+        db.query(
+            RolloutRecord.date.label("date"),
+            RolloutRecord.city.label("city"),
+            RolloutRecord.area.label("area"),
+            RolloutRecord.item.label("item"),
+            RolloutRecord.material_type.label("material_type"),
+            RolloutRecord.team_leader.label("team_leader"),
+            RolloutRecord.related_to_xbox.label("related_to_xbox"),
+            RolloutRecord.cable_code.label("cable_code"),
+            RolloutRecord.box_code.label("box_code"),
+            func.sum(RolloutRecord.actual).label("actual"),
+            func.count(RolloutRecord.id).label("record_count"),
+        )
+        .group_by(
+            RolloutRecord.date,
+            RolloutRecord.city,
+            RolloutRecord.area,
+            RolloutRecord.item,
+            RolloutRecord.material_type,
+            RolloutRecord.team_leader,
+            RolloutRecord.related_to_xbox,
+            RolloutRecord.cable_code,
+            RolloutRecord.box_code,
+        )
+        .order_by(RolloutRecord.date.asc(), RolloutRecord.city.asc(), RolloutRecord.area.asc())
+        .all()
+    )
+    records = [
+        {
+            "Date": str(row.date) if row.date else "",
+            "city": row.city or "",
+            "Area": row.area or "",
+            "item": row.item or "",
+            "material type": row.material_type or "",
+            "team leader": row.team_leader or "",
+            "Related to XBOX": row.related_to_xbox or "",
+            "cable code": row.cable_code or "",
+            "box code": row.box_code or "",
+            "actual": float(row.actual or 0),
+            "__rollout_record_count": int(row.record_count or 0),
+        }
+        for row in grouped_rows
+    ]
+    records = rollout_records_for_session(request, records)
+    response = {
+        "success": True,
+        "name": "Rollout Dashboard Summary",
+        "source": "database",
+        "summary_only": True,
+        "count": sum(int(row.get("__rollout_record_count") or 0) for row in records),
+        "fetched_at": datetime.now(TRIPOLI_TZ).isoformat(),
+        "records": records,
+        "metrics": {
+            "database_rows_loaded": len(grouped_rows),
+            "rows_returned": len(records),
+            "full_record_rows_avoided": sum(int(row.get("__rollout_record_count") or 0) for row in records),
+        },
+    }
+    response["metrics"]["estimated_payload_bytes"] = len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return response
+
+
 @app.get("/api/warehouse/rollout-daily-progress/export")
 def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
@@ -4156,19 +4226,6 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
                 "audit": audit["logs"],
             }
         )
-        if not is_single_ran(program_key):
-            rollout = list_rollout_material_usage(request, db=db, program=program_key)
-            daily_progress = list_rollout_daily_progress(request, limit=5000, program=program_key, db=db)
-            payload.update(
-                {
-                    "rolloutUsage": rollout["usage"],
-                    "rolloutRecords": rollout["rollout_records"],
-                    "rolloutSource": rollout.get("rollout_source", ""),
-                    "rolloutDailyProgress": daily_progress["records"],
-                }
-            )
-        else:
-            payload.update({"rolloutUsage": [], "rolloutRecords": 0, "rolloutSource": "", "rolloutDailyProgress": []})
     WAREHOUSE_CACHE[cache_key] = (time.monotonic(), payload)
     return payload
 
