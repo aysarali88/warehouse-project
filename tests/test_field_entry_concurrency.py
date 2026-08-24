@@ -380,6 +380,69 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertLess(result["metrics"]["estimated_payload_bytes"], full_payload_bytes)
         db.close()
 
+    def test_rollout_dashboard_summary_filters_maqawba_by_active_map_codes(self):
+        """Maqawba KPI rows must match the active fiber-map design only."""
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-MAQ-ACTIVE",
+                date="2026-08-24",
+                city="Misurata",
+                area="Maqawba",
+                item="SUB BOX",
+                material_type="SUB BOX",
+                related_to_xbox="X1",
+                box_code="H1-L1-S1",
+                actual=1,
+            ),
+            RolloutRecord(
+                record_id="RDP-MAQ-REMOVED",
+                date="2026-08-24",
+                city="Misurata",
+                area="Maqawba",
+                item="SUB BOX",
+                material_type="SUB BOX",
+                related_to_xbox="X1",
+                box_code="H9-L3-S4",
+                actual=1,
+            ),
+            RolloutRecord(
+                record_id="RDP-OTHER-AREA",
+                date="2026-08-24",
+                city="Tripoli",
+                area="Hay Demashq",
+                item="SUB BOX",
+                material_type="SUB BOX",
+                related_to_xbox="X1",
+                box_code="H9-L3-S4",
+                actual=1,
+            ),
+        ])
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""),
+                program="FTTH",
+            )
+        )
+        original_reference = main.rollout_code_reference_rows
+        main.ROLLOUT_CODE_REFERENCE_CACHE.clear()
+        main.rollout_code_reference_rows = lambda db=None, program="FTTH": [
+            {"area": "Maqawba", "xbox": "X1", "code": "H1-L1-S1", "type": "box", "source": "box"}
+        ]
+        try:
+            result = main.rollout_dashboard_summary(request, program="FTTH", db=db)
+        finally:
+            main.rollout_code_reference_rows = original_reference
+            main.ROLLOUT_CODE_REFERENCE_CACHE.clear()
+            db.close()
+
+        codes = {(row["Area"], row["box code"]) for row in result["records"]}
+        self.assertIn(("Maqawba", "H1-L1-S1"), codes)
+        self.assertNotIn(("Maqawba", "H9-L3-S4"), codes)
+        self.assertIn(("Hay Demashq", "H9-L3-S4"), codes)
+
     def test_warehouse_bootstrap_excludes_rollout_payloads(self):
         """Warehouse startup must not transfer the Rollout record dataset."""
         db = SessionLocal()
