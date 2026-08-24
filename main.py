@@ -2033,6 +2033,62 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
     return rows
 
 
+def rollout_dashboard_summary_metric_rows(rows: list[dict], db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
+    """Keep Maqawba dashboard totals aligned with the active fiber-map design."""
+    if not any(rollout_area_key(first_value(row, "Area", "area", default="")) == "maqawba" for row in rows):
+        return rows
+
+    refs = rollout_code_reference_rows(db, program)
+    ref_sets = {
+        "box": set(),
+        "hub": set(),
+        "xbox": set(),
+        "drop_cable": set(),
+        "route_cable": set(),
+    }
+    for ref in refs:
+        if rollout_area_key(ref.get("area")) != "maqawba":
+            continue
+        xbox = rollout_xbox_key(ref.get("xbox"))
+        code = rollout_code_key(ref.get("code"))
+        if not xbox or not code:
+            continue
+        key = (xbox, code)
+        source = rollout_norm(ref.get("source"))
+        code_type = rollout_norm(ref.get("type"))
+        if code_type == "box" and source == "hub":
+            ref_sets["hub"].add(key)
+        elif code_type == "box" and source == "xbox":
+            ref_sets["xbox"].add(key)
+        elif code_type == "box":
+            ref_sets["box"].add(key)
+        elif code_type == "cable" and source == "route":
+            ref_sets["route_cable"].add(key)
+        elif code_type == "cable":
+            ref_sets["drop_cable"].add(key)
+
+    def keep(row: dict) -> bool:
+        if rollout_area_key(first_value(row, "Area", "area", default="")) != "maqawba":
+            return True
+        material = rollout_norm(f"{first_value(row, 'item', default='')} {first_value(row, 'material type', default='')}")
+        xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "related_to_xbox", "XBOX", "xbox", default=""))
+        box_code = rollout_code_key(first_value(row, "box code", "box_code", default=""))
+        cable_code = rollout_code_key(first_value(row, "cable code", "cable_code", default=""))
+        if "hubbox" in material:
+            return (xbox, box_code) in ref_sets["hub"]
+        if "xbox" in material:
+            return (xbox, box_code) in ref_sets["xbox"] and box_code == rollout_code_key(xbox)
+        if "subbox" in material or "endbox" in material:
+            return (xbox, box_code) in ref_sets["box"]
+        if "singlecoredistributioncable" in material or "distributioncable" in material:
+            return (xbox, cable_code) in ref_sets["drop_cable"]
+        if "4corecable" in material:
+            return (xbox, cable_code) in ref_sets["route_cable"]
+        return True
+
+    return [row for row in rows if keep(row)]
+
+
 def rollout_reference_matches(area: str, xbox: str, code: str, code_type: str, db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
     area_key = rollout_area_key(area)
     xbox_key = rollout_xbox_key(xbox)
@@ -3596,6 +3652,7 @@ def rollout_dashboard_summary(request: Request, program: str = DEFAULT_PROGRAM, 
         for row in grouped_rows
     ]
     records = rollout_records_for_session(request, records)
+    records = rollout_dashboard_summary_metric_rows(records, db, program)
     response = {
         "success": True,
         "name": "Rollout Dashboard Summary",
