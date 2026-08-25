@@ -1,6 +1,12 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+
+TEST_DB_PATH = Path(tempfile.gettempdir()) / f"warehouse-rollout-tests-{os.getpid()}.db"
+os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
 
 from scripts.validate_public_rls import application_tables, load_exceptions, validate_exception_reasons
 

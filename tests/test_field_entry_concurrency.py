@@ -2,20 +2,26 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import close_all_sessions
 from fastapi import HTTPException
 
+TEST_DB_PATH = Path(tempfile.gettempdir()) / f"warehouse-rollout-tests-{os.getpid()}.db"
+try:
+    TEST_DB_PATH.unlink()
+except FileNotFoundError:
+    pass
+os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
+
 
 class FieldEntryConcurrencyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        cls.db_file.close()
-        os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{cls.db_file.name}"
-        os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
         global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, StockMovement, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem
         import main
         from database import SessionLocal
@@ -30,13 +36,18 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             StockMovement,
             Warehouse,
         )
+        if main.engine.dialect.name != "sqlite":
+            raise RuntimeError("Tests must use an isolated SQLite database, never the production database.")
 
     @classmethod
     def tearDownClass(cls):
         main.clear_rollout_db_cache()
         close_all_sessions()
         main.engine.dispose()
-        os.unlink(cls.db_file.name)
+        try:
+            TEST_DB_PATH.unlink()
+        except FileNotFoundError:
+            pass
 
     def test_counter_and_submission_key_are_unique(self):
         db = SessionLocal()
