@@ -371,6 +371,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["full_record_rows_avoided"], 3)
         self.assertEqual(result["records"][0]["actual"], 3)
         self.assertEqual(result["records"][0]["cable code"], "H1-L1-S1")
+        self.assertEqual(result["records"][0]["staus"], "Done")
         self.assertGreater(result["metrics"]["estimated_payload_bytes"], 0)
         full_payload_bytes = len(json.dumps(
             {"records": [main.row_to_record(row) for row in db.query(RolloutRecord).all()]},

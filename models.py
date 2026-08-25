@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import Column, DDL, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, event, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -471,3 +471,16 @@ class AuditLog(Base):
     actor = Column(String, default="system")
     details = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+def enable_rls_for_future_public_tables() -> None:
+    """Enable RLS automatically when SQLAlchemy creates new PostgreSQL public tables."""
+    for table in Base.metadata.tables.values():
+        event.listen(
+            table,
+            "after_create",
+            DDL(f'ALTER TABLE public."{table.name}" ENABLE ROW LEVEL SECURITY').execute_if(dialect="postgresql"),
+        )
+
+
+enable_rls_for_future_public_tables()
