@@ -3043,6 +3043,14 @@ var warehouseFiberScrollState={windowY:0,mainY:0};
 var warehouseFiberRestoringTab=false;
 var warehouseFiberMapMode='design';
 var WFM_MAP_SCOPES=[
+  {id:'awlad-baeoo-x1',title:'Awlad Baeoo - X-BOX1',area:'Awlad Baeoo',xbox:'X1',images:[
+    {title:'X1-H01-H02',src:'/static/assets/awlad-baeoo/xbox1-01-h01-h02.png'},
+    {title:'X1-H03-H04',src:'/static/assets/awlad-baeoo/xbox1-02-h03-h04.png'},
+    {title:'X1-H05-H06',src:'/static/assets/awlad-baeoo/xbox1-03-h05-h06.png'},
+    {title:'X1-H07-H08',src:'/static/assets/awlad-baeoo/xbox1-04-h07-h08.png'},
+    {title:'X1-H09-H10',src:'/static/assets/awlad-baeoo/xbox1-05-h09-h10.png'},
+    {title:'X1-H11',src:'/static/assets/awlad-baeoo/xbox1-06-h11.png'}
+  ]},
   {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
   {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
   {id:'hay-andalus-z3-x7',title:'Hay Al Andalus Zone 3 - X-BOX7',area:'Hay Al Andalus Zone 3',xbox:'X7'},
@@ -3087,6 +3095,13 @@ function wfmSelectMapXbox(value){
 function wfmSchematicEntries(area,xbox){return (warehouseFiberReference?.schematics||[]).filter(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area)&&wfmXboxKey(row.xbox)===wfmXboxKey(xbox))}
 function wfmSchematicUrl(row){return withProgramQuery(`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}`)}
 function wfmSelectSchematic(value){warehouseFiberSelectedSchematic=value||'';warehouseFiberScrollState={windowY:0,mainY:0};renderRolloutMapPanel()}
+function renderStaticFiberMapImages(scope){
+  const box=document.getElementById('rolloutDailyMap');if(!box||!scope?.images?.length)return false;
+  const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];
+  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===wfmMapAreaKey(area)?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)"><option value="">All XBOXes</option>${scopes.map(row=>`<option value="${esc(row.id)}" ${row.id===warehouseFiberSelectedScope?'selected':''}>${esc(row.xbox)}</option>`).join('')}</select></label></div>`;
+  box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(scope.title)}</h3><p>${esc(scope.area)} · ${esc(scope.xbox)}</p></div><div>${controls}</div></div><div class="fiber-map-schematic-list">${scope.images.map((image,index)=>`<article class="fiber-map-schematic-card"><h4>${esc(image.title)}</h4><img src="${esc(image.src)}" alt="${esc(image.title)} map" decoding="async" ${index?'loading="lazy"':'fetchpriority="high"'}></article>`).join('')}</div></div>`;
+  return true;
+}
 async function downloadAreaFiberMapPdf(){
   const area=warehouseFiberSelectedArea||'';
   if(!area){toast('Select an area first');return}
@@ -3163,6 +3178,8 @@ const renderRolloutMapPanelWithInteraction=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
+  const staticScope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
+  if(renderStaticFiberMapImages(staticScope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
   if(renderWorkbookSchematicMap()){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
   return renderRolloutMapPanelWithInteraction();
 };
