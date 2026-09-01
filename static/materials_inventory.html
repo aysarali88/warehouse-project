@@ -1698,7 +1698,12 @@ async function publishAreaBuilder(){
     const button=document.getElementById('areaBuilderPublishButton');if(button)button.disabled=true;
     const data=await api('/api/warehouse/area-builder/publish',{method:'POST',body:areaBuilderFormData('publish')});
     warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true);
+    warehouseFiberSelectedArea=data.area?.name||area;
+    warehouseFiberSelectedScope=(wfmScopesForArea(warehouseFiberSelectedArea)[0]||{}).id||'';
     const review=document.getElementById('areaBuilderReview');if(review)review.innerHTML=`<div><strong>Area published</strong><small>${esc(data.message)}. It is now available in the Map and Field Entry.</small></div>`;
+    switchView('rolloutDaily');
+    switchRolloutDailyTab('map');
+    renderRolloutMapPanel();
     toast(data.message);
   }catch(error){toast(error.message)}finally{const button=document.getElementById('areaBuilderPublishButton');if(button)button.disabled=false}
 }
