@@ -6958,7 +6958,7 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
         db.query(MaterialReturn)
         .options(selectinload(MaterialReturn.items), joinedload(MaterialReturn.warehouse))
         .filter(MaterialReturn.id == return_id, MaterialReturn.program == program_key)
-        .with_for_update()
+        .with_for_update(of=MaterialReturn)
         .first()
     )
     if row is None:
