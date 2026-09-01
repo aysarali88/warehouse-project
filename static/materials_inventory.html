@@ -2827,7 +2827,11 @@ async function ensureRolloutDashboardDesignReference(force=false){
   warehouseFiberReferenceLoading=true;
   try{const data=await api('/api/warehouse/fiber-map-reference');applyFiberMapReference(data);return warehouseFiberReference}
   catch(error){return null}
-  finally{warehouseFiberReferenceLoading=false;renderRolloutDailyProgress()}
+  finally{
+    warehouseFiberReferenceLoading=false;
+    renderRolloutDailyProgress();
+    if(document.querySelector('.view.active')?.id==='rolloutDaily'&&document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map')setTimeout(()=>renderRolloutMapPanel(),0);
+  }
 }
 
 function wfmValue(row,names){
@@ -3116,7 +3120,7 @@ async function downloadAreaFiberMapPdf(){
   }finally{holder.remove()}
 }
 function renderRolloutMapPanel(){
-  const box=document.getElementById('rolloutDailyMap');if(!box)return;const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];syncWarehouseFiberScope(selectedArea);
+  const box=document.getElementById('rolloutDailyMap');if(!box)return;if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){ensureRolloutDashboardDesignReference().then(data=>{if(data)renderRolloutMapPanel();else box.innerHTML='<div class="map-note">Map reference could not be loaded.</div>'})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];syncWarehouseFiberScope(selectedArea);
   if(wh.rolloutDashboardSummaryOnly){box.innerHTML='<div class="map-note">Loading Rollout details for the map...</div>';if(!rolloutRefreshBusy)ensureRolloutDailyDetails(false).then(()=>renderRolloutMapPanel());return}
   const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([key,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===key?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)" ${selectedArea?'':'disabled'}><option value="">All XBOXes</option>${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===warehouseFiberSelectedScope?'selected':''}>${esc(scope.xbox)}</option>`).join('')}</select></label><button class="btn primary" type="button" onclick="downloadAreaFiberMapPdf()" ${selectedArea?'':'disabled'}>Download area PDF</button></div>`;
   if(!selectedArea){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>Fiber Map</h3><p>Select an area to load the complete area map.</p></div>${controls}</div><div class="map-note">No map loaded. Select an area first.</div></div>`;return}
