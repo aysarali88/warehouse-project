@@ -1957,7 +1957,8 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
                 "targetSubEndBox": len(payload.get("boxes") or []),
                 "targetHubBox": len({(rollout_xbox_key(row.get("Related to XBOX")), str(row.get("Hub") or "").strip()) for row in payload.get("boxes") or [] if row.get("Hub")}),
                 "targetXbox": len({rollout_xbox_key(row.get("Related to XBOX")) for row in payload.get("boxes") or [] if row.get("Related to XBOX")}),
-                "targetCableMeters": sum(safe_float(row.get("Cable length m")) for row in payload.get("boxes") or []),
+                "targetCableMeters": sum(safe_float(row.get("Cable length m")) for row in payload.get("boxes") or [])
+                + sum(safe_float(row.get("Cable length m")) for row in payload.get("routes") or []),
                 "targetUsers": saved_area.target_users,
                 "dynamic": True,
             }
