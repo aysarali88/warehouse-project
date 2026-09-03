@@ -2814,7 +2814,7 @@ setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
-const HIDDEN_DYNAMIC_MAP_AREAS=new Set(['awlad baeoo']);
+const HIDDEN_DYNAMIC_MAP_AREAS=new Set();
 
 function applyFiberMapReference(data){
   warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
@@ -3043,21 +3043,6 @@ var warehouseFiberScrollState={windowY:0,mainY:0};
 var warehouseFiberRestoringTab=false;
 var warehouseFiberMapMode='design';
 var WFM_MAP_SCOPES=[
-  {id:'awlad-baeoo-x1',title:'Awlad Baeoo - X-BOX1',area:'Awlad Baeoo',xbox:'X1',images:[
-    {title:'X1-H01-H02',src:'/static/assets/awlad-baeoo/xbox1-01-h01-h02.png'},
-    {title:'X1-H03-H04',src:'/static/assets/awlad-baeoo/xbox1-02-h03-h04.png'},
-    {title:'X1-H05-H06',src:'/static/assets/awlad-baeoo/xbox1-03-h05-h06.png'},
-    {title:'X1-H07-H08',src:'/static/assets/awlad-baeoo/xbox1-04-h07-h08.png'},
-    {title:'X1-H09-H10',src:'/static/assets/awlad-baeoo/xbox1-05-h09-h10.png'},
-    {title:'X1-H11',src:'/static/assets/awlad-baeoo/xbox1-06-h11.png'}
-  ]},
-  {id:'awlad-baeoo-x2',title:'Awlad Baeoo - X-BOX2',area:'Awlad Baeoo',xbox:'X2',images:[
-    {title:'X2-H01-H02',src:'/static/assets/awlad-baeoo/xbox2-01-h01-h02.png'},
-    {title:'X2-H03-H04',src:'/static/assets/awlad-baeoo/xbox2-02-h03-h04.png'},
-    {title:'X2-H05-H06',src:'/static/assets/awlad-baeoo/xbox2-03-h05-h06.png'},
-    {title:'X2-H07-H08',src:'/static/assets/awlad-baeoo/xbox2-04-h07-h08.png'},
-    {title:'X2-H09-H10',src:'/static/assets/awlad-baeoo/xbox2-05-h09-h10.png'}
-  ]},
   {id:'x4',title:'Hay Andalus Zone 2 - X-BOX4',area:'Hay Al Andalus Zone 2',xbox:'X4'},
   {id:'x5',title:'Hay Andalus Zone 2 - X-BOX5',area:'Hay Al Andalus Zone 2',xbox:'X5'},
   {id:'hay-andalus-z3-x7',title:'Hay Al Andalus Zone 3 - X-BOX7',area:'Hay Al Andalus Zone 3',xbox:'X7'},
@@ -3089,12 +3074,6 @@ function syncWarehouseFiberScope(area){
   const scopes=wfmScopesForArea(warehouseFiberSelectedArea);
   if(!warehouseFiberSelectedArea){warehouseFiberSelectedScope='';return}
   if(!scopes.some(scope=>scope.id===warehouseFiberSelectedScope))warehouseFiberSelectedScope='';
-}
-function wfmAutoSelectImageScope(area){
-  const scopes=area?wfmScopesForArea(area):[];
-  if(warehouseFiberSelectedScope||!scopes.some(scope=>scope.images?.length))return;
-  const firstImageScope=scopes.find(scope=>scope.images?.length);
-  if(firstImageScope)warehouseFiberSelectedScope=firstImageScope.id;
 }
 function wfmSelectMapArea(value){
   warehouseFiberSelectedArea=value||'';
@@ -3198,9 +3177,9 @@ const renderRolloutMapPanelWithInteraction=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
-  wfmAutoSelectImageScope(warehouseFiberSelectedArea||'');
   const staticScope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(renderStaticFiberMapImages(staticScope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
+  if(staticScope&&!staticScope.images?.length&&wfmParts(staticScope.area,staticScope.xbox).length)return renderRolloutMapPanelWithInteraction();
   if(renderWorkbookSchematicMap()){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
   return renderRolloutMapPanelWithInteraction();
 };
