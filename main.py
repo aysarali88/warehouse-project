@@ -2138,7 +2138,7 @@ def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str
 
 def area_builder_hub_code(value) -> str:
     match = re.search(r"\b(H\s*\d+)\b", str(value or "").upper())
-    return re.sub(r"\s+", "", match.group(1)) if match else ""
+    return f"H{int(re.search(r'\d+', match.group(1)).group())}" if match else ""
 
 
 def area_builder_xbox_code(value) -> str:

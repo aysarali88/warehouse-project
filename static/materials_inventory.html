@@ -2991,7 +2991,7 @@ function wfmDynamicRows(part){
   [...part.hubs].sort((a,b)=>a-b).forEach(hub=>{if(used.has(hub))return;const pair=pairs.get(hub);if(pair&&part.hubs.includes(pair)&&!used.has(pair)){rows.push([hub,pair]);used.add(hub);used.add(pair)}else{rows.push([hub]);used.add(hub)}});return rows;
 }
 function wfmHubPosition(part,hub){const rows=wfmDynamicRows(part),rowIndex=Math.max(0,rows.findIndex(row=>row.includes(hub))),col=Math.max(0,(rows[rowIndex]||[hub]).indexOf(hub));return{x:col===0?440:1400,y:560+rowIndex*800}}
-function wfmRouteForHub(part,hub){return(part.routeRows||[]).find(row=>String(wfmValue(row,['Route to'])).toUpperCase()===`H${hub}`)||null}
+function wfmRouteForHub(part,hub){return(part.routeRows||[]).find(row=>wfmOrdinal(wfmValue(row,['Route to']))===hub)||null}
 function wfmBoxSequence(row){const code=String(wfmValue(row,['Box code'])||'').match(/-S\s*0*(\d+)/i);return code?Number(code[1]):wfmOrdinal(wfmValue(row,['Sequence','Splitter']))}
 function wfmTerminals(part,hub,line){return(part.boxRows||[]).filter(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line).sort((a,b)=>wfmBoxSequence(a)-wfmBoxSequence(b))}
 function wfmDb(row){const raw=wfmValue(row,['dB','db']);if(raw===''||raw===null||raw===undefined)return '';const value=Number(raw);return Number.isFinite(value)?`${value.toFixed(1)} dB`:String(raw)}
