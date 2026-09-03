@@ -2814,7 +2814,7 @@ setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
-const HIDDEN_DYNAMIC_MAP_AREAS=new Set(['AWLADBAEOO']);
+const HIDDEN_DYNAMIC_MAP_AREAS=new Set(['awlad baeoo']);
 
 function applyFiberMapReference(data){
   warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
@@ -3076,13 +3076,25 @@ function wfmMapAreaKey(value){
 }
 function wfmScopesForArea(area){
   const key=wfmMapAreaKey(area);
-  if(!key||key==='all areas')return WFM_MAP_SCOPES;
-  return WFM_MAP_SCOPES.filter(scope=>wfmMapAreaKey(scope.area)===key);
+  const scopes=(!key||key==='all areas')?WFM_MAP_SCOPES:WFM_MAP_SCOPES.filter(scope=>wfmMapAreaKey(scope.area)===key);
+  const seenScopes=new Set();
+  return scopes.filter(scope=>{
+    const scopeKey=`${wfmMapAreaKey(scope.area)}|${wfmXboxKey(scope.xbox)}|${scope.title||''}`;
+    if(seenScopes.has(scopeKey))return false;
+    seenScopes.add(scopeKey);
+    return true;
+  });
 }
 function syncWarehouseFiberScope(area){
   const scopes=wfmScopesForArea(warehouseFiberSelectedArea);
   if(!warehouseFiberSelectedArea){warehouseFiberSelectedScope='';return}
   if(!scopes.some(scope=>scope.id===warehouseFiberSelectedScope))warehouseFiberSelectedScope='';
+}
+function wfmAutoSelectImageScope(area){
+  const scopes=area?wfmScopesForArea(area):[];
+  if(warehouseFiberSelectedScope||!scopes.some(scope=>scope.images?.length))return;
+  const firstImageScope=scopes.find(scope=>scope.images?.length);
+  if(firstImageScope)warehouseFiberSelectedScope=firstImageScope.id;
 }
 function wfmSelectMapArea(value){
   warehouseFiberSelectedArea=value||'';
@@ -3105,7 +3117,7 @@ function wfmSelectSchematic(value){warehouseFiberSelectedSchematic=value||'';war
 function renderStaticFiberMapImages(scope){
   const box=document.getElementById('rolloutDailyMap');if(!box||!scope?.images?.length)return false;
   const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];
-  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===wfmMapAreaKey(area)?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)"><option value="">All XBOXes</option>${scopes.map(row=>`<option value="${esc(row.id)}" ${row.id===warehouseFiberSelectedScope?'selected':''}>${esc(row.xbox)}</option>`).join('')}</select></label></div>`;
+  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===wfmMapAreaKey(area)?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)"><option value="">All XBOXes</option>${scopes.map(row=>`<option value="${esc(row.id)}" ${row.id===warehouseFiberSelectedScope?'selected':''}>${esc(row.xbox)}</option>`).join('')}</select></label><button class="btn primary" type="button" onclick="downloadAreaFiberMapPdf()">Download area PDF</button></div>`;
   box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(scope.title)}</h3><p>${esc(scope.area)} · ${esc(scope.xbox)}</p></div><div>${controls}</div></div><div class="map-stage static-map-stage">${scope.images.map((image,index)=>`<img class="static-fiber-map-image" src="${esc(image.src)}" alt="${esc(image.title)} map" decoding="async" ${index?'loading="lazy"':'fetchpriority="high"'}>`).join('')}</div></div>`;
   return true;
 }
@@ -3185,6 +3197,7 @@ const renderRolloutMapPanelWithInteraction=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
+  wfmAutoSelectImageScope(warehouseFiberSelectedArea||'');
   const staticScope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(renderStaticFiberMapImages(staticScope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
   if(renderWorkbookSchematicMap()){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
