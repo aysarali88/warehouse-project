@@ -2304,7 +2304,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
                 "Part": sheet_parts.get((xbox, hub), f"Part{((int(re.search(r'\d+', hub).group()) - 1) // 2) + 1:02d}"),
                 "Hub": hub,
                 "Line": line,
-                "Splitter": 8 if is_end else 9,
+                "Splitter": sequence,
                 "Box code": code,
                 "Box type": "END BOX" if is_end else "SUB BOX",
                 "Real length m": actual,
