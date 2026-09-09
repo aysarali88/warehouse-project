@@ -2952,7 +2952,7 @@ function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
     const base=rows.find(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line)||rows[0]||{};
     rows.push({...base,Area:area,Zone:area,'Related to XBOX':xbox,XBOX:xbox,Part:wfmValue(base,['Part'])||`Part${String(Math.ceil(hub/2)).padStart(2,'0')}`,Hub:`H${hub}`,Line:line,Splitter:4,'Box code':code,'Box type':'END BOX','Real length m':0,'Cable length m':length,'Material type':`Single-Core Distribution Cable_${length}m`});
   };
-  addEnd('H5-L1-S4',5,1,50);addEnd('H6-L2-S4',6,2,100);return rows;
+  addEnd('H5-L1-S4',5,1,50);addEnd('H5-L3-S3',5,3,50);addEnd('H6-L2-S4',6,2,100);return rows;
 }
 function wfmParts(area,xbox){
   if(!warehouseFiberReference)return[];
