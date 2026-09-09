@@ -2944,9 +2944,19 @@ function rolloutMapCableProgressMetric(area,rows){
 }
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
 function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
+function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
+  if(normalizeText(area)!=='hayalandaluszone3'||wfmXboxKey(xbox)!=='X9')return sourceRows;
+  const removed=new Set(['H1-L3-S3','H1-L3-S4']),rows=sourceRows.filter(row=>!removed.has(String(wfmValue(row,['Box code'])).toUpperCase()));
+  const addEnd=(code,hub,line,length)=>{
+    if(rows.some(row=>String(wfmValue(row,['Box code'])).toUpperCase()===code))return;
+    const base=rows.find(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line)||rows[0]||{};
+    rows.push({...base,Area:area,Zone:area,'Related to XBOX':xbox,XBOX:xbox,Part:wfmValue(base,['Part'])||`Part${String(Math.ceil(hub/2)).padStart(2,'0')}`,Hub:`H${hub}`,Line:line,Splitter:4,'Box code':code,'Box type':'END BOX','Real length m':0,'Cable length m':length,'Material type':`Single-Core Distribution Cable_${length}m`});
+  };
+  addEnd('H5-L1-S4',5,1,50);addEnd('H6-L2-S4',6,2,100);return rows;
+}
 function wfmParts(area,xbox){
   if(!warehouseFiberReference)return[];
-  const boxes=wfmUnique((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Box code'])].join('|'));
+  const boxes=wfmApplyHayAndalusZone3X9MapEdits(area,xbox,wfmUnique((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Box code'])].join('|')));
   const routes=wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|'));
   const groups=new Map();
   [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
