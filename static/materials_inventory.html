@@ -2966,7 +2966,7 @@ function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return mat
 function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
   const areaKey=canonicalRolloutArea(area)==='awladbaeoo'?'awladbaeoo':normalizeText(area),xboxKey=wfmXboxKey(xbox);
   if(areaKey!=='hayalandaluszone3'&&areaKey!=='awladbaeoo')return sourceRows;
-  const removed=areaKey==='hayalandaluszone3'&&xboxKey==='X9'?new Set(['H1-L3-S3','H1-L3-S4','H2-L1-S4','H4-L2-S4'].map(normalizeMapCode)):new Set();
+  const removed=areaKey==='hayalandaluszone3'&&xboxKey==='X9'?new Set(['H1-L3-S3','H1-L3-S4','H2-L1-S4','H4-L2-S4','H5-L4-S3'].map(normalizeMapCode)):new Set();
   if(areaKey==='awladbaeoo'&&xboxKey==='X1')['H2-L1-S3','H2-L1-S4','H2-L3-S3','H10-L1-S3','H9-L3-S2','H9-L3-S3','H9-L3-S4','H9-L2-S4'].forEach(code=>removed.add(normalizeMapCode(code)));
   if(areaKey==='awladbaeoo'&&xboxKey==='X2')['H2-L1-S4','H3-L4-S4','H3-L2-S3','H3-L2-S4'].forEach(code=>removed.add(normalizeMapCode(code)));
   const rows=sourceRows.filter(row=>!removed.has(normalizeMapCode(wfmValue(row,['Box code']))));
