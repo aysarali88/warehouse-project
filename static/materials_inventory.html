@@ -2525,12 +2525,21 @@ function rolloutMetricFromRows(rows){
   metric.actualUsers=metric.distributionQty*8;
   return metric;
 }
+function wfmDesignTargetFor(area){
+  if(!warehouseFiberReference||normalizeText(area)!=='awladbaeoo')return null;
+  const parts=wfmParts(area,''),boxes=parts.flatMap(part=>part.boxRows||[]),routes=parts.flatMap(part=>part.routeRows||[]);
+  if(!boxes.length&&!routes.length)return null;
+  const hubs=new Set(),xboxes=new Set();boxes.forEach(row=>{const xbox=wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']));if(xbox)xboxes.add(xbox);const hub=wfmOrdinal(wfmValue(row,['Hub']));if(xbox&&hub)hubs.add(`${xbox}|H${hub}`)});
+  return {cableMeters:boxes.reduce((sum,row)=>sum+Number(wfmValue(row,['Cable length m'])||0),0)+routes.reduce((sum,row)=>sum+Number(wfmValue(row,['Cable length m'])||0),0),subEndBox:boxes.length,hubBox:hubs.size,xbox:xboxes.size,totalBoxes:boxes.length+hubs.size+xboxes.size};
+}
 function rolloutPlanFor(city,area){
   if(normalizeText(area)==='allareas')return null;
   return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&normalizeText(p.area)===normalizeText(area))||ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.area)===normalizeText(area))||null;
 }
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
+  const design=wfmDesignTargetFor(area);
+  if(design)return {...design,users:Number(plan.targetUsers||0)};
   return {
     cableMeters:Number(plan.targetCableMeters||0),
     subEndBox:Number(plan.targetSubEndBox||0),
@@ -2912,9 +2921,8 @@ function wfmCableState(part,rows,code,expectedLength,kind){
   return{status:matches.length?'mismatch':'missing',rows:matches,routeLabel:wfmRouteLabel(matches)};
 }
 function rolloutMapCableProgressMetric(area,rows){
-  // Maqawba is maintained from the live map design. Older completed areas
-  // keep their approved dashboard targets and Field Entry aggregation.
-  if(!warehouseFiberReference||normalizeText(area)!==normalizeText('Maqawba'))return null;
+  // These areas use the active map design for cable progress and totals.
+  if(!warehouseFiberReference||!['maqawba','awladbaeoo'].includes(normalizeText(area)))return null;
   const parts=wfmParts(area,'');
   if(!parts.length)return null;
   const metric={targetMeters:0,installedMeters:0,missingMeters:0,mismatchMeters:0,codes:0};
@@ -2945,14 +2953,23 @@ function rolloutMapCableProgressMetric(area,rows){
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
 function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
 function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
-  if(normalizeText(area)!=='hayalandaluszone3'||wfmXboxKey(xbox)!=='X9')return sourceRows;
-  const removed=new Set(['H1-L3-S3','H1-L3-S4']),rows=sourceRows.filter(row=>!removed.has(String(wfmValue(row,['Box code'])).toUpperCase()));
+  const areaKey=normalizeText(area),xboxKey=wfmXboxKey(xbox);
+  if(areaKey!=='hayalandaluszone3'&&areaKey!=='awladbaeoo')return sourceRows;
+  const removed=areaKey==='hayalandaluszone3'&&xboxKey==='X9'?new Set(['H1-L3-S3','H1-L3-S4']):new Set();
+  if(areaKey==='awladbaeoo'&&xboxKey==='X1')['H2-L1-S3','H2-L1-S4','H2-L3-S3','H10-L1-S3','H9-L3-S2','H9-L3-S3','H9-L3-S4','H9-L2-S4'].forEach(code=>removed.add(code));
+  if(areaKey==='awladbaeoo'&&xboxKey==='X2')['H2-L1-S4','H3-L4-S4','H3-L2-S3','H3-L2-S4'].forEach(code=>removed.add(code));
+  const rows=sourceRows.filter(row=>!removed.has(normalizeMapCode(wfmValue(row,['Box code']))));
   const addEnd=(code,hub,line,length)=>{
-    if(rows.some(row=>String(wfmValue(row,['Box code'])).toUpperCase()===code))return;
+    if(rows.some(row=>normalizeMapCode(wfmValue(row,['Box code']))===normalizeMapCode(code)))return;
     const base=rows.find(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line)||rows[0]||{};
     rows.push({...base,Area:area,Zone:area,'Related to XBOX':xbox,XBOX:xbox,Part:wfmValue(base,['Part'])||`Part${String(Math.ceil(hub/2)).padStart(2,'0')}`,Hub:`H${hub}`,Line:line,Splitter:4,'Box code':code,'Box type':'END BOX','Real length m':0,'Cable length m':length,'Material type':`Single-Core Distribution Cable_${length}m`});
   };
-  addEnd('H5-L1-S4',5,1,50);addEnd('H5-L3-S3',5,3,50);addEnd('H6-L2-S4',6,2,100);return rows;
+  if(areaKey==='hayalandaluszone3'&&xboxKey==='X9'){
+    addEnd('H5-L1-S4',5,1,50);addEnd('H5-L3-S3',5,3,50);addEnd('H6-L2-S4',6,2,100);
+  }
+  if(areaKey==='awladbaeoo'&&xboxKey==='X2')addEnd('H10-L3-S3',10,3,200);
+  if(areaKey==='awladbaeoo'&&xboxKey==='X1')addEnd('H2-L2-S4',2,2,50);
+  return rows;
 }
 function wfmParts(area,xbox){
   if(!warehouseFiberReference)return[];
