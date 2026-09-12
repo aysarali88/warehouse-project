@@ -2560,7 +2560,7 @@ function setRolloutDashboardFilter(key,value){
 }
 function renderRolloutDailyProgress(){
 const rows=wh.rolloutDailyProgress||[];
-if(!wh.rolloutDashboardSummaryOnly&&(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map'||normalizeText(rolloutDashboardFilters.area)==='awladbaeoo'))ensureRolloutDashboardDesignReference();
+if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map'||normalizeText(rolloutDashboardFilters.area)==='awladbaeoo')ensureRolloutDashboardDesignReference();
 const stats=document.getElementById('rolloutDailyStats');
 const table=document.getElementById('rolloutDailyKpi');
 if(!stats||!table)return;
