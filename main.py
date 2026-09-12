@@ -2030,6 +2030,38 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
         add(row, code, "cable", "route")
+    # Keep map-only additions available to Field Entry validation until the
+    # published fiber-map reference is regenerated.
+    add(
+        {
+            "City": "Tripoli",
+            "Area": "Hay Al Andalus Zone 3",
+            "Zone": "Hay Al Andalus Zone 3",
+            "Related to XBOX": "X9",
+            "XBOX": "X-BOX09",
+            "Box type": "END BOX",
+            "Material type": "Single-Core Distribution Cable_50m",
+            "Cable length m": 50,
+        },
+        "H3-L1-S4",
+        "box",
+        "map_override",
+        "END BOX",
+    )
+    add(
+        {
+            "City": "Tripoli",
+            "Area": "Hay Al Andalus Zone 3",
+            "Zone": "Hay Al Andalus Zone 3",
+            "Related to XBOX": "X9",
+            "XBOX": "X-BOX09",
+            "Material type": "Single-Core Distribution Cable_50m",
+            "Cable length m": 50,
+        },
+        "H3-L1-S4",
+        "cable",
+        "map_override",
+    )
     ROLLOUT_CODE_REFERENCE_CACHE[program_key] = rows
     return rows
 
