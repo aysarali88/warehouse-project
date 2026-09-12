@@ -2954,6 +2954,7 @@ function rolloutMapCableProgressMetric(area,rows){
     (part.boxRows||[]).forEach(ref=>add(part,ref,'Box code','distribution'));
     (part.routeRows||[]).forEach(ref=>add(part,ref,'Route code','fourcore'));
   });
+  if(normalizeText(area)==='awladbaeoo')metric.installedMeters=rolloutMetricFromRows(rows).cableMeters;
   return metric;
 }
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
@@ -2992,7 +2993,7 @@ function wfmDashboardParts(area){
 }
 function rolloutDashboardMetricRows(rows,area){
   if(!warehouseFiberReference||normalizeText(area)==='allareas')return rows;
-  const parts=wfmDashboardParts(area);
+  const parts=wfmParts(area,'');
   if(!parts.length)return rows;
   const enforceExactMaqawbaMetrics=normalizeText(area)==='maqawba';
   const boxCodes=new Set(),routeCodes=new Set(),hubCodes=new Set(),xboxCodes=new Set();
