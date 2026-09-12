@@ -2105,7 +2105,7 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
         }
         add(override, code, "box", "map_override", "END BOX")
         add(override, code, "cable", "map_override")
-    removed_x9_codes = {"H1-L3-S3", "H1-L3-S4", "H2-L1-S4", "H4-L2-S4", "H5-L4-S3"}
+    removed_x9_codes = {"H1-L3-S3", "H1-L3-S4", "H2-L1-S4", "H4-L2-S4", "H5-L4-S2", "H5-L4-S3", "H8-L2-S1", "H8-L2-S2", "H8-L2-S3", "H8-L2-S4"}
     rows = [
         row
         for row in rows
