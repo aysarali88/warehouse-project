@@ -2062,6 +2062,46 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
         "cable",
         "map_override",
     )
+    add(
+        {
+            "City": "Tripoli",
+            "Area": "Hay Al Andalus Zone 3",
+            "Zone": "Hay Al Andalus Zone 3",
+            "Related to XBOX": "X9",
+            "XBOX": "X-BOX09",
+            "Box type": "END BOX",
+            "Material type": "Single-Core Distribution Cable_100m",
+            "Cable length m": 100,
+        },
+        "H4-L1-S3",
+        "box",
+        "map_override",
+        "END BOX",
+    )
+    add(
+        {
+            "City": "Tripoli",
+            "Area": "Hay Al Andalus Zone 3",
+            "Zone": "Hay Al Andalus Zone 3",
+            "Related to XBOX": "X9",
+            "XBOX": "X-BOX09",
+            "Material type": "Single-Core Distribution Cable_100m",
+            "Cable length m": 100,
+        },
+        "H4-L1-S3",
+        "cable",
+        "map_override",
+    )
+    removed_x9_codes = {"H1-L3-S3", "H1-L3-S4", "H2-L1-S4", "H4-L2-S4"}
+    rows = [
+        row
+        for row in rows
+        if not (
+            rollout_area_key(row.get("area")) == "hayalandaluszone3"
+            and rollout_xbox_key(row.get("xbox")) == "X9"
+            and rollout_code_key(row.get("code")) in {rollout_code_key(code) for code in removed_x9_codes}
+        )
+    ]
     ROLLOUT_CODE_REFERENCE_CACHE[program_key] = rows
     return rows
 
