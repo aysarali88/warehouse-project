@@ -3044,6 +3044,9 @@ function wfmDynamicRows(part){
 function wfmHubPosition(part,hub){const rows=wfmDynamicRows(part),rowIndex=Math.max(0,rows.findIndex(row=>row.includes(hub))),col=Math.max(0,(rows[rowIndex]||[hub]).indexOf(hub));return{x:col===0?440:1400,y:560+rowIndex*800}}
 function wfmRouteForHub(part,hub){return(part.routeRows||[]).find(row=>wfmOrdinal(wfmValue(row,['Route to']))===hub)||null}
 function wfmRouteSourceHub(part,hub){
+  const route=wfmRouteForHub(part,hub);
+  const explicit=String(wfmValue(route,['Route from'])).match(/^H(\d+)$/i);
+  if(explicit)return Number(explicit[1]);
   if(wfmIsHayAndalusZone3X9(part)){
     const row=wfmDynamicRows(part).find(item=>item.includes(hub));
     const index=row?row.indexOf(hub):-1;
