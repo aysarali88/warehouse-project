@@ -2092,6 +2092,19 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
         "cable",
         "map_override",
     )
+    for code, length in (("H5-L1-S4", 50), ("H5-L3-S3", 50), ("H6-L2-S4", 100)):
+        override = {
+            "City": "Tripoli",
+            "Area": "Hay Al Andalus Zone 3",
+            "Zone": "Hay Al Andalus Zone 3",
+            "Related to XBOX": "X9",
+            "XBOX": "X-BOX09",
+            "Box type": "END BOX",
+            "Material type": f"Single-Core Distribution Cable_{length}m",
+            "Cable length m": length,
+        }
+        add(override, code, "box", "map_override", "END BOX")
+        add(override, code, "cable", "map_override")
     removed_x9_codes = {"H1-L3-S3", "H1-L3-S4", "H2-L1-S4", "H4-L2-S4"}
     rows = [
         row
