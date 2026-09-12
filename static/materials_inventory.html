@@ -3031,9 +3031,17 @@ function rolloutDashboardMetricRows(rows,area){
 }
 function wfmIsHayAndalusZone3X9(part){return normalizeText(part?.area)==='hayalandaluszone3'&&wfmXboxKey(part?.xbox)==='X9'}
 function wfmHayAndalusZone3X9Rows(part){
-  const hubs=[...(part.hubs||[])].sort((a,b)=>a-b),wanted=[[1],[2,3],[4],[5,6],[7,8],[9],[10,11]],used=new Set(),rows=[];
-  wanted.forEach(row=>{const present=row.filter(h=>hubs.includes(h));if(present.length){rows.push(present);present.forEach(h=>used.add(h))}});
-  hubs.forEach(h=>{if(!used.has(h))rows.push([h])});
+  const hubs=[...(part.hubs||[])].sort((a,b)=>a-b),used=new Set(),rows=[];
+  const sourceOf=hub=>String(wfmValue(wfmRouteForHub(part,hub),['Route from'])).match(/^H(\d+)$/i)?.[1]||'';
+  hubs.forEach(hub=>{
+    if(used.has(hub))return;
+    const source=sourceOf(hub);
+    if(!source){
+      const next=hubs.find(candidate=>!used.has(candidate)&&sourceOf(candidate)===`H${hub}`);
+      const row=next?[hub,next]:[hub]; rows.push(row); row.forEach(value=>used.add(value)); return;
+    }
+  });
+  hubs.forEach(hub=>{if(!used.has(hub)){rows.push([hub]);used.add(hub)}});
   return rows;
 }
 function wfmDynamicRows(part){
@@ -3047,11 +3055,7 @@ function wfmRouteSourceHub(part,hub){
   const route=wfmRouteForHub(part,hub);
   const explicit=String(wfmValue(route,['Route from'])).match(/^H(\d+)$/i);
   if(explicit)return Number(explicit[1]);
-  if(wfmIsHayAndalusZone3X9(part)){
-    const row=wfmDynamicRows(part).find(item=>item.includes(hub));
-    const index=row?row.indexOf(hub):-1;
-    return index>0?row[index-1]:null;
-  }
+  if(wfmIsHayAndalusZone3X9(part))return null;
   const match=String(wfmValue(wfmRouteForHub(part,hub),['Route from'])).match(/^H(\d+)$/i);
   return match?Number(match[1]):null;
 }
