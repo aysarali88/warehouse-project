@@ -1563,7 +1563,9 @@ let activeUsers=[];
 let currentEditingMrId=null;
 let currentEditingTransferId=null;
 let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
-const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3'],Misurata:['Maqawba','Ras A Tota']};
+function canonicalRolloutArea(value){const key=normalizeText(value);return ['awladbaeo','awladbaeoo'].includes(key)?'awladbaeoo':String(value||'').trim()}
+function sameRolloutDashboardArea(a,b){return normalizeText(canonicalRolloutArea(a))===normalizeText(canonicalRolloutArea(b))}
+const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
 const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
@@ -2527,7 +2529,7 @@ function rolloutMetricFromRows(rows){
   return metric;
 }
 function wfmDesignTargetFor(area){
-  if(!warehouseFiberReference||normalizeText(area)!=='awladbaeoo')return null;
+  if(!warehouseFiberReference||canonicalRolloutArea(area)!=='awladbaeoo')return null;
   const parts=wfmParts(area,''),includedParts=parts.filter(part=>!(wfmXboxKey(part.xbox)==='X1'&&part.hubs.some(hub=>hub>=3&&hub<=8))),boxes=includedParts.flatMap(part=>part.boxRows||[]),routes=includedParts.flatMap(part=>part.routeRows||[]);
   if(!boxes.length&&!routes.length)return null;
   const hubs=new Set(),xboxes=new Set();includedParts.forEach(part=>{const xbox=wfmXboxKey(part.xbox);if(xbox)xboxes.add(xbox);part.hubs.forEach(hub=>{if(xbox&&hub)hubs.add(`${xbox}|H${hub}`)})});
@@ -2539,7 +2541,7 @@ function rolloutPlanFor(city,area){
 }
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
-  if(normalizeText(area)==='awladbaeoo')return {cableMeters:20140,subEndBox:169,hubBox:15,xbox:2,totalBoxes:186,users:1352};
+  if(canonicalRolloutArea(area)==='awladbaeoo')return {cableMeters:20140,subEndBox:169,hubBox:15,xbox:2,totalBoxes:186,users:1352};
   const design=wfmDesignTargetFor(area);
   if(design)return {...design,users:Number(plan.targetUsers||0)};
   return {
@@ -2562,7 +2564,7 @@ function setRolloutDashboardFilter(key,value){
 }
 function renderRolloutDailyProgress(){
 const rows=wh.rolloutDailyProgress||[];
-const isAwladDashboard=normalizeText(rolloutDashboardFilters.area)==='awladbaeoo';
+const isAwladDashboard=canonicalRolloutArea(rolloutDashboardFilters.area)==='awladbaeoo';
 if((document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map'||isAwladDashboard)&&!warehouseFiberReference){
   ensureRolloutDashboardDesignReference();
   if(isAwladDashboard){const table=document.getElementById('rolloutDailyKpi');if(table)table.innerHTML='<div class="empty">Loading dashboard design...</div>';return}
@@ -2582,17 +2584,17 @@ const dateOptions=[...new Set(rows.map(r=>String(r.Date||'').slice(0,10)).filter
 const cityOptions=[...new Set([...Object.keys(ROLLOUT_DASHBOARD_AREAS),...rows.map(r=>String(r.city||r.City||'').trim()).filter(Boolean)])];
 if(!cityOptions.includes(rolloutDashboardFilters.city))rolloutDashboardFilters.city=cityOptions[0]||'Tripoli';
 const mappedAreas=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
-const dataAreas=[...new Set(rows.filter(r=>!rolloutDashboardFilters.city||normalizeText(r.city||r.City)===normalizeText(rolloutDashboardFilters.city)).map(r=>String(r.Area||r.area||'').trim()).filter(Boolean))];
+const dataAreas=[...new Set(rows.filter(r=>!rolloutDashboardFilters.city||normalizeText(r.city||r.City)===normalizeText(rolloutDashboardFilters.city)).map(r=>{const area=canonicalRolloutArea(r.Area||r.area||'');return area==='awladbaeoo'?'Awlad Baeoo':area}).filter(Boolean))];
 const areaOptions=[...new Set([...mappedAreas,...dataAreas])];
 if(!areaOptions.includes(rolloutDashboardFilters.area)&&normalizeText(rolloutDashboardFilters.area)!=='allareas')rolloutDashboardFilters.area=areaOptions[0]||'All Areas';
 const scopedRows=rows.filter(r=>{
   const rowDate=String(r.Date||'').slice(0,10);
   const rowCity=String(r.city||r.City||'').trim();
   const rowArea=String(r.Area||r.area||'').trim();
-  const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||normalizeText(rowArea)===normalizeText(rolloutDashboardFilters.area);
+  const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||sameRolloutDashboardArea(rowArea,rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>normalizeText(r.Area||r.area)===normalizeText(area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const cableTarget=normalizeText(area)==='awladbaeoo'?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);return{name:area,...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const cableTarget=canonicalRolloutArea(area)==='awladbaeoo'?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);return{name:area,...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
 const mapCable=rolloutMapCableProgressMetric(rolloutDashboardFilters.area,scopedRows);
@@ -2605,7 +2607,7 @@ if(plan){
 }
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
 const baseDashboardTarget=rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0)}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0}):{...baseDashboardTarget,cableMeters:normalizeText(rolloutDashboardFilters.area)==='awladbaeoo'?baseDashboardTarget.cableMeters:(mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters)};
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0)}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0}):{...baseDashboardTarget,cableMeters:isAwladDashboard?baseDashboardTarget.cableMeters:(mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters)};
 const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
 const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
 const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
@@ -2863,7 +2865,8 @@ function wfmValue(row,names){
 }
 function wfmKey(value){return String(value??'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9]/g,'').replace(/([HLS])0+(\d)/g,'$1$2')}
 function wfmAreaKey(value){
-  return wfmKey(value).replace(/^HAYALANDALUS/,'HAYANDALUS');
+  const key=wfmKey(value).replace(/^HAYALANDALUS/,'HAYANDALUS');
+  return key==='AWLADBAEO'?'AWLADBAEOO':key;
 }
 function wfmAreaMatches(row,area){
   const target=wfmAreaKey(area), areaKey=wfmAreaKey(wfmValue(row,['Area','area'])), zoneKey=wfmAreaKey(wfmValue(row,['Zone','zone']));
@@ -2959,7 +2962,7 @@ function rolloutMapCableProgressMetric(area,rows){
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
 function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
 function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
-  const areaKey=normalizeText(area),xboxKey=wfmXboxKey(xbox);
+  const areaKey=canonicalRolloutArea(area)==='awladbaeoo'?'awladbaeoo':normalizeText(area),xboxKey=wfmXboxKey(xbox);
   if(areaKey!=='hayalandaluszone3'&&areaKey!=='awladbaeoo')return sourceRows;
   const removed=areaKey==='hayalandaluszone3'&&xboxKey==='X9'?new Set(['H1-L3-S3','H1-L3-S4'].map(normalizeMapCode)):new Set();
   if(areaKey==='awladbaeoo'&&xboxKey==='X1')['H2-L1-S3','H2-L1-S4','H2-L3-S3','H10-L1-S3','H9-L3-S2','H9-L3-S3','H9-L3-S4','H9-L2-S4'].forEach(code=>removed.add(normalizeMapCode(code)));
@@ -2987,7 +2990,7 @@ function wfmParts(area,xbox){
 }
 function wfmDashboardParts(area){
   const parts=wfmParts(area,'');
-  if(normalizeText(area)!=='awladbaeoo')return parts;
+  if(canonicalRolloutArea(area)!=='awladbaeoo')return parts;
   return parts.filter(part=>!(wfmXboxKey(part.xbox)==='X1'&&part.hubs.some(hub=>hub>=3&&hub<=8)));
 }
 function rolloutDashboardMetricRows(rows,area){
