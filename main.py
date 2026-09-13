@@ -4111,7 +4111,7 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
 
 @app.patch("/api/warehouse/rollout-field-entry/{record_id}")
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin")
+    require_roles(request, "Requester", "Admin")
 
     row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
     if row is None:
