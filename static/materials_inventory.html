@@ -2901,11 +2901,18 @@ function wfmRecordScope(row,part){
   const xbox=wfmValue(row,['Related to XBOX','related to xbox','XBOX','xbox']);
   return !part.xbox||wfmXboxKey(xbox)===wfmXboxKey(part.xbox);
 }
-function wfmRecordMatchesCode(row,code){
-  const target=wfmCodeKey(code);if(!target)return false;
+const WFM_X9_ROUTE_CODE_RENAMES={H1H2:'H2-H3',X9H3:'X9-H2',H3H4:'X9-H4',H9H10:'H10-H11',X9H11:'X9-H10'};
+function wfmRouteCodeAliases(part,code){
+  const target=wfmCodeKey(code);if(!target)return[];
+  if(!wfmIsHayAndalusZone3X9(part))return[target];
+  const match=Object.entries(WFM_X9_ROUTE_CODE_RENAMES).find(([oldCode,newCode])=>target===wfmCodeKey(oldCode)||target===wfmCodeKey(newCode));
+  return match?[wfmCodeKey(match[0]),wfmCodeKey(match[1])]:[target];
+}
+function wfmRecordMatchesCode(row,code,part){
+  const targets=new Set(wfmRouteCodeAliases(part,code));if(!targets.size)return false;
   return ['ID','id','cable code','Cable code','box code','Box code','code','Code'].some(name=>{
     const value=wfmCodeKey(wfmValue(row,[name]));
-    return value===target;
+    return targets.has(value);
   });
 }
 function wfmDistribution(row){return /single[\s-]*core\s+distribution\s+cable/i.test(wfmText(row))&&wfmLength(row)>0}
@@ -2919,7 +2926,7 @@ function wfmBoxType(row){
 }
 function wfmRowsForPart(part,rows){return (rows||[]).filter(row=>wfmRecordScope(row,part))}
 function wfmRowsForCode(part,rows,code,kind){
-  return wfmRowsForPart(part,rows).filter(row=>wfmRecordMatchesCode(row,code)).filter(row=>kind==='box'?Boolean(wfmBoxType(row)):kind==='distribution'?wfmDistribution(row):kind==='fourcore'?wfmFourCore(row):true)
+  return wfmRowsForPart(part,rows).filter(row=>wfmRecordMatchesCode(row,code,part)).filter(row=>kind==='box'?Boolean(wfmBoxType(row)):kind==='distribution'?wfmDistribution(row):kind==='fourcore'?wfmFourCore(row):true)
 }
 function wfmNodeState(part,rows,code,expectedType){
   const matches=wfmRowsForCode(part,rows,code,'box');
@@ -2982,10 +2989,14 @@ function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
   if(areaKey==='awladbaeoo'&&xboxKey==='X1')addEnd('H2-L2-S4',2,2,50);
   return rows;
 }
+function wfmApplyHayAndalusZone3X9RouteEdits(area,xbox,sourceRows){
+  if(normalizeText(area)!=='hayalandaluszone3'||wfmXboxKey(xbox)!=='X9')return sourceRows;
+  return sourceRows.map(row=>{const next=WFM_X9_ROUTE_CODE_RENAMES[normalizeMapCode(wfmValue(row,['Route code']))];return next?{...row,'Route code':next}:row});
+}
 function wfmParts(area,xbox){
   if(!warehouseFiberReference)return[];
   const boxes=wfmApplyHayAndalusZone3X9MapEdits(area,xbox,wfmUnique((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Box code'])].join('|')));
-  const routes=wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|'));
+  const routes=wfmApplyHayAndalusZone3X9RouteEdits(area,xbox,wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|')));
   const groups=new Map();
   [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
   return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length)
