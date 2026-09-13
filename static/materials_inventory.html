@@ -2901,7 +2901,7 @@ function wfmRecordScope(row,part){
   const xbox=wfmValue(row,['Related to XBOX','related to xbox','XBOX','xbox']);
   return !part.xbox||wfmXboxKey(xbox)===wfmXboxKey(part.xbox);
 }
-const WFM_X9_ROUTE_CODE_RENAMES={H1H2:'H2-H3',X9H3:'X9-H2',H3H4:'X9-H4',H9H10:'H10-H11',X9H11:'X9-H10'};
+const WFM_X9_ROUTE_CODE_RENAMES={H1H2:'X9-H2',X9H3:'H2-H3',H3H4:'X9-H4',H9H10:'X9-H10',X9H11:'H10-H11'};
 function wfmRouteCodeAliases(part,code){
   const target=wfmCodeKey(code);if(!target)return[];
   if(!wfmIsHayAndalusZone3X9(part))return[target];
