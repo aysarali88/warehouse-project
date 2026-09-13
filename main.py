@@ -1981,6 +1981,13 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
     ref = load_fiber_map_reference(db, program_key)
     rows: list[dict] = []
     seen: set[tuple[str, str, str, str]] = set()
+    x9_route_code_renames = {
+        "H1H2": "X9-H2",
+        "X9H3": "H2-H3",
+        "H3H4": "X9-H4",
+        "H9H10": "X9-H10",
+        "X9H11": "H10-H11",
+    }
 
     def add(row: dict, code: str, code_type: str, source: str, material_override: str = ""):
         if not code:
@@ -2029,6 +2036,8 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
             add(hub_row, hub_code, "box", "hub", "HubBox")
     for row in ref.get("routes") or []:
         code = str(first_value(row, "Route code", "route code", "Cable code", "cable code", default="") or "").strip()
+        if rollout_area_key(first_value(row, "Zone", "zone", "Area", "area", default="")) == "hayalandaluszone3" and rollout_xbox_key(first_value(row, "Related to XBOX", "related to xbox", "XBOX", "xbox", default="")) == "X9":
+            code = x9_route_code_renames.get(rollout_code_key(code), code)
         add(row, code, "cable", "route")
     # Keep map-only additions available to Field Entry validation until the
     # published fiber-map reference is regenerated.
