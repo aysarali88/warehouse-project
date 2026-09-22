@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
 from email.message import EmailMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -131,6 +131,10 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisition_items ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_number VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_file_name VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_file_content_type VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_file_data BYTEA",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
@@ -182,6 +186,10 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE products ADD COLUMN vendor VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisition_items ADD COLUMN vendor VARCHAR DEFAULT ''",
             "ALTER TABLE receive_orders ADD COLUMN receipt_date VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN invoice_number VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN invoice_file_name VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN invoice_file_content_type VARCHAR DEFAULT ''",
+            "ALTER TABLE receive_orders ADD COLUMN invoice_file_data BLOB",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
@@ -1226,6 +1234,7 @@ class ReceiveIn(BaseModel):
     warehouse_id: int
     supplier: str = ""
     receipt_number: str = ""
+    invoice_number: str = ""
     receipt_date: str = ""
     created_by: str = "system"
     items: list[ReceiveItemIn]
@@ -1235,6 +1244,7 @@ class InventoryReceiveIn(BaseModel):
     program: str = DEFAULT_PROGRAM
     receipt_date: str = ""
     receipt_number: str = ""
+    invoice_number: str = ""
     supplier: str = ""
     warehouse_id: int
     sku: str
@@ -1245,6 +1255,48 @@ class InventoryReceiveIn(BaseModel):
     qr_code: str = ""
     category: str = ""
     created_by: str = "manager"
+
+
+MAX_INVOICE_FILE_BYTES = 10 * 1024 * 1024
+INVOICE_FILE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+INVOICE_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
+
+
+async def inventory_receive_payload(request: Request) -> tuple[InventoryReceiveIn, str, str, bytes | None]:
+    """Accept either the legacy JSON payload or a multipart request with an invoice."""
+    content_type = str(request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" not in content_type:
+        try:
+            return InventoryReceiveIn.model_validate(await request.json()), "", "", None
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    form = await request.form()
+    values = {key: form.get(key, "") for key in InventoryReceiveIn.model_fields}
+    try:
+        data = InventoryReceiveIn.model_validate(values)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    uploaded = form.get("invoice_file")
+    if not uploaded or not getattr(uploaded, "filename", ""):
+        return data, "", "", None
+    filename = os.path.basename(str(uploaded.filename)).strip()
+    extension = os.path.splitext(filename)[1].lower()
+    if not filename or extension not in INVOICE_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Invoice must be a PDF, PNG, JPG, or JPEG file")
+    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
+    contents = await uploaded.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Invoice file is empty")
+    if len(contents) > MAX_INVOICE_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="Invoice file must be 10 MB or smaller")
+    return data, filename, INVOICE_CONTENT_TYPES[extension], contents
 
 
 class InventoryAdjustmentIn(BaseModel):
@@ -2947,6 +2999,9 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "receipt_date": row.receipt_date,
+        "invoice_number": row.invoice_number,
+        "invoice_file_name": row.invoice_file_name,
+        "has_invoice_file": bool(row.invoice_file_data),
         "supplier": row.supplier,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -2963,6 +3018,9 @@ def receive_order_header_to_dict(row: ReceiveOrder) -> dict:
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "order_number": row.order_number,
         "receipt_date": row.receipt_date,
+        "invoice_number": row.invoice_number,
+        "invoice_file_name": row.invoice_file_name,
+        "has_invoice_file": bool(row.invoice_file_data),
         "supplier": row.supplier,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -6468,6 +6526,28 @@ def list_receive_orders(request: Request, limit: int = 50, program: str = DEFAUL
     return {"success": True, "receipts": [receive_order_to_dict(r) for r in rows]}
 
 
+@app.get("/api/warehouse/receive-orders/{order_id}/invoice")
+def download_receive_order_invoice(order_id: int, request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(program)
+    row = (
+        db.query(ReceiveOrder)
+        .filter(ReceiveOrder.id == order_id, ReceiveOrder.program == program_key)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    if not row.invoice_file_data:
+        raise HTTPException(status_code=404, detail="No invoice file attached to this receipt")
+    filename = os.path.basename(str(row.invoice_file_name or "invoice")) or "invoice"
+    return StreamingResponse(
+        io.BytesIO(row.invoice_file_data),
+        media_type=row.invoice_file_content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     rows = (
@@ -7284,6 +7364,7 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
         order_number=data.receipt_number.strip() or next_number(db, ReceiveOrder, "GRN"),
         supplier=data.supplier.strip(),
         receipt_date=data.receipt_date,
+        invoice_number=data.invoice_number.strip(),
         warehouse_id=data.warehouse_id,
         created_by=data.created_by,
     )
@@ -7340,7 +7421,8 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
 
 
 @app.post("/api/warehouse/receive-inventory")
-def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = Depends(db_session)):
+async def receive_inventory(request: Request, db: Session = Depends(db_session)):
+    data, invoice_file_name, invoice_file_content_type, invoice_file_data = await inventory_receive_payload(request)
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
     require_warehouse_access(request, db, data.warehouse_id, program_key)
@@ -7384,6 +7466,10 @@ def receive_inventory(data: InventoryReceiveIn, request: Request, db: Session = 
         order_number=data.receipt_number.strip() or next_number(db, ReceiveOrder, "GRN"),
         supplier=data.supplier.strip(),
         receipt_date=data.receipt_date,
+        invoice_number=data.invoice_number.strip(),
+        invoice_file_name=invoice_file_name,
+        invoice_file_content_type=invoice_file_content_type,
+        invoice_file_data=invoice_file_data,
         warehouse_id=data.warehouse_id,
         created_by=data.created_by,
     )
