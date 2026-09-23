@@ -136,6 +136,13 @@ There is no checked-in test suite, build pipeline, or deployment manifest in thi
 - String dates are widely used instead of normalized datetime objects in business documents
 - Minimal abstraction; prefer following existing patterns over introducing new layers
 
+## Fiber Map Reference
+- Treat `static/materials_inventory.html` functions `wfmParts()`, `wfmRenderPart()`, and `renderRolloutMapPanel()` as the canonical map presentation for every newly published area.
+- Build new area maps from structured cable, route, HUB, SUB, and END data so existing map status, field-entry interactions, cable lengths, and box counts continue to work.
+- Preserve uploaded workbook sheet images as source/reference material, but do not replace the canonical map view with a separate sheet picker or a stack of workbook screenshots.
+- Keep map parts in numeric order (`Part01`, `Part02`, ...). For a new area, verify its first XBOX map against an existing area in the live app before publishing the area to users.
+- When a user flags a map presentation problem, compare the implementation against an existing area's map before changing rendering behavior; fix the shared rendering path or ordering instead of adding another area-specific display path.
+
 ## Working Guidance For Future Sessions
 - Inspect only files relevant to the task first:
   - auth/users -> `main.py`, `models.py`, `static/materials_inventory.html`

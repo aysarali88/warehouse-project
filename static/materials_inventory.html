@@ -2838,27 +2838,8 @@ setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
 const HIDDEN_DYNAMIC_MAP_AREAS=new Set();
-const HAY_AL_ANDALUS_Z1_SCHEMATIC_SHEETS={X1:5,X2:8,X3:6,X4:8};
-
-function addKnownAreaSchematics(reference){
-  if(!reference)return;
-  const area='Hay Al Andalus Z1';
-  const hasArea=(reference.area_plans||[]).some(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area))
-    ||(reference.boxes||[]).some(row=>wfmMapAreaKey(wfmValue(row,['Area','area']))===wfmMapAreaKey(area));
-  if(!hasArea)return;
-  reference.schematics=Array.isArray(reference.schematics)?reference.schematics:[];
-  const known=new Set(reference.schematics.map(row=>`${wfmMapAreaKey(row.area)}|${wfmXboxKey(row.xbox)}|${row.sheet_name}`));
-  Object.entries(HAY_AL_ANDALUS_Z1_SCHEMATIC_SHEETS).forEach(([xbox,count])=>{
-    for(let number=1;number<=count;number++){
-      const sheet_name=`${xbox} map ${number}`,key=`${wfmMapAreaKey(area)}|${wfmXboxKey(xbox)}|${sheet_name}`;
-      if(!known.has(key)){reference.schematics.push({area,xbox,sheet_name});known.add(key)}
-    }
-  });
-}
-
 function applyFiberMapReference(data){
   warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
-  addKnownAreaSchematics(warehouseFiberReference);
   (warehouseFiberReference.area_plans||[]).forEach(plan=>{
     const city=String(plan.city||'').trim(),area=String(plan.area||'').trim();if(!city||!area)return;
     if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
@@ -3021,7 +3002,7 @@ function wfmParts(area,xbox){
   const routes=wfmApplyHayAndalusZone3X9RouteEdits(area,xbox,wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|')));
   const groups=new Map();
   [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
-  return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length)
+  return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length).sort((a,b)=>wfmOrdinal(a.part)-wfmOrdinal(b.part)||String(a.part).localeCompare(String(b.part)))
 }
 function wfmDashboardParts(area){
   const parts=wfmParts(area,'');
@@ -3135,7 +3116,6 @@ function wfmRenderPart(part,rows){const height=Math.max(1300,Math.max(...part.hu
 function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const length=wfmValue(ref,['Cable length m']);if(length===''||length===undefined||length===null)return;const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),length,'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
 var warehouseFiberSelectedScope='';
 var warehouseFiberSelectedArea='';
-var warehouseFiberSelectedSchematic='';
 var warehouseFiberScrollState={windowY:0,mainY:0};
 var warehouseFiberRestoringTab=false;
 var warehouseFiberMapMode='design';
@@ -3175,21 +3155,16 @@ function syncWarehouseFiberScope(area){
 function wfmSelectMapArea(value){
   warehouseFiberSelectedArea=value||'';
   warehouseFiberSelectedScope='';
-  warehouseFiberSelectedSchematic='';
   warehouseFiberScrollState={windowY:0,mainY:0};
   renderRolloutMapPanel();
   updatePageLink();
 }
 function wfmSelectMapXbox(value){
   warehouseFiberSelectedScope=value||'';
-  warehouseFiberSelectedSchematic='';
   warehouseFiberScrollState={windowY:0,mainY:0};
   renderRolloutMapPanel();
   updatePageLink();
 }
-function wfmSchematicEntries(area,xbox){return (warehouseFiberReference?.schematics||[]).filter(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area)&&wfmXboxKey(row.xbox)===wfmXboxKey(xbox))}
-function wfmSchematicUrl(row){return withProgramQuery(`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}`)}
-function wfmSelectSchematic(value){warehouseFiberSelectedSchematic=value||'';warehouseFiberScrollState={windowY:0,mainY:0};renderRolloutMapPanel()}
 function renderStaticFiberMapImages(scope){
   const box=document.getElementById('rolloutDailyMap');if(!box||!scope?.images?.length)return false;
   const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];
@@ -3258,23 +3233,12 @@ function saveWarehouseFiberScroll(){if(document.querySelector('[data-rollout-dai
 function restoreWarehouseFiberScroll(){const state=warehouseFiberScrollState||{};if(!state.windowY&&!state.mainY)return;requestAnimationFrame(()=>requestAnimationFrame(()=>{const main=document.querySelector('.main');if(main)main.scrollTop=state.mainY||0;window.scrollTo(0,state.windowY||0)}))}
 const baseRenderRolloutMapPanel=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){if(isSingleRan()){const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='';return}if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();const result=baseRenderRolloutMapPanel();bindMapEntryTargets(document.getElementById('rolloutDailyMap'));restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result};
-function renderWorkbookSchematicMap(){
-  const box=document.getElementById('rolloutDailyMap');if(!box)return false;
-  const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];const selectedScope=scopes.find(scope=>scope.id===warehouseFiberSelectedScope);
-  if(!selectedScope||!warehouseFiberReference)return false;
-  const schematics=wfmSchematicEntries(selectedScope.area,selectedScope.xbox);if(!schematics.length)return false;
-  const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];
-  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(selectedArea)===wfmMapAreaKey(area)?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)"><option value="">All XBOXes</option>${scopes.map(scope=>`<option value="${esc(scope.id)}" ${scope.id===warehouseFiberSelectedScope?'selected':''}>${esc(scope.xbox)}</option>`).join('')}</select></label><button class="btn primary" type="button" onclick="downloadAreaFiberMapPdf()">Download area PDF</button></div>`;
-  box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(selectedScope.title)}</h3><p>${esc(selectedScope.area)} · ${esc(selectedScope.xbox)}</p></div><div>${controls}</div></div><div class="fiber-map-schematic-list">${schematics.map((row,index)=>`<article class="fiber-map-schematic-card"><h4>${esc(row.sheet_name)}</h4><img src="${esc(wfmSchematicUrl(row))}" alt="${esc(row.sheet_name)} map schematic" decoding="async" ${index?'loading="lazy"':'fetchpriority="high"'}></article>`).join('')}</div></div>`;
-  return true;
-}
 const renderRolloutMapPanelWithInteraction=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const staticScope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(renderStaticFiberMapImages(staticScope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
-  if(renderWorkbookSchematicMap()){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
   if(staticScope&&!staticScope.images?.length&&wfmParts(staticScope.area,staticScope.xbox).length)return renderRolloutMapPanelWithInteraction();
   return renderRolloutMapPanelWithInteraction();
 };
