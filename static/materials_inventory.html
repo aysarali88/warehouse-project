@@ -3178,7 +3178,7 @@ function wfmSavedSchematicScope(scope){
   if(!scope||!warehouseFiberReference?.schematics?.length)return null;
   const rows=warehouseFiberReference.schematics.filter(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(scope.area)&&wfmXboxKey(row.xbox)===wfmXboxKey(scope.xbox)).sort((a,b)=>wfmOrdinal(a.sheet_name)-wfmOrdinal(b.sheet_name)||String(a.sheet_name).localeCompare(String(b.sheet_name)));
   if(!rows.length)return null;
-  const images=rows.map(row=>({title:row.sheet_name,src:`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}`}));
+  const images=rows.map(row=>({title:row.sheet_name,src:`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}&program=${encodeURIComponent(normalizeProgram(currentProgram))}`}));
   return {...scope,images};
 }
 async function downloadAreaFiberMapPdf(){
