@@ -601,6 +601,10 @@ body.sr-program .login-logo img{
 </style>
 <style>
 .static-map-card{border:0}
+.pdf-map-stage{position:relative;width:100%;aspect-ratio:792/612;background:#fff;overflow:hidden}
+.pdf-map-stage img{display:block;width:100%;height:100%;object-fit:fill}
+.pdf-map-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.pdf-map-overlay .map-entry-target{pointer-events:all;cursor:pointer}
 .command-kpi strong{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .command-kpi strong em{font-size:15px;font-style:normal;font-weight:900;white-space:nowrap}
 .command-kpi small{display:block;margin-top:5px;color:rgba(255,255,255,.78);font-size:11px;font-weight:800}
@@ -3081,7 +3085,7 @@ function closeMapFieldEntry(){document.getElementById('mapEntryModal')?.classLis
 function mapEntrySetSaving(saving){mapFieldEntryState.saving=saving;const button=document.getElementById('mapEntrySaveButton');if(button){button.disabled=saving;button.textContent=saving?'Saving...':'Save progress'}}
 function mapEntryForTarget(target){
   const card=target.closest('.map-card');if(!card)return null;
-  const area=card.dataset.mapArea||'',xbox=card.dataset.mapXbox||'',partName=card.dataset.mapPart||'',kind=target.dataset.mapEntryKind||'',code=target.dataset.mapEntryCode||'';
+  const area=card.dataset.mapArea||'',xbox=card.dataset.mapXbox||'',partName=target.dataset.mapEntryPart||card.dataset.mapPart||'',kind=target.dataset.mapEntryKind||'',code=target.dataset.mapEntryCode||'';
   const part=wfmParts(area,xbox).find(row=>String(row.part)===partName);if(!part||!kind||!code)return null;
   const ref=(kind==='route'?(part.routeRows||[]):(part.boxRows||[])).find(row=>normalizeMapCode(wfmValue(row,[kind==='route'?'Route code':'Box code']))===normalizeMapCode(code))||(part.boxRows||[])[0]||{};
   const boxType=kind==='hub'?'HUB BOX':String(wfmValue(ref,['Box type'])||'SUB BOX').toUpperCase();
@@ -3182,6 +3186,38 @@ function wfmSavedSchematicScope(scope){
   const images=rows.map(row=>({title:row.sheet_name,src:`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}&program=${encodeURIComponent(normalizeProgram(currentProgram))}`}));
   return {...scope,images};
 }
+let hayAndalusZ1MapLayout=null,hayAndalusZ1MapLayoutLoading=null;
+function wfmIsHayAndalusZ1PdfScope(scope){return wfmMapAreaKey(scope?.area)==='hay al andalus z1'&&/^X[1-4]$/.test(wfmXboxKey(scope?.xbox))}
+function ensureHayAndalusZ1MapLayout(){
+  if(hayAndalusZ1MapLayout)return Promise.resolve(hayAndalusZ1MapLayout);
+  if(!hayAndalusZ1MapLayoutLoading)hayAndalusZ1MapLayoutLoading=fetch('/static/assets/hay-andalus-z1-map-layout.json').then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>(hayAndalusZ1MapLayout=data)).finally(()=>{hayAndalusZ1MapLayoutLoading=null});
+  return hayAndalusZ1MapLayoutLoading;
+}
+function renderHayAndalusZ1PdfMap(scope){
+  const box=document.getElementById('rolloutDailyMap'),xbox=wfmXboxKey(scope.xbox),sheet=hayAndalusZ1MapLayout?.xboxes?.[xbox];if(!box||!sheet)return false;
+  const parts=wfmParts(scope.area,scope.xbox),rows=wh.rolloutDailyProgress||[],partsByCode=new Map();
+  parts.forEach(part=>(part.boxRows||[]).forEach(ref=>partsByCode.set(wfmCodeKey(wfmValue(ref,['Box code'])),{part,ref})));
+  const counts=wfmMapCounts(parts,rows),green='#168a4a',blue='#1778d4';
+  const nodes=Object.entries(sheet.points).map(([code,point])=>{
+    const match=partsByCode.get(wfmCodeKey(code));if(!match)return'';
+    const type=String(wfmValue(match.ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB';
+    const state=wfmNodeState(match.part,rows,code,type).status,color=state==='installed'?green:state==='mismatch'?blue:'';
+    if(!color)return'';
+    return`<circle cx="${point.x}" cy="${point.y}" r="${point.r}" fill="${color}" fill-opacity=".2" stroke="${color}" stroke-width="1.1" data-map-entry-kind="box" data-map-entry-code="${esc(code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
+  }).join('');
+  const cables=sheet.segments.map(segment=>{
+    const match=partsByCode.get(wfmCodeKey(segment.code));if(!match)return'';
+    const expected=wfmValue(match.ref,['Cable length m']),state=wfmCableState(match.part,rows,segment.code,expected,'distribution').status,color=state==='installed'?green:state==='mismatch'?blue:'';
+    if(!color)return'';
+    return`<line x1="${segment.x1}" y1="${segment.y}" x2="${segment.x2}" y2="${segment.y}" stroke="${color}" stroke-width="1.35" stroke-linecap="round" data-map-entry-kind="distribution" data-map-entry-code="${esc(segment.code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
+  }).join('');
+  const areaOptions=[...new Map((WFM_MAP_SCOPES||[]).map(row=>[wfmMapAreaKey(row.area),row.area])).entries()],scopes=wfmScopesForArea(scope.area);
+  const controls=`<div class="map-filter-row"><label class="map-scope-picker">Area<select onchange="wfmSelectMapArea(this.value)"><option value="">Select area</option>${areaOptions.map(([,area])=>`<option value="${esc(area)}" ${wfmMapAreaKey(scope.area)===wfmMapAreaKey(area)?'selected':''}>${esc(area)}</option>`).join('')}</select></label><label class="map-scope-picker">XBOX<select onchange="wfmSelectMapXbox(this.value)">${scopes.map(row=>`<option value="${esc(row.id)}" ${row.id===warehouseFiberSelectedScope?'selected':''}>${esc(row.xbox)}</option>`).join('')}</select></label><button class="btn primary" type="button" onclick="downloadAreaFiberMapPdf()">Download area PDF</button></div>`;
+  const summary=`<p>${esc(scope.area)} · ${esc(scope.xbox)} · live status from Rollout Daily Progress</p><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div>`;
+  box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(scope.title)}</h3>${summary.split('<div class="map-legend">')[0]}</div><div>${controls}</div></div>${summary.slice(summary.indexOf('<div class="map-legend">'))}<div class="map-stage static-map-stage"><div class="map-card pdf-map-card" data-map-area="${esc(scope.area)}" data-map-xbox="${esc(scope.xbox)}"><div class="pdf-map-stage"><img src="${esc(sheet.image)}" alt="${esc(scope.xbox)} original fiber map" decoding="async" loading="eager"><svg class="pdf-map-overlay" viewBox="0 0 ${hayAndalusZ1MapLayout.pageSize.width} ${hayAndalusZ1MapLayout.pageSize.height}" preserveAspectRatio="none" aria-label="Live map status">${cables}${nodes}</svg></div></div></div></div>`;
+  bindMapEntryTargets(box);
+  return true;
+}
 async function downloadAreaFiberMapPdf(){
   const area=warehouseFiberSelectedArea||'';
   if(!area){toast('Select an area first');return}
@@ -3247,6 +3283,15 @@ renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const scope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
+  if(scope&&wfmIsHayAndalusZ1PdfScope(scope)){
+    if(wh.rolloutDashboardSummaryOnly)return renderRolloutMapPanelWithInteraction();
+    if(!hayAndalusZ1MapLayout){
+      const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='<div class="map-note">Loading approved XBOX map sheet...</div>';
+      ensureHayAndalusZ1MapLayout().then(()=>renderRolloutMapPanel()).catch(()=>{const schematic=wfmSavedSchematicScope(scope);if(schematic)renderStaticFiberMapImages(schematic);else renderRolloutMapPanelWithInteraction()});
+      restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return;
+    }
+    if(renderHayAndalusZ1PdfMap(scope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
+  }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
     const schematic=wfmSavedSchematicScope(scope);
     if(schematic&&renderStaticFiberMapImages(schematic)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
