@@ -2838,9 +2838,27 @@ setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceLoading=false;
 const HIDDEN_DYNAMIC_MAP_AREAS=new Set();
+const HAY_AL_ANDALUS_Z1_SCHEMATIC_SHEETS={X1:5,X2:8,X3:6,X4:8};
+
+function addKnownAreaSchematics(reference){
+  if(!reference)return;
+  const area='Hay Al Andalus Z1';
+  const hasArea=(reference.area_plans||[]).some(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area))
+    ||(reference.boxes||[]).some(row=>wfmMapAreaKey(wfmValue(row,['Area','area']))===wfmMapAreaKey(area));
+  if(!hasArea)return;
+  reference.schematics=Array.isArray(reference.schematics)?reference.schematics:[];
+  const known=new Set(reference.schematics.map(row=>`${wfmMapAreaKey(row.area)}|${wfmXboxKey(row.xbox)}|${row.sheet_name}`));
+  Object.entries(HAY_AL_ANDALUS_Z1_SCHEMATIC_SHEETS).forEach(([xbox,count])=>{
+    for(let number=1;number<=count;number++){
+      const sheet_name=`${xbox} map ${number}`,key=`${wfmMapAreaKey(area)}|${wfmXboxKey(xbox)}|${sheet_name}`;
+      if(!known.has(key)){reference.schematics.push({area,xbox,sheet_name});known.add(key)}
+    }
+  });
+}
 
 function applyFiberMapReference(data){
   warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
+  addKnownAreaSchematics(warehouseFiberReference);
   (warehouseFiberReference.area_plans||[]).forEach(plan=>{
     const city=String(plan.city||'').trim(),area=String(plan.area||'').trim();if(!city||!area)return;
     if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
