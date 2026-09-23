@@ -3284,7 +3284,6 @@ renderRolloutMapPanel=function(){
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const scope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(scope&&wfmIsHayAndalusZ1PdfScope(scope)){
-    if(wh.rolloutDashboardSummaryOnly)return renderRolloutMapPanelWithInteraction();
     if(!hayAndalusZ1MapLayout){
       const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='<div class="map-note">Loading approved XBOX map sheet...</div>';
       ensureHayAndalusZ1MapLayout().then(()=>renderRolloutMapPanel()).catch(()=>{const schematic=wfmSavedSchematicScope(scope);if(schematic)renderStaticFiberMapImages(schematic);else renderRolloutMapPanelWithInteraction()});
