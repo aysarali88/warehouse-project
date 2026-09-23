@@ -137,11 +137,11 @@ There is no checked-in test suite, build pipeline, or deployment manifest in thi
 - Minimal abstraction; prefer following existing patterns over introducing new layers
 
 ## Fiber Map Reference
-- Treat `static/materials_inventory.html` functions `wfmParts()`, `wfmRenderPart()`, and `renderRolloutMapPanel()` as the canonical map presentation for every newly published area.
-- Build new area maps from structured cable, route, HUB, SUB, and END data so existing map status, field-entry interactions, cable lengths, and box counts continue to work.
-- Preserve uploaded workbook sheet images as source/reference material, but do not replace the canonical map view with a separate sheet picker or a stack of workbook screenshots.
-- Keep map parts in numeric order (`Part01`, `Part02`, ...). For a new area, verify its first XBOX map against an existing area in the live app before publishing the area to users.
-- When a user flags a map presentation problem, compare the implementation against an existing area's map before changing rendering behavior; fix the shared rendering path or ordering instead of adding another area-specific display path.
+- When the user supplies approved map drawings or workbook schematics for an area, those drawings are the authoritative layout. Show the original schematic images in the standard map page and preserve their aspect ratio; do not approximate them with a newly drawn SVG.
+- Keep the standard Area and XBOX controls and PDF action, but do not add a sheet picker, duplicate sheet headings, status legend, or missing-status labels over reference drawings.
+- Order multiple sheets numerically by their sheet/part number and load all sheets for the selected XBOX eagerly so the complete map is ready together.
+- Use structured cable, route, HUB, SUB, and END data for live status and field-entry behavior only where the selected map is designed to support those overlays. Do not invent missing values or overlay fabricated statuses on an approved static drawing.
+- Before publishing each new area, compare its map frame, controls, ordering, and scale against the approved reference and an existing area in the live app. Reuse this workflow for every subsequent area without waiting for the user to repeat the same presentation feedback.
 
 ## Working Guidance For Future Sessions
 - Inspect only files relevant to the task first:
