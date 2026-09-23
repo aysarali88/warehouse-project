@@ -141,6 +141,7 @@ There is no checked-in test suite, build pipeline, or deployment manifest in thi
 - Keep the standard Area and XBOX controls and PDF action, but do not add a sheet picker, duplicate sheet headings, status legend, or missing-status labels over reference drawings.
 - Order multiple sheets numerically by their sheet/part number and load all sheets for the selected XBOX eagerly so the complete map is ready together.
 - Use structured cable, route, HUB, SUB, and END data for live status and field-entry behavior only where the selected map is designed to support those overlays. Do not invent missing values or overlay fabricated statuses on an approved static drawing.
+- A static reference image alone is not a complete rollout map: always load full field-entry details and keep live green/blue status visibly associated with its mapped codes while preserving the approved drawing.
 - Before publishing each new area, compare its map frame, controls, ordering, and scale against the approved reference and an existing area in the live app. Reuse this workflow for every subsequent area without waiting for the user to repeat the same presentation feedback.
 
 ## Working Guidance For Future Sessions
