@@ -3258,8 +3258,8 @@ renderRolloutMapPanel=function(){
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const staticScope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(renderStaticFiberMapImages(staticScope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
-  if(staticScope&&!staticScope.images?.length&&wfmParts(staticScope.area,staticScope.xbox).length)return renderRolloutMapPanelWithInteraction();
   if(renderWorkbookSchematicMap()){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
+  if(staticScope&&!staticScope.images?.length&&wfmParts(staticScope.area,staticScope.xbox).length)return renderRolloutMapPanelWithInteraction();
   return renderRolloutMapPanelWithInteraction();
 };
 if(isSingleRan())clearSingleRanRolloutState(false);
