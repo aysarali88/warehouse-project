@@ -3187,7 +3187,7 @@ function wfmSavedSchematicScope(scope){
   return {...scope,images};
 }
 let hayAndalusZ1MapLayout=null,hayAndalusZ1MapLayoutLoading=null;
-function wfmIsHayAndalusZ1PdfScope(scope){return wfmMapAreaKey(scope?.area)==='hay al andalus z1'&&/^X[1-4]$/.test(wfmXboxKey(scope?.xbox))}
+function wfmIsHayAndalusZ1PdfScope(scope){return ['hayalandalusz1','hayandalusz1'].includes(wfmMapAreaKey(scope?.area))&&/^X[1-4]$/.test(wfmXboxKey(scope?.xbox))}
 function ensureHayAndalusZ1MapLayout(){
   if(hayAndalusZ1MapLayout)return Promise.resolve(hayAndalusZ1MapLayout);
   if(!hayAndalusZ1MapLayoutLoading)hayAndalusZ1MapLayoutLoading=fetch('/static/assets/hay-andalus-z1-map-layout.json').then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>(hayAndalusZ1MapLayout=data)).finally(()=>{hayAndalusZ1MapLayoutLoading=null});
