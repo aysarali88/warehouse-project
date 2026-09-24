@@ -7279,7 +7279,7 @@ def reject_material_requisition(requisition_id: int, data: MaterialRequisitionAc
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/return-for-edit")
 def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Approval")
+    user = require_roles(request, "Admin", "Approval")
     program_key = normalize_program(data.program)
     row = (
         db.query(MaterialRequisition)
@@ -7290,16 +7290,13 @@ def return_material_requisition_for_edit(requisition_id: int, data: MaterialRequ
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
     role_key = normalize_usage_key(user.role)
-    # Approval owns pending requests; Management and Admin retain their
-    # supervisory override. Warehouse Managers can return only after approval.
+    # Approval can return pending requests; Admin can return pending or
+    # approved requests.
     returning_from_approval = (
-        role_key in {"approval", "approver", "management", "admin"}
+        role_key in {"approval", "approver", "admin"}
         and row.status == "pending_approval"
     )
-    returning_from_warehouse = (
-        role_key in {"warehousemanager", "management", "admin"}
-        and row.status == "approved"
-    )
+    returning_from_warehouse = role_key == "admin" and row.status == "approved"
     if not returning_from_approval and not returning_from_warehouse:
         raise HTTPException(status_code=400, detail=f"MR cannot be returned for edit from status {row.status}")
     if not returning_from_approval:
