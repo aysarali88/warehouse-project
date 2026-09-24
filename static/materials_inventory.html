@@ -2552,7 +2552,7 @@ function rolloutPlanFor(city,area){
 }
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
-  if(canonicalRolloutArea(area)==='awladbaeoo')return {cableMeters:31550,subEndBox:263,hubBox:21,xbox:2,totalBoxes:286,users:1352,singleCoreCableQty:263};
+  if(canonicalRolloutArea(area)==='awladbaeoo')return {cableMeters:31550,subEndBox:263,hubBox:21,xbox:2,totalBoxes:286,users:2104,singleCoreCableQty:263};
   const design=wfmDesignTargetFor(area);
   if(design)return {...design,users:Number(plan.targetUsers||0)};
   return {
