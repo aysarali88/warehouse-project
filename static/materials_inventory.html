@@ -3284,10 +3284,17 @@ renderRolloutMapPanel=function(){
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const scope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
   if(['hayalandalusz1','hayandalusz1'].includes(wfmMapAreaKey(warehouseFiberSelectedArea||''))){
+    const xboxScopes=wfmScopesForArea(warehouseFiberSelectedArea||'');
+    const firstXboxScope=xboxScopes.find(row=>wfmXboxKey(row.xbox)==='X1');
+    warehouseFiberSelectedScope=firstXboxScope?.id||'';
     const result=renderRolloutMapPanelWithInteraction();
     const box=document.getElementById('rolloutDailyMap');
-    box?.querySelector('.map-stage')?.remove();
     box?.querySelector('.map-list')?.remove();
+    const xboxPicker=box?.querySelectorAll('.map-scope-picker select')[1];
+    if(xboxPicker&&firstXboxScope){
+      [...xboxPicker.options].forEach(option=>{if(option.value!==firstXboxScope.id)option.remove()});
+      xboxPicker.value=firstXboxScope.id;
+    }
     restoreWarehouseFiberScroll();
     warehouseFiberRestoringTab=false;
     return result;
