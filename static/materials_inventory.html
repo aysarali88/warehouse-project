@@ -1579,7 +1579,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:372,targetHubBox:27,targetXbox:3,targetCableMeters:47189,targetUsers:2976,adjustmentCableMeters:-750,adjustmentSubEndBox:-5,note:'Design updates: X9 removed H8-L2-S1 through H8-L2-S4 and H5-L4-S2: 750m Single-Core Distribution cable and 5 SUB / END boxes. Map progress excludes these items.'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:398,targetHubBox:30,targetXbox:3,targetCableMeters:40800,targetUsers:3152,note:'Dashboard targets use the active Maqawba fiber-map design. Actuals use completed Field Entry records that match an active map code.'},
-  {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:169,targetHubBox:15,targetXbox:2,targetCableMeters:20140,targetUsers:1352,adjustmentCableMeters:-10790,adjustmentSubEndBox:-94,note:'Awlad Baeoo X1 map replaced with shared-XBOX design. Dashboard targets stay unchanged; map progress still excludes X1 H3-H8.'},
+  {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:183,targetHubBox:15,targetXbox:2,targetCableMeters:22135,targetUsers:1464,note:'Dashboard cable and box targets follow the active X1 and X2 fiber-map design.'},
   {city:'Misurata',area:'Ras A Tota',start:'2026-08-15',end:'2026-09-01',targetSubEndBox:194,targetHubBox:16,targetXbox:2,targetCableMeters:22850,targetUsers:1560,note:'Design updates: X2-H6 moved END from L4-S2 (100m) to L1-S4 (50m). X2-H2 replaced L3-S4 (150m) with L4-S1 SUB (100m) and L4-S2 END (80m). X2-H5-L1-S3 (80m) and X2-H6-L3-S3 (80m) were removed; X1-H5-L1-S3 SUB (100m), X1-H5-L1-S4 END (80m), and X2-H6-L2-S4 END (100m) were added. Removed X1-H1-L2-S4 END (50m) and added X1-H9-L4-S3 END (80m). Latest update: removed X1-H3-L3-S4 END (80m). Cable target includes 18,830m Single-Core Distribution plus 4,020m 4-core. Net total after latest update: +70m cable and SUB / END box total unchanged.'}
 ];
 const titles={dashboard:['WH Dashboard',''],setup:['Setup','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['Receive Inventory','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['Movements','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['Users','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
@@ -2541,9 +2541,9 @@ function rolloutMetricFromRows(rows){
 }
 function wfmDesignTargetFor(area){
   if(!warehouseFiberReference||canonicalRolloutArea(area)!=='awladbaeoo')return null;
-  const parts=wfmParts(area,''),includedParts=parts.filter(part=>!(wfmXboxKey(part.xbox)==='X1'&&part.hubs.some(hub=>hub>=3&&hub<=8))),boxes=includedParts.flatMap(part=>part.boxRows||[]),routes=includedParts.flatMap(part=>part.routeRows||[]);
+  const parts=wfmParts(area,''),boxes=parts.flatMap(part=>part.boxRows||[]),routes=parts.flatMap(part=>part.routeRows||[]);
   if(!boxes.length&&!routes.length)return null;
-  const hubs=new Set(),xboxes=new Set();includedParts.forEach(part=>{const xbox=wfmXboxKey(part.xbox);if(xbox)xboxes.add(xbox);part.hubs.forEach(hub=>{if(xbox&&hub)hubs.add(`${xbox}|H${hub}`)})});
+  const hubs=new Set(),xboxes=new Set();parts.forEach(part=>{const xbox=wfmXboxKey(part.xbox);if(xbox)xboxes.add(xbox);part.hubs.forEach(hub=>{if(xbox&&hub)hubs.add(`${xbox}|H${hub}`)})});
   return {cableMeters:boxes.reduce((sum,row)=>sum+Number(wfmValue(row,['Cable length m'])||0),0)+routes.reduce((sum,row)=>sum+Number(wfmValue(row,['Cable length m'])||0),0),subEndBox:boxes.length,hubBox:hubs.size,xbox:xboxes.size,totalBoxes:boxes.length+hubs.size+xboxes.size};
 }
 function rolloutPlanFor(city,area){
@@ -2552,9 +2552,8 @@ function rolloutPlanFor(city,area){
 }
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
-  if(canonicalRolloutArea(area)==='awladbaeoo')return {cableMeters:31550,subEndBox:263,hubBox:21,xbox:2,totalBoxes:286,users:2104,singleCoreCableQty:263};
   const design=wfmDesignTargetFor(area);
-  if(design)return {...design,users:Number(plan.targetUsers||0)};
+  if(design)return {...design,users:Number(plan.targetUsers||0),singleCoreCableQty:design.subEndBox};
   return {
     cableMeters:Number(plan.targetCableMeters||0),
     subEndBox:Number(plan.targetSubEndBox||0),
@@ -3006,9 +3005,7 @@ function wfmParts(area,xbox){
   return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length).sort((a,b)=>wfmOrdinal(a.part)-wfmOrdinal(b.part)||String(a.part).localeCompare(String(b.part)))
 }
 function wfmDashboardParts(area){
-  const parts=wfmParts(area,'');
-  if(canonicalRolloutArea(area)!=='awladbaeoo')return parts;
-  return parts.filter(part=>!(wfmXboxKey(part.xbox)==='X1'&&part.hubs.some(hub=>hub>=3&&hub<=8)));
+  return wfmParts(area,'');
 }
 function rolloutDashboardMetricRows(rows,area){
   if(!warehouseFiberReference||normalizeText(area)==='allareas')return rows;
