@@ -3283,6 +3283,15 @@ renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const scope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
+  if(['hayalandalusz1','hayandalusz1'].includes(wfmMapAreaKey(warehouseFiberSelectedArea||''))){
+    const result=renderRolloutMapPanelWithInteraction();
+    const box=document.getElementById('rolloutDailyMap');
+    box?.querySelector('.map-stage')?.remove();
+    box?.querySelector('.map-list')?.remove();
+    restoreWarehouseFiberScroll();
+    warehouseFiberRestoringTab=false;
+    return result;
+  }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
     const schematic=wfmSavedSchematicScope(scope);
     if(schematic&&renderStaticFiberMapImages(schematic)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
