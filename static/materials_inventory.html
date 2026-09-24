@@ -1579,7 +1579,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:372,targetHubBox:27,targetXbox:3,targetCableMeters:47189,targetUsers:2976,adjustmentCableMeters:-750,adjustmentSubEndBox:-5,note:'Design updates: X9 removed H8-L2-S1 through H8-L2-S4 and H5-L4-S2: 750m Single-Core Distribution cable and 5 SUB / END boxes. Map progress excludes these items.'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:398,targetHubBox:30,targetXbox:3,targetCableMeters:40800,targetUsers:3152,note:'Dashboard targets use the active Maqawba fiber-map design. Actuals use completed Field Entry records that match an active map code.'},
-  {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:169,targetHubBox:15,targetXbox:2,targetCableMeters:20140,targetUsers:1352,adjustmentCableMeters:-10790,adjustmentSubEndBox:-94,note:'Awlad Baeoo dashboard scope excludes X1 H3-H8: 10 requested line removals plus all H3-H8 traditional-mode design items. Map remains unchanged.'},
+  {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:169,targetHubBox:15,targetXbox:2,targetCableMeters:20140,targetUsers:1352,adjustmentCableMeters:-10790,adjustmentSubEndBox:-94,note:'Awlad Baeoo X1 map replaced with shared-XBOX design. Dashboard targets stay unchanged; map progress still excludes X1 H3-H8.'},
   {city:'Misurata',area:'Ras A Tota',start:'2026-08-15',end:'2026-09-01',targetSubEndBox:194,targetHubBox:16,targetXbox:2,targetCableMeters:22850,targetUsers:1560,note:'Design updates: X2-H6 moved END from L4-S2 (100m) to L1-S4 (50m). X2-H2 replaced L3-S4 (150m) with L4-S1 SUB (100m) and L4-S2 END (80m). X2-H5-L1-S3 (80m) and X2-H6-L3-S3 (80m) were removed; X1-H5-L1-S3 SUB (100m), X1-H5-L1-S4 END (80m), and X2-H6-L2-S4 END (100m) were added. Removed X1-H1-L2-S4 END (50m) and added X1-H9-L4-S3 END (80m). Latest update: removed X1-H3-L3-S4 END (80m). Cable target includes 18,830m Single-Core Distribution plus 4,020m 4-core. Net total after latest update: +70m cable and SUB / END box total unchanged.'}
 ];
 const titles={dashboard:['WH Dashboard',''],setup:['Setup','إضافة المستودعات والفنيين قبل عمليات الاستلام والصرف.'],receive:['Receive Inventory','تسجيل مادة جديدة أو زيادة كمية مادة موجودة مباشرة في المخزون.'],mr:['Material Request',''],mrHistory:['MR History','Archive of requesters material requisitions with filters and Excel export.'],scans:['Scan History','كل QR / Serial تمت قراءته ولأي MR طالع.'],rolloutDaily:['Rollout Progress',''],issue:['صرف لفني','صرف مواد من المستودع لفني مع منع الصرف الزائد وتتبع السيريالات.'],balances:['Inventory',''],audit:['Movements','سجل غير تشغيلي سريع للحركات وآثار العمليات.'],users:['Users','إدارة المستخدمين والصلاحيات والبريد الإلكتروني.']};
@@ -2982,7 +2982,6 @@ function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
   const areaKey=canonicalRolloutArea(area)==='awladbaeoo'?'awladbaeoo':normalizeText(area),xboxKey=wfmXboxKey(xbox);
   if(areaKey!=='hayalandaluszone3'&&areaKey!=='awladbaeoo')return sourceRows;
   const removed=areaKey==='hayalandaluszone3'&&xboxKey==='X9'?new Set(['H1-L3-S3','H1-L3-S4','H2-L1-S4','H4-L2-S4','H5-L4-S2','H5-L4-S3','H8-L2-S1','H8-L2-S2','H8-L2-S3','H8-L2-S4'].map(normalizeMapCode)):new Set();
-  if(areaKey==='awladbaeoo'&&xboxKey==='X1')['H2-L1-S3','H2-L1-S4','H2-L3-S3','H10-L1-S3','H9-L3-S2','H9-L3-S3','H9-L3-S4','H9-L2-S4'].forEach(code=>removed.add(normalizeMapCode(code)));
   if(areaKey==='awladbaeoo'&&xboxKey==='X2')['H2-L1-S4','H3-L4-S4','H3-L2-S3','H3-L2-S4'].forEach(code=>removed.add(normalizeMapCode(code)));
   const rows=sourceRows.filter(row=>!removed.has(normalizeMapCode(wfmValue(row,['Box code']))));
   const addEnd=(code,hub,line,length)=>{
@@ -2994,7 +2993,6 @@ function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
     addEnd('H3-L1-S4',3,1,50);addEnd('H4-L1-S3',4,1,100);addEnd('H5-L1-S4',5,1,50);addEnd('H5-L3-S3',5,3,50);addEnd('H6-L2-S4',6,2,100);
   }
   if(areaKey==='awladbaeoo'&&xboxKey==='X2')addEnd('H10-L3-S3',10,3,200);
-  if(areaKey==='awladbaeoo'&&xboxKey==='X1')addEnd('H2-L2-S4',2,2,50);
   return rows;
 }
 function wfmApplyHayAndalusZone3X9RouteEdits(area,xbox,sourceRows){
@@ -3128,6 +3126,11 @@ function wfmHayAndalusZ1DisplayParts(area,xbox){
   const sourceParts=wfmParts(area,xbox),allBoxes=sourceParts.flatMap(part=>part.boxRows||[]),allRoutes=sourceParts.flatMap(part=>part.routeRows||[]),hubs=Array.from({length:config.maxHub},(_,i)=>i+1),sharedXboxRows=config.rows,sharedXboxOutputs=config.outputs,boxRows=allBoxes.filter(row=>hubs.includes(wfmOrdinal(wfmValue(row,['Hub'])))),routeRows=allRoutes.filter(row=>hubs.includes(wfmOrdinal(wfmValue(row,['Route to']))));
   const subtitle=sharedXboxRows.map(row=>row.map(hub=>`H${hub}`).join('-')).join(' · ');
   return boxRows.length||routeRows.length?[{area,xbox,part:'Part01',title:`Hay Al Andalus Z1 / ${xboxKey}`,subtitle,hubs,boxRows,routeRows,sharedXboxMap:true,sharedXboxRows,sharedXboxOutputs}]:[];
+}
+function wfmAwladBaeooX1DisplayParts(area,xbox){
+  if(canonicalRolloutArea(area)!=='awladbaeoo'||wfmXboxKey(xbox)!=='X1')return[];
+  const sourceParts=wfmParts(area,xbox),sharedXboxRows=[[1,2],[3,4],[5,6],[7,8],[9,10],[11]],hubs=Array.from({length:11},(_,i)=>i+1),sharedXboxOutputs=[1,3,5,7,9,11],boxRows=sourceParts.flatMap(part=>part.boxRows||[]),routeRows=sourceParts.flatMap(part=>part.routeRows||[]),subtitle=sharedXboxRows.map(row=>row.map(hub=>`H${hub}`).join('-')).join(' · ');
+  return boxRows.length||routeRows.length?[{area,xbox,part:'Part01',title:'Awlad Baeoo / X1',subtitle,hubs,boxRows,routeRows,sharedXboxMap:true,sharedXboxRows,sharedXboxOutputs}]:[];
 }
 function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const length=wfmValue(ref,['Cable length m']);if(length===''||length===undefined||length===null)return;const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),length,'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
 var warehouseFiberSelectedScope='';
@@ -3313,6 +3316,12 @@ renderRolloutMapPanel=function(){
     restoreWarehouseFiberScroll();
     warehouseFiberRestoringTab=false;
     return result;
+  }
+  if(canonicalRolloutArea(scope?.area)==='awladbaeoo'&&wfmXboxKey(scope?.xbox)==='X1'){
+    const result=renderRolloutMapPanelWithInteraction();
+    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
+    if(stage){const displayParts=wfmAwladBaeooX1DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
     const schematic=wfmSavedSchematicScope(scope);
