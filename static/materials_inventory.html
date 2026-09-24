@@ -3135,6 +3135,11 @@ function wfmAwladBaeooX2DisplayParts(area,xbox){
   const sourceParts=wfmParts(area,xbox),sharedXboxRows=[[1,2],[3,4],[5,6],[7,8],[9,10]],hubs=Array.from({length:10},(_,i)=>i+1),sharedXboxOutputs=[1,3,5,7,9],boxRows=sourceParts.flatMap(part=>part.boxRows||[]),routeRows=sourceParts.flatMap(part=>part.routeRows||[]),subtitle=sharedXboxRows.map(row=>row.map(hub=>`H${hub}`).join('-')).join(' · ');
   return boxRows.length||routeRows.length?[{area,xbox,part:'Part01',title:'Awlad Baeoo / X2',subtitle,hubs,boxRows,routeRows,sharedXboxMap:true,sharedXboxRows,sharedXboxOutputs}]:[];
 }
+function wfmBeraWTaleemX1DisplayParts(area,xbox){
+  if(wfmMapAreaKey(area)!=='bera w taleem'||wfmXboxKey(xbox)!=='X1')return[];
+  const sourceParts=wfmParts(area,xbox),sharedXboxRows=[[1,2],[3,4],[5],[6,7]],hubs=Array.from({length:7},(_,i)=>i+1),sharedXboxOutputs=[1,3,5,6],boxRows=sourceParts.flatMap(part=>part.boxRows||[]),routeRows=sourceParts.flatMap(part=>part.routeRows||[]),subtitle=sharedXboxRows.map(row=>row.map(hub=>`H${hub}`).join('-')).join(' · ');
+  return boxRows.length||routeRows.length?[{area,xbox,part:'Part01',title:'Bera W Taleem / X1',subtitle,hubs,boxRows,routeRows,sharedXboxMap:true,sharedXboxRows,sharedXboxOutputs}]:[];
+}
 function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const length=wfmValue(ref,['Cable length m']);if(length===''||length===undefined||length===null)return;const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),length,'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
 var warehouseFiberSelectedScope='';
 var warehouseFiberSelectedArea='';
@@ -3330,6 +3335,12 @@ renderRolloutMapPanel=function(){
     const result=renderRolloutMapPanelWithInteraction();
     const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
     if(stage){const displayParts=wfmAwladBaeooX2DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
+  }
+  if(wfmMapAreaKey(scope?.area)==='bera w taleem'&&wfmXboxKey(scope?.xbox)==='X1'){
+    const result=renderRolloutMapPanelWithInteraction();
+    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
+    if(stage){const displayParts=wfmBeraWTaleemX1DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
     restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
