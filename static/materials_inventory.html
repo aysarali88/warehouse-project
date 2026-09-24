@@ -3283,14 +3283,6 @@ renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
   const scope=(wfmScopesForArea(warehouseFiberSelectedArea||'')||[]).find(row=>row.id===warehouseFiberSelectedScope);
-  if(scope&&wfmIsHayAndalusZ1PdfScope(scope)){
-    if(!hayAndalusZ1MapLayout){
-      const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='<div class="map-note">Loading approved XBOX map sheet...</div>';
-      ensureHayAndalusZ1MapLayout().then(()=>renderRolloutMapPanel()).catch(()=>{const schematic=wfmSavedSchematicScope(scope);if(schematic)renderStaticFiberMapImages(schematic);else renderRolloutMapPanelWithInteraction()});
-      restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return;
-    }
-    if(renderHayAndalusZ1PdfMap(scope)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
-  }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
     const schematic=wfmSavedSchematicScope(scope);
     if(schematic&&renderStaticFiberMapImages(schematic)){restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return}
