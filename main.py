@@ -70,7 +70,8 @@ ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
 ROLLOUT_DB_CACHE_TTL = 30
 ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
 ROLLOUT_ENTRY_ID_CACHE_TTL = 30
-ROLLOUT_CODE_REFERENCE_CACHE: dict[str, list[dict]] = {}
+ROLLOUT_CODE_REFERENCE_CACHE: dict[str, tuple[float, list[dict]]] = {}
+ROLLOUT_CODE_REFERENCE_CACHE_TTL = 60
 
 # Hay Demashq has no uploaded fiber map yet. These approved HUB codes keep
 # Hub Accessories entry available while preserving Area/XBOX validation.
@@ -2027,8 +2028,9 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
 
 def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
     program_key = normalize_program(program)
-    if program_key in ROLLOUT_CODE_REFERENCE_CACHE:
-        return ROLLOUT_CODE_REFERENCE_CACHE[program_key]
+    cached = ROLLOUT_CODE_REFERENCE_CACHE.get(program_key)
+    if cached and time.monotonic() - cached[0] < ROLLOUT_CODE_REFERENCE_CACHE_TTL:
+        return cached[1]
 
     ref = load_fiber_map_reference(db, program_key)
     rows: list[dict] = []
@@ -2176,7 +2178,7 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
             and rollout_code_key(row.get("code")) in {rollout_code_key(code) for code in removed_x9_codes}
         )
     ]
-    ROLLOUT_CODE_REFERENCE_CACHE[program_key] = rows
+    ROLLOUT_CODE_REFERENCE_CACHE[program_key] = (time.monotonic(), rows)
     return rows
 
 
