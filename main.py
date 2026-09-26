@@ -1386,6 +1386,7 @@ class MaterialRequisitionItemIn(BaseModel):
 
 class MaterialRequisitionIn(BaseModel):
     program: str = DEFAULT_PROGRAM
+    submission_token: str = ""
     creation_date: str = ""
     warehouse_id: int
     entity: str = "Rollout"
@@ -6638,9 +6639,48 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    actor = request_actor(request)
+    submission_token = data.submission_token.strip()
+    if submission_token and len(submission_token) > 128:
+        raise HTTPException(status_code=400, detail="Invalid MR submission token")
+    if submission_token:
+        token_identity = f"{program_key}:{normalize_usage_key(actor)}:{submission_token}"
+        if db.bind and db.bind.dialect.name == "postgresql":
+            lock_key = int.from_bytes(hashlib.sha256(token_identity.encode("utf-8")).digest()[:8], "big", signed=True)
+            db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        previous_submit = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "material_requisition_submission_token",
+                AuditLog.entity_type == "material_requisition_submission",
+                AuditLog.entity_id == token_identity,
+            )
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        if previous_submit:
+            try:
+                previous_details = json.loads(previous_submit.details or "{}")
+                previous_id = int(previous_details.get("requisition_id") or 0)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                previous_id = 0
+            previous_row = (
+                db.query(MaterialRequisition)
+                .filter(MaterialRequisition.id == previous_id, MaterialRequisition.program == program_key)
+                .first()
+                if previous_id
+                else None
+            )
+            if previous_row:
+                return {
+                    "success": True,
+                    "duplicate_submission": True,
+                    "issue_order": None,
+                    "requisition": requisition_to_dict(previous_row),
+                }
     data.site_id = resolved_site_name(db, program_key, data.site_id)
     warehouse = require_warehouse(db, data.warehouse_id, program_key)
-    data.created_by = request_actor(request)
+    data.created_by = actor
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
@@ -6714,7 +6754,26 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     else:
         row.status = "pending_approval"
 
-    log_audit(db, "create_material_requisition", "material_requisition", row.order_number, data.created_by, data.model_dump())
+    log_audit(
+        db,
+        "create_material_requisition",
+        "material_requisition",
+        row.order_number,
+        data.created_by,
+        data.model_dump(exclude={"submission_token"}),
+    )
+    if submission_token:
+        db.add(
+            AuditLog(
+                action="material_requisition_submission_token",
+                entity_type="material_requisition_submission",
+                entity_id=token_identity,
+                actor=data.created_by,
+                details=json.dumps(
+                    {"requisition_id": row.id, "order_number": row.order_number, "program": program_key}
+                ),
+            )
+        )
     db.commit()
     db.refresh(row)
     if row.status == "pending_approval":

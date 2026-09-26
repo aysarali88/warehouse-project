@@ -1573,6 +1573,7 @@ let lastApprovalCount=0;
 let appUsers=[];
 let activeUsers=[];
 let currentEditingMrId=null;
+let mrSubmitBusy=false;
 let currentEditingTransferId=null;
 let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
 function canonicalRolloutArea(value){const key=normalizeText(value);return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':String(value||'').trim()}
@@ -2811,8 +2812,15 @@ function renderMrPreview(orderNo='Draft'){const warehouse=wh.warehouses.find(w=>
 ${mrItemsTableHtml(items,isSingleRan())}
 <div class="mr-sign"><div><h4>Approver</h4><table><tr><th>Name</th><td>${esc(mrReceiverName.value)}</td></tr><tr><th>Title</th><td>${esc(mrReceiverTitle.value)}</td></tr><tr class="sig-row"><th>Signature</th><td>${signatureData('receiver')?`<img class="signature-img" src="${signatureData('receiver')}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(mrArriveTime.value))}</td></tr><tr><th>Comment (if have)</th><td></td></tr></table></div><div><h4>Requester</h4><table><tr><th>Name</th><td>${esc(mrRequesterName.value)}</td></tr><tr><th>Title</th><td>${esc(mrRequesterTitle.value)}</td></tr><tr class="sig-row"><th>Signature</th><td>${signatureData('requester')?`<img class="signature-img" src="${signatureData('requester')}">`:''}</td></tr><tr><th>Date(dd-mm-yyyy)</th><td>${esc(formatDate(mrCreationDate.value))}</td></tr><tr><th>Comment (if have)</th><td>${esc(mrRequesterComment.value)}</td></tr></table></div></div>`}
 function loadMrForEdit(req){currentEditingMrId=req.id;mrCreationDate.value=req.creation_date||'';mrWarehouse.value=req.warehouse_id||'';mrEntity.value=req.entity||'Rollout';mrProject.value=req.project_name||'FTTH';mrSiteId.value=req.site_id||'';mrSiteAddress.value=req.site_address||'';mrWoNo.value=req.wo_no||'';mrDomain.value=req.product_domain||'Passive';mrTeamLeader.value=req.team_leader||'';mrReceiverTel.value=req.receiver_tel||'';mrShipTime.value=req.request_shipment_time||'';mrArriveTime.value=req.request_arrived_site_time||'';mrRequesterName.value=req.requester_name||activeUser;mrRequesterTitle.value=req.requester_title||'';mrRequesterComment.value=req.requester_comment||'';mrReceiverName.value=req.receiver_name||'';mrReceiverTitle.value=req.receiver_title||'';const box=document.getElementById('mrLines');box.innerHTML='';(req.items||[]).forEach(item=>addMrLine(item));const notice=document.getElementById('mrEditNotice');if(notice){notice.textContent=`Editing MR ${req.order_number||''}. Return reason: ${req.return_reason||req.receiver_comment||'Update requested by Approval.'}`;notice.classList.remove('hidden')}renderMrPreview(req.order_number);toast(req.return_reason?`Return reason: ${req.return_reason}`:'Edit the MR and resubmit')}
+function mrSubmissionStorageKey(){return `mr-submit:${normalizeProgram(currentProgram)}:${normalizeText(activeUser)}`}
+function mrSubmissionToken(body){const key=mrSubmissionStorageKey(),fingerprint=JSON.stringify(body);let saved=null;try{saved=JSON.parse(sessionStorage.getItem(key)||'null')}catch{}if(saved?.fingerprint===fingerprint&&saved.token)return saved.token;const token=globalThis.crypto?.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;try{sessionStorage.setItem(key,JSON.stringify({fingerprint,token}))}catch{}return token}
+function resetMrSubmissionToken(){try{sessionStorage.removeItem(mrSubmissionStorageKey())}catch{}}
 async function editMr(id){try{let req=(wh.mrs||[]).find(r=>String(r.id)===String(id));if(!req){toast('MR not found');return}if(!Array.isArray(req.items)||!req.items.length){const data=await api(`/api/warehouse/material-requisitions/${id}`+authQueryString('?'));req=data.requisition||req;upsertLocalMr(req)}if(req.status!=='returned_for_edit'){toast('This MR is not available for editing');return}closeMrModal();switchView('mr');loadMrForEdit(req)}catch(e){toast(e.message)}}
 async function saveMr(){
+  if(mrSubmitBusy){toast('MR submission is already in progress');return}
+  mrSubmitBusy=true;
+  const submitButton=document.querySelector('#mr button[onclick="saveMr()"]');
+  if(submitButton){submitButton.disabled=true;submitButton.setAttribute('aria-busy','true')}
   try{
     if(!canCreateMr()){toast('Requester فقط يقدر ينشئ MR');return}
     const items=getMrItems();
@@ -2854,16 +2862,17 @@ async function saveMr(){
       items
     };
     const editingId=currentEditingMrId;
+    if(!editingId)body.submission_token=mrSubmissionToken(body);
     toast(editingId?'جاري إعادة إرسال MR...':'جاري إرسال MR للاعتماد...');
     const r=await api(editingId?`/api/warehouse/material-requisitions/${editingId}/resubmit`:'/api/warehouse/material-requisitions',{method:'POST',body:JSON.stringify(body)});
     const req=r.requisition;
     currentEditingMrId=null;
     const editNotice=document.getElementById('mrEditNotice');if(editNotice){editNotice.textContent='';editNotice.classList.add('hidden')}
-    toast('MR '+req.order_number+' sent to '+mrReceiverName.value+' for approval');
+    toast(r.duplicate_submission?'MR '+req.order_number+' was already submitted. No duplicate was created.':'MR '+req.order_number+' sent to '+mrReceiverName.value+' for approval');
     renderMrPreview(req.order_number);
     upsertLocalMr(req);
     syncWarehouseLater();
-  }catch(e){toast(e.message)}
+  }catch(e){toast(e.message)}finally{mrSubmitBusy=false;if(submitButton){submitButton.disabled=false;submitButton.removeAttribute('aria-busy')}}
 }function mrTableAction(r){const ownsReturnedMr=isAdmin()||normalizeText(r.created_by)===normalizeText(activeUser);const editBtn=(r.status==='returned_for_edit'&&canCreateMr()&&ownsReturnedMr)?`<button class="btn primary" onclick="editMr(${r.id})">Edit MR</button>`:'';const scanBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="openScanMaterial(${r.id})">Scan</button>`:'';const issueBtn=(r.status==='approved'&&canManageWarehouse())?`<button class="btn primary" onclick="issueApprovedMr(${r.id})">صرف</button>`:'';return `<div class="row-actions">${editBtn}${scanBtn}${issueBtn}<button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`}
 function visibleMrRows(){return (wh.mrs||[]).filter(userOwnsMr)}
 function renderMrTable(){mrTable.innerHTML=rowsTable([['Order','order_number'],['Warehouse','warehouse'],['Site','site_id'],['Requester','requester_name'],['Approver','receiver_name'],['Status','status',(v)=>statusChip(v)],['Date','creation_date'],['Action','id',(v,r)=>mrTableAction(r)]],visibleMrRows())}
@@ -2871,6 +2880,8 @@ function printMr(){renderMrPreview();printMrPortrait(()=>{document.getElementByI
 function setupPad(id){const c=document.getElementById(id),ctx=c.getContext('2d');function size(){const r=c.getBoundingClientRect();c.width=Math.max(300,r.width);c.height=110;ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111'}size();let draw=false;function pos(e){const r=c.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return{x:(p.clientX-r.left)*(c.width/r.width),y:(p.clientY-r.top)*(c.height/r.height)}}function start(e){draw=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);e.preventDefault()}function move(e){if(!draw)return;const p=pos(e);ctx.lineTo(p.x,p.y);ctx.stroke();renderMrPreview();e.preventDefault()}function end(){draw=false;renderMrPreview()}c.addEventListener('mousedown',start);c.addEventListener('mousemove',move);window.addEventListener('mouseup',end);c.addEventListener('touchstart',start,{passive:false});c.addEventListener('touchmove',move,{passive:false});c.addEventListener('touchend',end)}
 function clearSignature(role){const c=document.getElementById(role+'Pad'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);renderMrPreview()}
 setupPad('requesterPad');setupPad('receiverPad');initMrDefaults();
+document.getElementById('mr')?.addEventListener('input',event=>{if(event.target.matches('input,select,textarea'))resetMrSubmissionToken()});
+document.getElementById('mr')?.addEventListener('change',event=>{if(event.target.matches('input,select,textarea'))resetMrSubmissionToken()});
 bindScannerInput('scanMaterialInput',handleMaterialScan);
 bindScannerInput('historyScanInput',handleHistoryScan);
 document.querySelectorAll('#transferForm input,#transferForm select').forEach(el=>{el.addEventListener('input',renderTransferPreview);el.addEventListener('change',renderTransferPreview)});
