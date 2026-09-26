@@ -2690,6 +2690,11 @@ table.innerHTML=`
     <div class="field"><label>City</label><select onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
     <div class="field"><label>Area</label><select onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
   </div>
+  <section class="homepass-summary" aria-label="Homepass totals">
+    <div class="homepass-summary-card"><span>Total Homepass / Actual Users</span><strong>${fmt(homepassSummary.total)}</strong></div>
+    <div class="homepass-summary-card"><span>Misurata</span><strong>${fmt(homepassSummary.Misurata)}</strong></div>
+    <div class="homepass-summary-card"><span>Tripoli</span><strong>${fmt(homepassSummary.Tripoli)}</strong></div>
+  </section>
   <div class="command-hero">
     <div class="command-head">
       <div class="command-health">System healthy</div>
@@ -2719,11 +2724,6 @@ table.innerHTML=`
       <div class="timeline-foot">${timelineGood?'Actual output is aligned with planned pace.':`Behind by ${Math.abs(diff).toFixed(0)}%. Required productivity is ${plannedPct.toFixed(0)}% by ${esc(rolloutDashDateLabel(selectedDate))}; actual productivity is ${actualPct.toFixed(0)}%.`} Actual output ${fmt(metric.actualUsers)} users.</div>
     </div>
   </div>
-  <section class="homepass-summary" aria-label="Homepass totals">
-    <div class="homepass-summary-card"><span>Total Homepass / Actual Users</span><strong>${fmt(homepassSummary.total)}</strong></div>
-    <div class="homepass-summary-card"><span>Misurata</span><strong>${fmt(homepassSummary.Misurata)}</strong></div>
-    <div class="homepass-summary-card"><span>Tripoli</span><strong>${fmt(homepassSummary.Tripoli)}</strong></div>
-  </section>
   <div class="rollout-support">
     <div class="rollout-support-head"><h3>Site Survey progress</h3><span class="tag">Live from Survey sheet</span></div>
     <div class="survey-grid">
