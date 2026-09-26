@@ -1218,6 +1218,11 @@ class ProductIn(BaseModel):
     min_stock: float = 0
 
 
+class ProductVendorIn(BaseModel):
+    program: str = DEFAULT_PROGRAM
+    vendor: str = ""
+
+
 class MaterialScanIn(BaseModel):
     code: str
     actor: str = "system"
@@ -4526,6 +4531,30 @@ def list_products(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_sessi
     return {"success": True, "products": [product_to_dict(r) for r in rows]}
 
 
+@app.patch("/api/warehouse/products/{product_id}/vendor")
+def update_product_vendor(product_id: int, data: ProductVendorIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    program_key = normalize_program(data.program)
+    product = db.query(Product).filter(Product.id == product_id, Product.program == program_key).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        has_scoped_balance = db.query(StockBalance.id).filter(
+            StockBalance.program == program_key,
+            StockBalance.product_id == product.id,
+            StockBalance.warehouse_id.in_(allowed),
+        ).first()
+        if has_scoped_balance is None:
+            raise HTTPException(status_code=403, detail="You do not have access to this material")
+    product.vendor = data.vendor.strip()
+    log_audit(db, "update_product_vendor", "product", str(product.id), request_actor(request), {"vendor": product.vendor})
+    db.commit()
+    db.refresh(product)
+    clear_warehouse_cache()
+    return {"success": True, "product": product_to_dict(product)}
+
+
 def scan_code_candidates(scanned: str) -> list[str]:
     candidates = [scanned]
     if re.fullmatch(r"\d+\.0+", scanned):
@@ -4803,7 +4832,7 @@ def create_product(data: ProductIn, request: Request, db: Session = Depends(db_s
         category=data.category.strip(),
         name=name,
         item_detail=data.item_detail.strip(),
-        vendor=data.vendor.strip() if program_key == SINGLE_RAN_PROGRAM else "",
+        vendor=data.vendor.strip(),
         qr_code=data.qr_code.strip(),
         unit=data.unit.strip() or "PCS",
         tracking_type=data.tracking_type,
@@ -4974,6 +5003,7 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
                 "sku": balance.product.sku if balance.product else "",
                 "part_number": product_part_number(balance.product.sku if balance.product else "", balance.product.part_number if balance.product else ""),
                 "product": product_name,
+                "vendor": str(balance.product.vendor or "") if balance.product else "",
                 "unit": balance.product.unit if balance.product else "",
                 "total_received": display_total,
                 "received_movements": total_received,
@@ -5016,7 +5046,7 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Inventory"
-    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Reserved Pending", "Available", "Usage %"])
+    sheet.append(["Warehouse", "Part #", "SKU", "Item", "Vendor", "Unit", "Total Stock", "Issued WH", "Rollout Used", "WH Remaining", "Reserved Pending", "Available", "Usage %"])
     for row in rows:
         sheet.append(
             [
@@ -5024,6 +5054,7 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
                 row["part_number"],
                 row["sku"],
                 row["product"],
+                row["vendor"],
                 row["unit"],
                 row["total_received"],
                 row["total_consumed"],
@@ -5042,9 +5073,10 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     sheet.column_dimensions["B"].width = 20
     sheet.column_dimensions["C"].width = 18
     sheet.column_dimensions["D"].width = 46
-    for column in ("E", "F", "G", "H", "I", "J", "K", "L"):
+    sheet.column_dimensions["E"].width = 24
+    for column in ("F", "G", "H", "I", "J", "K", "L", "M"):
         sheet.column_dimensions[column].width = 16
-    for cell in sheet["L"][1:]:
+    for cell in sheet["M"][1:]:
         cell.number_format = "0.0%"
 
     output = io.BytesIO()
@@ -7380,7 +7412,7 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
 
     for item in data.items:
         product = require_product(db, item.product_id, program_key)
-        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+        if data.supplier.strip():
             product.vendor = data.supplier.strip()
         validate_serial_count(product, item.quantity, item.serial_numbers)
         stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
@@ -7450,7 +7482,7 @@ async def receive_inventory(request: Request, db: Session = Depends(db_session))
             category=data.category.strip(),
             name=name,
             item_detail=name,
-            vendor=data.supplier.strip() if program_key == SINGLE_RAN_PROGRAM else "",
+            vendor=data.supplier.strip(),
             qr_code=data.qr_code.strip(),
             unit=data.unit.strip() or "PCS",
             tracking_type="bulk",
@@ -7465,7 +7497,7 @@ async def receive_inventory(request: Request, db: Session = Depends(db_session))
         product.unit = data.unit.strip() or product.unit or "PCS"
         product.qr_code = data.qr_code.strip() or product.qr_code
         product.category = data.category.strip() or product.category
-        if program_key == SINGLE_RAN_PROGRAM and data.supplier.strip() and not str(product.vendor or "").strip():
+        if data.supplier.strip():
             product.vendor = data.supplier.strip()
 
     order = ReceiveOrder(
