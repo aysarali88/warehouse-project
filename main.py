@@ -295,6 +295,45 @@ def sync_single_ran_product_vendors():
 
 
 sync_single_ran_product_vendors()
+
+
+def sync_ftth_product_vendors_from_receipts():
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Product.id, Product.vendor, ReceiveOrder.supplier)
+            .outerjoin(ReceiveOrderItem, ReceiveOrderItem.product_id == Product.id)
+            .outerjoin(ReceiveOrder, ReceiveOrder.id == ReceiveOrderItem.receive_order_id)
+            .filter(Product.program == DEFAULT_PROGRAM)
+            .all()
+        )
+        vendors_by_product: dict[int, dict[str, str]] = {}
+        existing_vendors: dict[int, str] = {}
+        for product_id, current_vendor, supplier in rows:
+            existing_vendors[product_id] = str(current_vendor or "").strip()
+            vendor = str(supplier or "").strip()
+            if vendor:
+                vendors_by_product.setdefault(product_id, {}).setdefault(vendor.casefold(), vendor)
+        changed = 0
+        for product_id, vendors in vendors_by_product.items():
+            if not existing_vendors.get(product_id) and len(vendors) == 1:
+                db.query(Product).filter(Product.id == product_id, Product.program == DEFAULT_PROGRAM).update(
+                    {Product.vendor: next(iter(vendors.values()))}, synchronize_session=False
+                )
+                changed += 1
+        if changed:
+            db.commit()
+            logger.info("FTTH product vendors populated from unambiguous receipts for %s materials", changed)
+    except Exception:
+        db.rollback()
+        logger.exception("FTTH product vendor backfill failed")
+    finally:
+        db.close()
+
+
+sync_ftth_product_vendors_from_receipts()
+
+
 VALID_PROGRAM_VALUES = {DEFAULT_PROGRAM, SINGLE_RAN_PROGRAM, "SR", "SINGLERAN"}
 DEFAULT_SITE_IDS = ("Maqawba", "Hay Al Andalus Z2", "Ras A Tota")
 
