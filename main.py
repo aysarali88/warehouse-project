@@ -19,7 +19,7 @@ import zipfile
 from xml.etree import ElementTree
 from threading import Lock
 import bcrypt
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from email.utils import formataddr
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -5063,11 +5063,38 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     return {"success": True, "usage": usage_rows}
 
 
+MONTHLY_NEED_REFERENCE = [
+    {"warehouse": "Tripoli", "part_number": "14130BQC-010", "material": "4-coreCable_100m", "quantity": 100},
+    {"warehouse": "Tripoli", "part_number": "14130BQC-011", "material": "4-coreCable_150m", "quantity": 100},
+    {"warehouse": "Tripoli", "part_number": "14130BQC-012", "material": "4-coreCable_200m", "quantity": 100},
+    {"warehouse": "Tripoli", "part_number": "14130BQC", "material": "4-coreCable_300m", "quantity": 100},
+    {"warehouse": "Tripoli", "part_number": "14130BQC-001", "material": "4-coreCable_500m", "quantity": 100},
+    {"warehouse": "Tripoli", "part_number": "52590160", "material": "Plum ring hook", "quantity": 1000},
+    {"warehouse": "Tripoli", "part_number": "14137938-006", "material": "Single-Core Distribution Cable_200m", "quantity": 300},
+    {"warehouse": "Tripoli", "part_number": "14137938-007", "material": "Single-Core Distribution Cable_250m", "quantity": 300},
+    {"warehouse": "Tripoli", "part_number": "14137938-011", "material": "Single-Core Distribution Cable_5m", "quantity": 500},
+    {"warehouse": "Misurata Lnet", "part_number": "14261299", "material": "END BOX avec 8 users capacity", "quantity": 1000},
+    {"warehouse": "Misurata Lnet", "part_number": "14261785", "material": "HubBox", "quantity": 100},
+    {"warehouse": "Misurata Lnet", "part_number": "52590919", "material": "Metal wedge clamping", "quantity": 3000},
+    {"warehouse": "Misurata Lnet", "part_number": "14261388", "material": "Plastic Cable Storing Assembly", "quantity": 1100},
+    {"warehouse": "Misurata Lnet", "part_number": "52590160", "material": "Plum ring hook", "quantity": 500},
+    {"warehouse": "Misurata Lnet", "part_number": "21150804", "material": "Pole mounting assembly", "quantity": 3000},
+    {"warehouse": "Misurata Lnet", "part_number": "14137938-004", "material": "Single-Core Distribution Cable_150m", "quantity": 200},
+    {"warehouse": "Misurata Lnet", "part_number": "14137938-006", "material": "Single-Core Distribution Cable_200m", "quantity": 200},
+    {"warehouse": "Misurata Lnet", "part_number": "14137938-007", "material": "Single-Core Distribution Cable_250m", "quantity": 200},
+    {"warehouse": "Misurata Lnet", "part_number": "14137938", "material": "Single-Core Distribution Cable_50m", "quantity": 300},
+    {"warehouse": "Misurata Lnet", "part_number": "14137938-001", "material": "Single-Core Distribution Cable_80m", "quantity": 100},
+    {"warehouse": "Misurata Lnet", "part_number": "14261298", "material": "SUB BOX avec 8 users capacity", "quantity": 200},
+    {"warehouse": "Misurata Lnet", "part_number": "14261816", "material": "XBOX", "quantity": 20},
+]
+
+
 @app.get("/api/warehouse/stock-coverage")
 def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     window_days = 30
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    cutoff_date = (datetime.now(TRIPOLI_TZ).date() - timedelta(days=window_days - 1))
     balances_query = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
@@ -5077,7 +5104,7 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         if not allowed:
-            return {"success": True, "window_days": window_days, "critical_days": 7, "warning_days": 14, "items": [], "monthly_replenishment": [], "no_recent_consumption": {"tripoli": 0, "misurata": 0}}
+            return {"success": True, "window_days": window_days, "critical_days": 7, "warning_days": 14, "items": [], "monthly_replenishment": [], "manual_review": {"tripoli": [], "misurata": []}, "no_recent_consumption": {"tripoli": 0, "misurata": 0}}
         balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
     balances = balances_query.all()
     movement_query = db.query(
@@ -5105,7 +5132,50 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         elif movement_type == "return_in" and quantity > 0:
             totals["returned"] += quantity
     reserved = reserved_stock_quantities(db, program_key)
+    needs_by_part = {
+        (normalize_usage_key(row["warehouse"]), normalize_usage_key(row["part_number"])): row
+        for row in MONTHLY_NEED_REFERENCE
+    }
+    needs_by_material = {
+        (normalize_usage_key(row["warehouse"]), canonical_material_key(row["material"])): row
+        for row in MONTHLY_NEED_REFERENCE
+    }
+    matched_needs: set[tuple[str, str]] = set()
+    rollout_rows, _ = (rollout_daily_progress_records(db) if not is_single_ran(program_key) else ([], "disabled"))
+    rollout_rows = rollout_records_for_session(request, rollout_rows)
+    rollout_material_keys: set[str] = set()
+    rollout_usage: dict[tuple[str, str], float] = {}
+    rollout_date_unknown: set[tuple[str, str]] = set()
+    for record in rollout_rows:
+        material = str(record.get("material type") or record.get("item") or "").strip()
+        material_key = canonical_material_key(material)
+        if not material_key:
+            continue
+        rollout_material_keys.add(material_key)
+        status = normalize_usage_key(str(record.get("staus") or record.get("status") or ""))
+        if status and status not in {"done", "completed", "installed"}:
+            continue
+        actual = safe_float(record.get("actual"))
+        if actual <= 0:
+            continue
+        warehouse_key = rollout_warehouse_key(record)
+        city = "tripoli" if "tripoli" in warehouse_key else "misurata" if "misurata" in warehouse_key else ""
+        date_value = str(record.get("Date") or record.get("date") or "").strip()
+        if not date_value:
+            date_value = str(record.get("entry time") or "").strip()
+        try:
+            record_date = date.fromisoformat(date_value[:10])
+        except (TypeError, ValueError):
+            if warehouse_key:
+                rollout_date_unknown.add((warehouse_key, material_key))
+            continue
+        if not city:
+            continue
+        if record_date >= cutoff_date:
+            key = (warehouse_key, material_key)
+            rollout_usage[key] = rollout_usage.get(key, 0) + actual
     no_recent_consumption = {"tripoli": 0, "misurata": 0}
+    manual_review = {"tripoli": [], "misurata": []}
     items = []
     monthly_replenishment = []
     for balance in balances:
@@ -5124,9 +5194,35 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         movement = movement_totals.get(key, {})
         issued = float(movement.get("issued", 0) or 0)
         returned = float(movement.get("returned", 0) or 0)
-        consumed = max(issued - returned, 0)
-        suggested = max(consumed - available, 0)
-        if normalize_usage_key(product.unit or "") in {"pcs", "pc", "piece", "pieces", "unit", "units", "box", "boxes"}:
+        material_key = canonical_material_key(product_display_name(product) or product.sku or "")
+        rollout_balance_key = rollout_warehouse_key({"city": warehouse.name, "Area": warehouse.location or ""})
+        city_material_key = (rollout_balance_key, material_key)
+        product_part = product_part_number(product.sku or "", product.part_number or "")
+        warehouse_material_key = normalize_usage_key(warehouse.name)
+        need = needs_by_part.get((warehouse_material_key, normalize_usage_key(product_part))) or needs_by_material.get((warehouse_material_key, material_key))
+        if need:
+            matched_needs.add((warehouse_material_key, canonical_material_key(need["material"])))
+        if material_key in rollout_material_keys:
+            if city_material_key in rollout_date_unknown or city_material_key not in rollout_usage:
+                if not need:
+                    manual_review[city].append({
+                        "warehouse": warehouse.name,
+                        "product": product_display_name(product),
+                        "sku": product.sku or "",
+                        "part_number": product_part,
+                        "unit": product.unit or "",
+                        "reason": "missing_rollout_data",
+                    })
+                consumed = 0.0
+                source = "manual_review"
+            else:
+                consumed = rollout_usage[city_material_key]
+                source = "rollout"
+        else:
+            consumed = max(issued - returned, 0)
+            source = "warehouse_net"
+        suggested = float(need["quantity"]) if need else max(consumed - available, 0)
+        if not need and normalize_usage_key(product.unit or "") in {"pcs", "pc", "piece", "pieces", "unit", "units", "box", "boxes"}:
             suggested = float(math.ceil(suggested - 1e-9))
         if suggested > 0:
             monthly_replenishment.append({
@@ -5136,11 +5232,14 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
                 "product_id": balance.product_id,
                 "product": product_display_name(product),
                 "sku": product.sku or "",
-                "part_number": product_part_number(product.sku or "", product.part_number or ""),
+                "part_number": product_part,
                 "unit": product.unit or "",
                 "issued_30d": issued,
                 "returned_30d": returned,
                 "net_consumed_30d": consumed,
+                "consumption_source": source,
+                "order_quantity_source": "provided_need" if need else "usage_calculation",
+                "reference_needed_quantity": float(need["quantity"]) if need else None,
                 "available": available,
                 "suggested_quantity": suggested,
             })
@@ -5167,12 +5266,30 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
             "unit": product.unit or "",
             "available": available,
             "consumed_30d": consumed,
+            "consumption_source": source,
             "daily_average": consumed / window_days,
             "coverage_days": coverage_days,
             "status": status,
         })
+    for need in MONTHLY_NEED_REFERENCE:
+        warehouse_key = normalize_usage_key(need["warehouse"])
+        material_key = canonical_material_key(need["material"])
+        if (warehouse_key, material_key) in matched_needs:
+            continue
+        city = "tripoli" if "tripoli" in warehouse_key else "misurata"
+        manual_review[city].append({
+            "warehouse": need["warehouse"],
+            "product": need["material"],
+            "sku": "",
+            "part_number": need["part_number"],
+            "unit": "PCS",
+            "reason": "need_item_not_found",
+            "needed_quantity": need["quantity"],
+        })
     items.sort(key=lambda item: (item["city"], item["coverage_days"], item["product"].casefold()))
     monthly_replenishment.sort(key=lambda item: (item["city"], -item["suggested_quantity"], item["product"].casefold()))
+    for city in manual_review:
+        manual_review[city].sort(key=lambda item: (item["product"].casefold(), item["warehouse"].casefold()))
     return {
         "success": True,
         "window_days": window_days,
@@ -5180,6 +5297,7 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         "warning_days": 14,
         "items": items,
         "no_recent_consumption": no_recent_consumption,
+        "manual_review": manual_review,
         "monthly_replenishment": monthly_replenishment,
     }
 
