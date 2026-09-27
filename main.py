@@ -5,6 +5,7 @@ import io
 import json
 import hmac
 import logging
+import math
 import os
 import re
 import secrets
@@ -5076,27 +5077,37 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         if not allowed:
-            return {"success": True, "window_days": window_days, "critical_days": 7, "warning_days": 14, "items": [], "no_recent_consumption": {"tripoli": 0, "misurata": 0}}
+            return {"success": True, "window_days": window_days, "critical_days": 7, "warning_days": 14, "items": [], "monthly_replenishment": [], "no_recent_consumption": {"tripoli": 0, "misurata": 0}}
         balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
     balances = balances_query.all()
-    issued_totals = {
-        (warehouse_id, product_id): float(total or 0)
-        for warehouse_id, product_id, total in (
-            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-            .filter(
-                StockMovement.program == program_key,
-                StockMovement.warehouse_id.isnot(None),
-                StockMovement.movement_type == "issue_to_technician",
-                StockMovement.quantity < 0,
-                StockMovement.created_at >= cutoff,
-            )
-            .group_by(StockMovement.warehouse_id, StockMovement.product_id)
-            .all()
-        )
-    }
+    movement_query = db.query(
+        StockMovement.warehouse_id,
+        StockMovement.product_id,
+        StockMovement.movement_type,
+        func.sum(StockMovement.quantity),
+    ).filter(
+        StockMovement.program == program_key,
+        StockMovement.warehouse_id.isnot(None),
+        StockMovement.movement_type.in_(["issue_to_technician", "return_in"]),
+        StockMovement.created_at >= cutoff,
+    )
+    if allowed is not None:
+        movement_query = movement_query.filter(StockMovement.warehouse_id.in_(allowed))
+    movement_totals: dict[tuple[int, int], dict[str, float]] = {}
+    for warehouse_id, product_id, movement_type, total in movement_query.group_by(
+        StockMovement.warehouse_id, StockMovement.product_id, StockMovement.movement_type
+    ).all():
+        key = (warehouse_id, product_id)
+        totals = movement_totals.setdefault(key, {"issued": 0.0, "returned": 0.0})
+        quantity = float(total or 0)
+        if movement_type == "issue_to_technician" and quantity < 0:
+            totals["issued"] += -quantity
+        elif movement_type == "return_in" and quantity > 0:
+            totals["returned"] += quantity
     reserved = reserved_stock_quantities(db, program_key)
     no_recent_consumption = {"tripoli": 0, "misurata": 0}
     items = []
+    monthly_replenishment = []
     for balance in balances:
         warehouse = balance.warehouse
         product = balance.product
@@ -5110,13 +5121,35 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         quantity = float(balance.quantity or 0)
         reserved_quantity = float(reserved.get(key, 0) or 0)
         available = max(quantity - reserved_quantity, 0)
-        consumed = issued_totals.get(key, 0)
+        movement = movement_totals.get(key, {})
+        issued = float(movement.get("issued", 0) or 0)
+        returned = float(movement.get("returned", 0) or 0)
+        consumed = max(issued - returned, 0)
+        suggested = max(consumed - available, 0)
+        if normalize_usage_key(product.unit or "") in {"pcs", "pc", "piece", "pieces", "unit", "units", "box", "boxes"}:
+            suggested = float(math.ceil(suggested - 1e-9))
+        if suggested > 0:
+            monthly_replenishment.append({
+                "warehouse_id": balance.warehouse_id,
+                "warehouse": warehouse.name,
+                "city": city,
+                "product_id": balance.product_id,
+                "product": product_display_name(product),
+                "sku": product.sku or "",
+                "part_number": product_part_number(product.sku or "", product.part_number or ""),
+                "unit": product.unit or "",
+                "issued_30d": issued,
+                "returned_30d": returned,
+                "net_consumed_30d": consumed,
+                "available": available,
+                "suggested_quantity": suggested,
+            })
         if consumed <= 0:
+            no_recent_consumption[city] += 1
             if available <= 0:
                 status = "out_of_stock"
                 coverage_days = 0
             else:
-                no_recent_consumption[city] += 1
                 continue
         else:
             daily_average = consumed / window_days
@@ -5139,6 +5172,7 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
             "status": status,
         })
     items.sort(key=lambda item: (item["city"], item["coverage_days"], item["product"].casefold()))
+    monthly_replenishment.sort(key=lambda item: (item["city"], -item["suggested_quantity"], item["product"].casefold()))
     return {
         "success": True,
         "window_days": window_days,
@@ -5146,6 +5180,7 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         "warning_days": 14,
         "items": items,
         "no_recent_consumption": no_recent_consumption,
+        "monthly_replenishment": monthly_replenishment,
     }
 
 
