@@ -5062,6 +5062,93 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     return {"success": True, "usage": usage_rows}
 
 
+@app.get("/api/warehouse/stock-coverage")
+def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    window_days = 30
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    balances_query = (
+        db.query(StockBalance)
+        .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
+        .filter(StockBalance.program == program_key)
+        .order_by(StockBalance.warehouse_id, StockBalance.product_id)
+    )
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    if allowed is not None:
+        if not allowed:
+            return {"success": True, "window_days": window_days, "critical_days": 7, "warning_days": 14, "items": [], "no_recent_consumption": {"tripoli": 0, "misurata": 0}}
+        balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
+    balances = balances_query.all()
+    issued_totals = {
+        (warehouse_id, product_id): float(total or 0)
+        for warehouse_id, product_id, total in (
+            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
+            .filter(
+                StockMovement.program == program_key,
+                StockMovement.warehouse_id.isnot(None),
+                StockMovement.movement_type == "issue_to_technician",
+                StockMovement.quantity < 0,
+                StockMovement.created_at >= cutoff,
+            )
+            .group_by(StockMovement.warehouse_id, StockMovement.product_id)
+            .all()
+        )
+    }
+    reserved = reserved_stock_quantities(db, program_key)
+    no_recent_consumption = {"tripoli": 0, "misurata": 0}
+    items = []
+    for balance in balances:
+        warehouse = balance.warehouse
+        product = balance.product
+        if warehouse is None or product is None:
+            continue
+        warehouse_key = normalize_usage_key(f"{warehouse.name} {warehouse.location or ''}")
+        city = "tripoli" if "tripoli" in warehouse_key else "misurata" if "misurata" in warehouse_key else ""
+        if not city:
+            continue
+        key = (balance.warehouse_id, balance.product_id)
+        quantity = float(balance.quantity or 0)
+        reserved_quantity = float(reserved.get(key, 0) or 0)
+        available = max(quantity - reserved_quantity, 0)
+        consumed = issued_totals.get(key, 0)
+        if consumed <= 0:
+            if available <= 0:
+                status = "out_of_stock"
+                coverage_days = 0
+            else:
+                no_recent_consumption[city] += 1
+                continue
+        else:
+            daily_average = consumed / window_days
+            coverage_days = available / daily_average
+            status = "critical" if coverage_days < 7 else "warning" if coverage_days <= 14 else "normal"
+            if status == "normal":
+                continue
+        items.append({
+            "warehouse_id": balance.warehouse_id,
+            "warehouse": warehouse.name,
+            "city": city,
+            "product_id": balance.product_id,
+            "product": product_display_name(product),
+            "sku": product.sku or "",
+            "unit": product.unit or "",
+            "available": available,
+            "consumed_30d": consumed,
+            "daily_average": consumed / window_days,
+            "coverage_days": coverage_days,
+            "status": status,
+        })
+    items.sort(key=lambda item: (item["city"], item["coverage_days"], item["product"].casefold()))
+    return {
+        "success": True,
+        "window_days": window_days,
+        "critical_days": 7,
+        "warning_days": 14,
+        "items": items,
+        "no_recent_consumption": no_recent_consumption,
+    }
+
+
 def user_can_view_material_return(row: MaterialReturn, viewer: str = "", role: str = "") -> bool:
     role_key = normalize_usage_key(role)
     viewer_key = normalize_usage_key(viewer)
