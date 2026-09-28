@@ -954,7 +954,7 @@ body.sr-program .login-logo img{
                 <label>ID</label><input id="feId" value="Auto" readonly>
                 <label>Date</label><input id="feDate" type="date">
                 <label>Supervisor Name</label><input id="feSupervisor" list="feSupervisorList" autocomplete="off">
-                <label>team leader</label><input id="feTeamLeader" list="feTeamList" autocomplete="off">
+                <label>team leader</label><select id="feTeamLeader"></select>
                 <label>City</label><select id="feCity" onchange="fieldEntryCityChanged()"></select>
                 <label>Area</label><select id="feArea" onchange="fieldEntryAreaChanged()"></select>
                 <label>Activity</label><select id="feActivity"><option>Installation</option><option>Splicing</option><option>Testing</option><option>Activation</option><option>Maintenance</option></select>
@@ -1472,7 +1472,7 @@ body.sr-program .login-logo img{
     <div class="field-entry-grid" style="margin-top:14px">
       <label>Date</label><input id="feeDate" type="date">
       <label>Supervisor Name</label><input id="feeSupervisor" autocomplete="off">
-      <label>Team leader</label><input id="feeTeamLeader" autocomplete="off">
+      <label>Team leader</label><select id="feeTeamLeader"></select>
       <label>City</label><select id="feeCity" onchange="fieldEntryEditCityChanged()"></select>
       <label>Area</label><select id="feeArea" onchange="fieldEntryEditAreaChanged()"></select>
       <label>Activity</label><select id="feeActivity"><option>Installation</option><option>Splicing</option><option>Testing</option><option>Activation</option><option>Maintenance</option></select>
@@ -1512,7 +1512,7 @@ body.sr-program .login-logo img{
     <div class="field-entry-grid" style="margin-top:14px">
       <label>Date</label><input id="mapEntryDate" type="date">
       <label>Supervisor Name</label><input id="mapEntrySupervisor" autocomplete="off">
-      <label>Team leader</label><input id="mapEntryTeamLeader" autocomplete="off">
+      <label>Team leader</label><select id="mapEntryTeamLeader"></select>
       <label>Item name</label><input id="mapEntryItem" readonly>
       <label>Item detail</label><select id="mapEntryMaterial"></select>
       <label>Code</label><input id="mapEntryCode" readonly>
@@ -1591,6 +1591,18 @@ let currentEditingMrId=null;
 let mrSubmitBusy=false;
 let currentEditingTransferId=null;
 let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
+const FIELD_TEAM_LEADERS=[
+  'ابراهيم قاسم الحرار',
+  'احمد محمد القعود',
+  'احمد مصطفى الفايدي',
+  'عبد الفتاح ادريس رحيم',
+  'مالك مختار تركي',
+  'ضرار يوسف الزعلوك',
+  'احمد محمد الفايدي',
+  'مصطفى محمد قاسمية',
+  'مصطفى يوسف الهبالي',
+  'محمد رجب دعمان'
+];
 function canonicalRolloutArea(value){const key=normalizeText(value);return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':String(value||'').trim()}
 function displayRolloutArea(value){const area=canonicalRolloutArea(value);return area==='awladbaeoo'?'Awlad Baeoo':area}
 function sameRolloutDashboardArea(a,b){return normalizeText(canonicalRolloutArea(a))===normalizeText(canonicalRolloutArea(b))}
@@ -2404,6 +2416,8 @@ function fieldEntryBoxMatchesItem(code,item){const itemKey=normalizeText(item);c
 function fieldEntryCodeDescription(code,type){return type==='box'?(code.box_type||code.source):(code.material_type||code.box_type||code.source)}
 function fieldEntryCodeOptions(){const type=fieldEntryCodeType();const item=document.getElementById('feItem')?.value||'';const showCompleted=document.getElementById('feShowCompleted')?.checked;return fieldEntryScopedCodes().filter(c=>c.type===type&&(type!=='box'||fieldEntryBoxMatchesItem(c,item))&&(showCompleted||c.entry_status!=='done'))}
 function fieldEntryFillSelect(id,values,current=''){const el=document.getElementById(id);if(!el)return;const prev=current||el.value;el.innerHTML=values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');if(values.includes(prev))el.value=prev;else if(values.length)el.value=values[0]}
+function setFieldTeamLeaderOptions(id,current='',preserveUnknown=false){const select=document.getElementById(id);if(!select)return;const selected=String(current||select.value||'');const options=['<option value="">Select team leader</option>',...FIELD_TEAM_LEADERS.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`)];if(preserveUnknown&&selected&&!FIELD_TEAM_LEADERS.includes(selected))options.push(`<option value="${esc(selected)}">${esc(selected)} (existing)</option>`);select.innerHTML=options.join('');select.value=selected&&[...select.options].some(option=>option.value===selected)?selected:''}
+['feTeamLeader','feeTeamLeader','mapEntryTeamLeader'].forEach(id=>setFieldTeamLeaderOptions(id));
 function fieldEntryStockMaterialMatches(balance,item,material){const target=normalizeText(material);const itemKey=normalizeText(item);const productRow=(wh.products||[]).find(row=>String(row.id)===String(balance.product_id));const candidates=[normalizeText(balance.product||''),normalizeText(productRow?.name||''),normalizeText(productRow?.item_detail||'')].filter(Boolean);if(candidates.includes(target))return true;const boxItem=['subbox','endbox','hubbox','xbox'].includes(itemKey);return boxItem&&candidates.some(value=>value.startsWith(itemKey))}
 function fieldEntryUpdateStockRemaining(){const input=document.getElementById('feStockRemaining');if(!input)return;const city=document.getElementById('feCity')?.value||'';const item=document.getElementById('feItem')?.value||'';const material=document.getElementById('feMaterialType')?.value||'';const cityKey=normalizeText(city);if(!cityKey||!material){input.value='0';return}const preferredWarehouse={misurata:'misuratafreezone'}[cityKey]||cityKey;let cityWarehouses=(wh.warehouses||[]).filter(warehouse=>normalizeText(warehouse.name||'')===preferredWarehouse);if(!cityWarehouses.length)cityWarehouses=(wh.warehouses||[]).filter(warehouse=>normalizeText(warehouse.location||'')===cityKey);if(!cityWarehouses.length)cityWarehouses=(wh.warehouses||[]).filter(warehouse=>normalizeText(warehouse.name||'')===cityKey);const warehouseIds=new Set(cityWarehouses.map(warehouse=>String(warehouse.id)));const total=(wh.stockBalances||[]).filter(balance=>warehouseIds.has(String(balance.warehouse_id))).filter(balance=>fieldEntryStockMaterialMatches(balance,item,material)).reduce((sum,balance)=>sum+Number(balance.quantity||0),0);input.value=Number.isInteger(total)?String(total):String(Number(total.toFixed(2)))}
 function fieldEntryDefaultMaterial(){const item=document.getElementById('feItem')?.value||'';if(normalizeText(item)==='pigtail')return 'Pigtail';if(normalizeText(item).includes('accessor'))return "S' type clamp";if(normalizeText(item).includes('cable'))return 'Single-Core Distribution Cable_50m';if(normalizeText(item).includes('hub'))return 'HubBox';if(normalizeText(item).includes('xbox'))return 'XBOX';if(normalizeText(item).includes('end'))return 'END BOX avec 8 users capacit';return 'SUB BOX avec 8 users capacit'}
