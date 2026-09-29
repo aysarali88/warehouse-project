@@ -609,3 +609,16 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(updated.notes, "After notes")
         main.clear_rollout_db_cache()
         db.close()
+
+    def test_warehouse_manager_cannot_view_mr_until_approval(self):
+        row = SimpleNamespace(status="pending_approval", warehouse=SimpleNamespace(name="Tripoli"))
+        self.assertFalse(main.user_can_view_requisition(row, "Tripoli", "Warehouse Manager"))
+
+        for status in ("approved", "signed", "issued"):
+            row.status = status
+            self.assertTrue(main.user_can_view_requisition(row, "Tripoli", "Warehouse Manager"))
+
+        row.status = "rejected"
+        self.assertFalse(main.user_can_view_requisition(row, "Tripoli", "Warehouse Manager"))
+        row.status = "pending_approval"
+        self.assertTrue(main.user_can_view_requisition(row, "Approver", "Approval"))

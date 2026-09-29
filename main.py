@@ -3412,7 +3412,7 @@ def user_can_view_requisition(row: MaterialRequisition, viewer: str = "", role: 
     if role_key in {"admin", "management"}:
         return True
     if role_key == "warehousemanager":
-        return warehouse_manager_handles_mr(viewer, row)
+        return row.status in {"approved", "signed", "issued"} and warehouse_manager_handles_mr(viewer, row)
     if role_key in {"approval", "approver"}:
         return row.status == "pending_approval" or normalize_usage_key(row.receiver_name) == viewer_key
     if role_key == "requester":
