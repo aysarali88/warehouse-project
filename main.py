@@ -7424,6 +7424,10 @@ def confirm_material_transfer(transfer_id: int, request: Request, data: Material
     return {"success": True, "transfer": transfer_to_dict(row)}
 
 
+def return_condition_is_damaged(condition: str) -> bool:
+    return normalize_usage_key(condition) in {"damage", "damaged"}
+
+
 @app.post("/api/warehouse/material-returns")
 def create_material_return(data: MaterialReturnIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Requester")
@@ -7452,10 +7456,16 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     db.add(row)
     db.flush()
 
+    stock_added_quantity = 0
+    damaged_quantity_not_stocked = 0
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key)
-        if not requester_submission:
+        damaged = return_condition_is_damaged(item.condition)
+        if damaged:
+            damaged_quantity_not_stocked += item.quantity
+        elif not requester_submission:
             locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
+            stock_added_quantity += item.quantity
         db.add(
             MaterialReturnItem(
                 return_id=row.id,
@@ -7469,7 +7479,7 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
                 remark=item.remark.strip(),
             )
         )
-        if not requester_submission:
+        if not requester_submission and not damaged:
             db.add(
                 StockMovement(
                     program=program_key,
@@ -7493,7 +7503,13 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     )
     db.commit()
     db.refresh(row)
-    return {"success": True, "return_number": row.return_number, "return": material_return_to_dict(row)}
+    return {
+        "success": True,
+        "return_number": row.return_number,
+        "return": material_return_to_dict(row),
+        "stock_added_quantity": stock_added_quantity,
+        "damaged_quantity_not_stocked": damaged_quantity_not_stocked,
+    }
 
 
 @app.post("/api/warehouse/material-returns/{return_id}/approve")
@@ -7514,9 +7530,15 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     require_warehouse_access(request, db, row.warehouse_id, program_key)
 
     actor = request_actor(request)
+    stock_added_quantity = 0
+    damaged_quantity_not_stocked = 0
     for item in row.items:
         require_product(db, item.product_id, program_key)
+        if return_condition_is_damaged(item.condition):
+            damaged_quantity_not_stocked += item.quantity
+            continue
         locked_stock_balance(db, row.warehouse_id, item.product_id, program_key).quantity += item.quantity
+        stock_added_quantity += item.quantity
         db.add(
             StockMovement(
                 program=program_key,
@@ -7535,7 +7557,12 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     log_audit(db, "approve_material_return", "material_return", row.return_number, actor, data.model_dump())
     db.commit()
     db.refresh(row)
-    return {"success": True, "return": material_return_to_dict(row)}
+    return {
+        "success": True,
+        "return": material_return_to_dict(row),
+        "stock_added_quantity": stock_added_quantity,
+        "damaged_quantity_not_stocked": damaged_quantity_not_stocked,
+    }
 
 
 @app.post("/api/warehouse/material-returns/{return_id}/reject")

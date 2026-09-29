@@ -139,9 +139,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         db = SessionLocal()
         warehouse = Warehouse(name="Returns Test WH")
         product = Product(sku="RETURN-TEST", name="Return test material")
-        db.add_all([warehouse, product])
+        damaged_product = Product(sku="RETURN-DAMAGED-APPROVAL-TEST", name="Damaged approval test material")
+        db.add_all([warehouse, product, damaged_product])
         db.flush()
-        db.add(StockBalance(warehouse_id=warehouse.id, product_id=product.id, quantity=10))
+        db.add_all([
+            StockBalance(warehouse_id=warehouse.id, product_id=product.id, quantity=10),
+            StockBalance(warehouse_id=warehouse.id, product_id=damaged_product.id, quantity=20),
+        ])
         db.commit()
 
         requester_request = SimpleNamespace(
@@ -151,7 +155,10 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             main.MaterialReturnIn(
                 warehouse_id=warehouse.id,
                 returned_by="Requester",
-                items=[main.MaterialReturnItemIn(product_id=product.id, quantity=3)],
+                items=[
+                    main.MaterialReturnItemIn(product_id=product.id, quantity=3, condition="Good"),
+                    main.MaterialReturnItemIn(product_id=damaged_product.id, quantity=4, condition="Damaged"),
+                ],
             ),
             requester_request,
             db,
@@ -163,15 +170,62 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         manager_request = SimpleNamespace(
             state=SimpleNamespace(current_user=SimpleNamespace(role="Warehouse Manager", name="Warehouse Manager", username="manager", warehouse_name=warehouse.name))
         )
-        confirmed = main.approve_material_return(
+        approval_result = main.approve_material_return(
             pending["id"],
             main.MaterialRequisitionActionIn(actor="Warehouse Manager"),
             manager_request,
             db,
-        )["return"]
+        )
+        confirmed = approval_result["return"]
         self.assertEqual(confirmed["status"], "confirmed")
+        self.assertEqual(approval_result["stock_added_quantity"], 3)
+        self.assertEqual(approval_result["damaged_quantity_not_stocked"], 4)
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 13)
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=damaged_product.id).one().quantity, 20)
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="return_in").count(), 1)
+        db.close()
+
+    def test_damaged_return_is_recorded_but_never_added_to_stock(self):
+        route = next(
+            route for route in main.app.routes
+            if getattr(route, "path", None) == "/api/warehouse/material-returns"
+            and "POST" in getattr(route, "methods", set())
+        )
+        self.assertIs(route.endpoint, main.create_material_return)
+        db = SessionLocal()
+        warehouse = Warehouse(name="Damaged Returns Test WH")
+        good_product = Product(sku="RETURN-GOOD-TEST", name="Good return test material")
+        damaged_product = Product(sku="RETURN-DAMAGED-TEST", name="Damaged return test material")
+        db.add_all([warehouse, good_product, damaged_product])
+        db.flush()
+        db.add_all([
+            StockBalance(warehouse_id=warehouse.id, product_id=good_product.id, quantity=10),
+            StockBalance(warehouse_id=warehouse.id, product_id=damaged_product.id, quantity=20),
+        ])
+        db.commit()
+
+        manager_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Warehouse Manager", name="Manager", username="manager", warehouse_name=warehouse.name))
+        )
+        result = main.create_material_return(
+            main.MaterialReturnIn(
+                warehouse_id=warehouse.id,
+                returned_by="Field team",
+                items=[
+                    main.MaterialReturnItemIn(product_id=good_product.id, quantity=3, condition="Good"),
+                    main.MaterialReturnItemIn(product_id=damaged_product.id, quantity=4, condition="Damaged"),
+                ],
+            ),
+            manager_request,
+            db,
+        )
+        return_row = result["return"]
+        self.assertEqual(result["stock_added_quantity"], 3)
+        self.assertEqual(result["damaged_quantity_not_stocked"], 4)
+        self.assertEqual(len(return_row["items"]), 2)
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=good_product.id).one().quantity, 13)
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=damaged_product.id).one().quantity, 20)
+        self.assertEqual(db.query(StockMovement).filter_by(reference=return_row["return_number"], movement_type="return_in").count(), 1)
         db.close()
 
     def test_receiving_warehouse_can_return_approved_transfer_without_stock_movement(self):
