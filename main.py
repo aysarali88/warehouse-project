@@ -2006,6 +2006,19 @@ def rollout_code_key(value) -> str:
     return re.sub(r"[^A-Z0-9]+", "", text_value)
 
 
+def retired_hay_andalus_z1_box(row: dict) -> bool:
+    area_key = rollout_norm(first_value(row, "Area", "area", default=""))
+    zone_key = rollout_norm(first_value(row, "Zone", "zone", default=""))
+    z1_keys = {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}
+    if area_key not in z1_keys and zone_key not in z1_keys:
+        return False
+    xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", "xbox", default=""))
+    code = rollout_code_key(first_value(row, "Box code", "box_code", default=""))
+    return (
+        xbox == "X3" and (code in {f"H8L3S{sequence}" for sequence in range(1, 5)} or code == "H9L2S4")
+    ) or (xbox == "X4" and code == "H2L4S3")
+
+
 def rollout_entry_mode(data: dict) -> str:
     text_value = " ".join(
         str(first_value(data, "code_type", "type", "item", "Item", "material type", "Material Type", "material_type", default="") or "")
@@ -2037,6 +2050,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         logger.warning("Fiber map reference not found: %s", FIBER_MAP_REFERENCE_PATH)
     except Exception:
         logger.exception("Could not read fiber map reference")
+    data["boxes"] = [row for row in data["boxes"] if not retired_hay_andalus_z1_box(row)]
     if db is None:
         return data
     for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
@@ -2045,7 +2059,8 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         except (TypeError, ValueError):
             logger.warning("Ignoring unreadable saved fiber map for %s", saved_area.area)
             continue
-        data["boxes"].extend(payload.get("boxes") or [])
+        boxes = [row for row in payload.get("boxes") or [] if not retired_hay_andalus_z1_box(row)]
+        data["boxes"].extend(boxes)
         data["routes"].extend(payload.get("routes") or [])
         data["area_plans"].append(
             {
@@ -2053,10 +2068,10 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
                 "area": saved_area.area,
                 "start": saved_area.start_date,
                 "end": saved_area.end_date,
-                "targetSubEndBox": len(payload.get("boxes") or []),
-                "targetHubBox": len({(rollout_xbox_key(row.get("Related to XBOX")), str(row.get("Hub") or "").strip()) for row in payload.get("boxes") or [] if row.get("Hub")}),
-                "targetXbox": len({rollout_xbox_key(row.get("Related to XBOX")) for row in payload.get("boxes") or [] if row.get("Related to XBOX")}),
-                "targetCableMeters": sum(safe_float(row.get("Cable length m")) for row in payload.get("boxes") or [])
+                "targetSubEndBox": len(boxes),
+                "targetHubBox": len({(rollout_xbox_key(row.get("Related to XBOX")), str(row.get("Hub") or "").strip()) for row in boxes if row.get("Hub")}),
+                "targetXbox": len({rollout_xbox_key(row.get("Related to XBOX")) for row in boxes if row.get("Related to XBOX")}),
+                "targetCableMeters": sum(safe_float(row.get("Cable length m")) for row in boxes)
                 + sum(safe_float(row.get("Cable length m")) for row in payload.get("routes") or []),
                 "targetUsers": saved_area.target_users,
                 "dynamic": True,

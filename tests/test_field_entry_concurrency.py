@@ -86,6 +86,25 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(main.canonical_mr_history_area("Albera"), "Albera")
         self.assertEqual(main.canonical_mr_history_area("Hay Al Andalus Z2"), "Hay Al Andalus Z2")
 
+    def test_retired_zone_one_boxes_are_scoped_to_requested_xboxes_and_codes(self):
+        self.assertTrue(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus", "Zone": "Hay Andalus ZONE 1",
+            "XBOX": "X-BOX3", "Box code": "H8-L3-S1",
+        }))
+        self.assertTrue(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus Z1", "XBOX": "X3", "Box code": "H9-L2-S4",
+        }))
+        self.assertTrue(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Andalus Zone 1", "XBOX": "X4", "Box code": "H2-L4-S3",
+        }))
+        self.assertFalse(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus", "Zone": "Hay Andalus ZONE 2",
+            "XBOX": "X4", "Box code": "H2-L4-S3",
+        }))
+        self.assertFalse(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus Z1", "XBOX": "X3", "Box code": "H8-L2-S1",
+        }))
+
     def test_hub_codes_are_available_from_map_parent_hub_field(self):
         refs = main.rollout_code_reference_rows()
         hubs = [
