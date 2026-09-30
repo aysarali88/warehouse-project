@@ -1606,8 +1606,8 @@ const FIELD_TEAM_LEADERS=[
   'مصطفى يوسف الهبالي',
   'محمد رجب دعمان'
 ];
-function canonicalRolloutArea(value){const key=normalizeText(value);return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':String(value||'').trim()}
-function displayRolloutArea(value){const area=canonicalRolloutArea(value);return area==='awladbaeoo'?'Awlad Baeoo':area}
+function canonicalRolloutArea(value){const key=normalizeText(value);if(['berawtaleem','albera'].includes(key))return'albera';return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':String(value||'').trim()}
+function displayRolloutArea(value){const area=canonicalRolloutArea(value);return area==='awladbaeoo'?'Awlad Baeoo':area==='albera'?'Albera':area}
 function sameRolloutDashboardArea(a,b){return normalizeText(canonicalRolloutArea(a))===normalizeText(canonicalRolloutArea(b))}
 const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
 const ROLLOUT_DASHBOARD_PLAN=[

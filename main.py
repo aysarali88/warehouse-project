@@ -3009,7 +3009,7 @@ def scan_log_to_dict(row: MaterialScanLog) -> dict:
         "material_requisition_id": row.material_requisition_id,
         "mr_order": requisition.order_number if requisition else "Stock Scan",
         "mr_status": requisition.status if requisition else row.status,
-        "site_id": requisition.site_id if requisition else "",
+        "site_id": canonical_mr_history_area(requisition.site_id) if requisition else "",
         "site_address": requisition.site_address if requisition else "",
         "warehouse_id": row.warehouse_id,
         "warehouse": warehouse.name if warehouse else "",
@@ -3089,7 +3089,7 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
         "warehouse": row.warehouse.name if row.warehouse else "",
         "entity": row.entity,
         "project_name": row.project_name,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "wo_no": row.wo_no,
         "product_domain": row.product_domain,
@@ -3382,7 +3382,7 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
         "warehouse": row.warehouse.name if row.warehouse else "",
         "entity": row.entity,
         "project_name": row.project_name,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "wo_no": row.wo_no,
         "product_domain": row.product_domain,
@@ -3451,7 +3451,10 @@ def canonical_area_name(value: str) -> str:
 
 
 def canonical_mr_history_area(value: str) -> str:
-    return canonical_area_name(value)
+    text_value = str(value or "").strip()
+    if normalize_usage_key(text_value) in {"berawtaleem", "albera"}:
+        return "Albera"
+    return canonical_area_name(text_value)
 
 
 def requisition_history_row_to_dict(row: MaterialRequisition) -> dict:
@@ -4527,9 +4530,9 @@ def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session
 def resolved_site_name(db: Session, program: str, site_value: str) -> str:
     value = str(site_value or "").strip()
     if not value.isdigit():
-        return value
+        return canonical_mr_history_area(value)
     site = db.query(Site).filter(Site.id == int(value), Site.program == normalize_program(program)).first()
-    return site.name if site else value
+    return canonical_mr_history_area(site.name if site else value)
 
 
 @app.post("/api/warehouse/warehouses")
