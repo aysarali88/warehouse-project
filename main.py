@@ -2019,6 +2019,17 @@ def retired_hay_andalus_z1_box(row: dict) -> bool:
     ) or (xbox == "X4" and code in {"H2L4S3", "H8L2S4"})
 
 
+def retired_bera_w_taleem_x1_box(row: dict) -> bool:
+    area = rollout_norm(first_value(row, "Area", "area", default=""))
+    zone = rollout_norm(first_value(row, "Zone", "zone", default=""))
+    if area not in {"berawtaleem", "albera"} and zone not in {"berawtaleem", "albera"}:
+        return False
+    if rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", "xbox", default="")) != "X1":
+        return False
+    code = rollout_code_key(first_value(row, "Box code", "box_code", default=""))
+    return code == "H5L1S4" or code in {f"H5L4S{sequence}" for sequence in range(1, 5)}
+
+
 def add_hay_andalus_z1_x4_box(data: dict) -> None:
     code, hub, splitter, length = "H8-L1-S3", 8, 3, 80
     z1_keys = {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}
@@ -2128,7 +2139,10 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         logger.warning("Fiber map reference not found: %s", FIBER_MAP_REFERENCE_PATH)
     except Exception:
         logger.exception("Could not read fiber map reference")
-    data["boxes"] = [row for row in data["boxes"] if not retired_hay_andalus_z1_box(row)]
+    data["boxes"] = [
+        row for row in data["boxes"]
+        if not retired_hay_andalus_z1_box(row) and not retired_bera_w_taleem_x1_box(row)
+    ]
     if db is None:
         add_hay_andalus_z1_x4_box(data)
         add_bera_w_taleem_x2_boxes(data)
@@ -2139,7 +2153,10 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         except (TypeError, ValueError):
             logger.warning("Ignoring unreadable saved fiber map for %s", saved_area.area)
             continue
-        boxes = [row for row in payload.get("boxes") or [] if not retired_hay_andalus_z1_box(row)]
+        boxes = [
+            row for row in payload.get("boxes") or []
+            if not retired_hay_andalus_z1_box(row) and not retired_bera_w_taleem_x1_box(row)
+        ]
         data["boxes"].extend(boxes)
         data["routes"].extend(payload.get("routes") or [])
         data["area_plans"].append(

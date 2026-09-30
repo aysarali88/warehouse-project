@@ -76,7 +76,10 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         db.close()
 
     def test_andalus_zone_two_reference_matches_legacy_area(self):
-        refs = [row for row in main.rollout_code_reference_rows() if row["xbox"] == "X4"]
+        refs = [
+            row for row in main.rollout_code_reference_rows()
+            if row["xbox"] == "X4" and row["area"] == "Hay Al Andalus Zone 2"
+        ]
         self.assertTrue(refs)
         self.assertTrue(all(row["area"] == "Hay Al Andalus Zone 2" for row in refs))
         self.assertEqual(main.rollout_area_key("Hay Al Andalus"), main.rollout_area_key("Hay Al Andalus Zone 2"))
@@ -134,6 +137,18 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(len(reference["boxes"]), 2)
         self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 12)
         self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 680)
+
+    def test_bera_w_taleem_x1_retired_boxes_are_scoped_to_requested_codes(self):
+        for code in ("H5-L1-S4", "H5-L4-S1", "H5-L4-S2", "H5-L4-S3", "H5-L4-S4"):
+            self.assertTrue(main.retired_bera_w_taleem_x1_box({
+                "Area": "Bera W Taleem", "Related to XBOX": "X1", "Box code": code,
+            }))
+        self.assertFalse(main.retired_bera_w_taleem_x1_box({
+            "Area": "Bera W Taleem", "Related to XBOX": "X2", "Box code": "H5-L4-S1",
+        }))
+        self.assertFalse(main.retired_bera_w_taleem_x1_box({
+            "Area": "Another Area", "Related to XBOX": "X1", "Box code": "H5-L4-S1",
+        }))
 
     def test_hub_codes_are_available_from_map_parent_hub_field(self):
         refs = main.rollout_code_reference_rows()
