@@ -97,6 +97,9 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertTrue(main.retired_hay_andalus_z1_box({
             "Area": "Hay Andalus Zone 1", "XBOX": "X4", "Box code": "H2-L4-S3",
         }))
+        self.assertTrue(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus Z1", "XBOX": "X4", "Box code": "H8-L2-S4",
+        }))
         self.assertFalse(main.retired_hay_andalus_z1_box({
             "Area": "Hay Al Andalus", "Zone": "Hay Andalus ZONE 2",
             "XBOX": "X4", "Box code": "H2-L4-S3",
@@ -104,6 +107,21 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertFalse(main.retired_hay_andalus_z1_box({
             "Area": "Hay Al Andalus Z1", "XBOX": "X3", "Box code": "H8-L2-S1",
         }))
+        self.assertFalse(main.retired_hay_andalus_z1_box({
+            "Area": "Hay Al Andalus Zone 2", "XBOX": "X4", "Box code": "H8-L2-S4",
+        }))
+
+    def test_hay_andalus_z1_x4_adds_requested_box_and_cable(self):
+        reference = {"boxes": [], "area_plans": [{"area": "Hay Al Andalus Z1", "targetSubEndBox": 10, "targetCableMeters": 500}]}
+        main.add_hay_andalus_z1_x4_box(reference)
+
+        self.assertEqual(len(reference["boxes"]), 1)
+        box = reference["boxes"][0]
+        self.assertEqual(box["Related to XBOX"], "X4")
+        self.assertEqual(box["Box code"], "H8-L1-S3")
+        self.assertEqual(box["Cable length m"], 80)
+        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 11)
+        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 580)
 
     def test_bera_w_taleem_x2_boxes_are_added_once_with_requested_cable_lengths(self):
         reference = {"boxes": [], "area_plans": [{"area": "Bera W Taleem", "targetSubEndBox": 10, "targetCableMeters": 500}]}
