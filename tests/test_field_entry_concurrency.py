@@ -105,6 +105,18 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             "Area": "Hay Al Andalus Z1", "XBOX": "X3", "Box code": "H8-L2-S1",
         }))
 
+    def test_bera_w_taleem_x2_boxes_are_added_once_with_requested_cable_lengths(self):
+        reference = {"boxes": [], "area_plans": [{"area": "Bera W Taleem", "targetSubEndBox": 10, "targetCableMeters": 500}]}
+        main.add_bera_w_taleem_x2_boxes(reference)
+        main.add_bera_w_taleem_x2_boxes(reference)
+
+        boxes = {row["Box code"]: row for row in reference["boxes"]}
+        self.assertEqual(boxes["H4-L1-S3"]["Cable length m"], 80)
+        self.assertEqual(boxes["H2-L1-S3"]["Cable length m"], 100)
+        self.assertEqual(len(reference["boxes"]), 2)
+        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 12)
+        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 680)
+
     def test_hub_codes_are_available_from_map_parent_hub_field(self):
         refs = main.rollout_code_reference_rows()
         hubs = [

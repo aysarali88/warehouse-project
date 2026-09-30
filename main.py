@@ -2019,6 +2019,47 @@ def retired_hay_andalus_z1_box(row: dict) -> bool:
     ) or (xbox == "X4" and code == "H2L4S3")
 
 
+def add_bera_w_taleem_x2_boxes(data: dict) -> None:
+    additions = (("H4-L1-S3", 4, 3, 80), ("H2-L1-S3", 2, 3, 100))
+    existing = {
+        (
+            rollout_area_key(first_value(row, "Zone", "Area", default="")),
+            rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")),
+            rollout_code_key(first_value(row, "Box code", default="")),
+        )
+        for row in data.get("boxes") or []
+    }
+    area_key = rollout_area_key("Bera W Taleem")
+    for code, hub, splitter, length in additions:
+        key = (area_key, "X2", rollout_code_key(code))
+        if key in existing:
+            continue
+        data.setdefault("boxes", []).append(
+            {
+                "Area": "Bera W Taleem",
+                "Zone": "Bera W Taleem",
+                "City": "Misurata",
+                "Related to XBOX": "X2",
+                "XBOX": "X-BOX02",
+                "Part": "x2-part01",
+                "Hub": f"H{hub}",
+                "Line": 1,
+                "Splitter": splitter,
+                "Box code": code,
+                "Box type": "SUB BOX",
+                "Real length m": "",
+                "Cable length m": length,
+                "Material type": f"Single-Core Distribution Cable_{length}m",
+                "dB": "",
+            }
+        )
+        for plan in data.get("area_plans") or []:
+            if rollout_area_key(plan.get("area")) == area_key:
+                plan["targetSubEndBox"] = int(plan.get("targetSubEndBox") or 0) + 1
+                plan["targetCableMeters"] = safe_float(plan.get("targetCableMeters")) + length
+        existing.add(key)
+
+
 def rollout_entry_mode(data: dict) -> str:
     text_value = " ".join(
         str(first_value(data, "code_type", "type", "item", "Item", "material type", "Material Type", "material_type", default="") or "")
@@ -2052,6 +2093,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         logger.exception("Could not read fiber map reference")
     data["boxes"] = [row for row in data["boxes"] if not retired_hay_andalus_z1_box(row)]
     if db is None:
+        add_bera_w_taleem_x2_boxes(data)
         return data
     for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
         try:
@@ -2084,6 +2126,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         .order_by(FiberMapSchematic.area, FiberMapSchematic.xbox, FiberMapSchematic.sheet_name)
         .all()
     ]
+    add_bera_w_taleem_x2_boxes(data)
     return data
 
 
