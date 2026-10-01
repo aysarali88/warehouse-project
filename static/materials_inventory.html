@@ -910,7 +910,7 @@ body.sr-program .login-logo img{
       </div>
       <div class="workflow-lane" id="opsSnapshot"></div>
       <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
-      <div class="viz-panel damage-inventory-panel"><h3>Damaged / Quarantine (Virtual)</h3><div id="damagedStockOverview"></div></div>
+      <div class="viz-panel damage-inventory-panel"><h3>Damage Warehouse</h3><div id="damagedStockOverview"></div></div>
       <div class="viz-grid">
         <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
         <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
@@ -1344,8 +1344,7 @@ body.sr-program .login-logo img{
       </div>
       <div id="stockBalancesTable"></div>
       <section class="damage-inventory-panel" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
-        <h3>Virtual Damage Warehouses</h3>
-        <div class="hint" style="margin-bottom:10px">Quarantined stock is shown separately and is not available for issue or transfer.</div>
+        <div class="top" style="margin-bottom:10px"><div><h3>Damage Warehouse</h3><div class="hint">All confirmed damaged returns, grouped by material. This stock cannot be issued or transferred.</div></div><button class="btn soft admin-only" type="button" onclick="reconcileDamageInventory()">Import confirmed returns</button></div>
         <div id="virtualDamageInventoryTable"></div>
       </section>
     </div>
@@ -1801,6 +1800,16 @@ function api(path,opts={}){
     if(activeButton&&activeButton.isConnected){activeButton.disabled=false;activeButton.removeAttribute('aria-busy')}
   });
 }
+async function reconcileDamageInventory(){
+  if(!isAdmin())return toast('Admin only');
+  if(!confirm('Import confirmed historical returns marked Damage into the central Damage warehouse? Pending and rejected returns will be skipped.'))return;
+  try{
+    const result=await api('/api/warehouse/damage-inventory/reconcile',{method:'POST',body:JSON.stringify({})});
+    const summary=`Imported ${fmt(result.migrated_lines)} return lines (${fmt(result.migrated_quantity)} units). Already in Damage: ${fmt(result.already_in_damage)}.`;
+    toast(result.duplicate_lines_requires_review?`${summary} ${fmt(result.duplicate_lines_requires_review)} duplicate lines need review.`:summary);
+    syncWarehouseLater();
+  }catch(error){toast(error.message)}
+}
 function bindScannerInput(id,handler){const input=document.getElementById(id);if(!input)return;input.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();clearTimeout(scanDebounceTimers[id]);handler()}});input.addEventListener('input',()=>{clearTimeout(scanDebounceTimers[id]);const value=input.value.trim();if(value.length<3)return;scanDebounceTimers[id]=setTimeout(()=>handler(),650)})}
 function rowsTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 async function loadUsers(){try{const data=await api('/api/auth/users?program='+encodeURIComponent(normalizeProgram(currentProgram)));appUsers=data.users||[];renderUsers()}catch(e){toast(e.message)}}
@@ -1995,8 +2004,8 @@ const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||
 const whRows=[...byWh.values()].sort((a,b)=>String(a.warehouse).localeCompare(String(b.warehouse)));
 document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-summary">${whRows.map(r=>`<div class="warehouse-summary-card"><b>${esc(r.warehouse||'Unknown warehouse')}</b><div class="warehouse-summary-metrics"><div><span>Total Stock</span><strong class="total">${fmt(r.totalStock)}</strong></div><div><span>Issued WH</span><strong class="issued">${fmt(r.issued)}</strong></div><div><span>WH Remaining</span><strong class="remaining">${fmt(r.remaining)}</strong></div><div><span>Available</span><strong class="available">${fmt(r.available)}</strong></div><div><span>Reserved Pending</span><strong class="reserved">${fmt(r.reserved)}</strong></div></div></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد أرصدة</div>';
 const damaged=wh.damagedStock||{total_quantity:0,items:[],events:[]};
-document.getElementById('damagedStockOverview').innerHTML=damaged.items?.length?`<div class="status-tile warn"><span>Total quarantined</span><strong>${fmt(damaged.total_quantity)}</strong></div><div class="replenishment-table-wrap"><table class="replenishment-table"><thead><tr><th>Source Warehouse</th><th>Material</th><th>SKU / Part #</th><th>Quarantined</th><th>Unit</th></tr></thead><tbody>${damaged.items.map(r=>`<tr><td>${esc(r.source_warehouse)}</td><td>${esc(r.product)}</td><td>${esc(r.sku||'')}<br>${esc(r.part_number||'')}</td><td>${fmt(r.quantity)}</td><td>${esc(r.unit||'PCS')}</td></tr>`).join('')}</tbody></table></div><details><summary>Recent damage return references (${fmt(damaged.events?.length||0)})</summary><div class="movement-stream">${(damaged.events||[]).map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>${esc(r.reference||'Return')} · ${esc(r.product)}</b><small>${esc(r.source_warehouse)} · ${fmt(r.quantity)} · ${esc(r.note||'')}</small></div></div>`).join('')}</div></details>`:'<div class="empty-soft">No damaged stock in quarantine</div>';
-document.getElementById('virtualDamageInventoryTable').innerHTML=damaged.items?.length?rowsTable([['Virtual Warehouse','warehouse'],['Physical Source','source_warehouse'],['Material','product'],['SKU','sku'],['Part #','part_number'],['Quarantined Balance','quantity',(value)=>fmt(value)],['Unit','unit']],damaged.items):'<div class="empty-soft">No quarantined materials currently in stock.</div>';
+document.getElementById('damagedStockOverview').innerHTML=damaged.items?.length?`<div class="status-tile warn"><span>Damage warehouse · Total quantity</span><strong>${fmt(damaged.total_quantity)}</strong></div><div class="replenishment-table-wrap"><table class="replenishment-table"><thead><tr><th>Material</th><th>SKU / Part #</th><th>Quantity</th><th>Unit</th></tr></thead><tbody>${damaged.items.map(r=>`<tr><td>${esc(r.product)}</td><td>${esc(r.sku||'')}<br>${esc(r.part_number||'')}</td><td>${fmt(r.quantity)}</td><td>${esc(r.unit||'PCS')}</td></tr>`).join('')}</tbody></table></div><details><summary>Recent damage return references (${fmt(damaged.events?.length||0)})</summary><div class="movement-stream">${(damaged.events||[]).map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>${esc(r.reference||'Return')} · ${esc(r.product)}</b><small>${esc(r.source_warehouse)} · ${fmt(r.quantity)} · ${esc(r.note||'')}</small></div></div>`).join('')}</div></details>`:'<div class="empty-soft">Damage warehouse is currently empty.</div>';
+document.getElementById('virtualDamageInventoryTable').innerHTML=damaged.items?.length?rowsTable([['Warehouse','warehouse'],['Material','product'],['SKU','sku'],['Part #','part_number'],['Quantity','quantity',(value)=>fmt(value)],['Unit','unit']],damaged.items):'<div class="empty-soft">Damage warehouse is currently empty.</div>';
 const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
 document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="movement-stream">${focusRows.map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
 const receiptRows=(wh.receipts||[]).slice(0,5);

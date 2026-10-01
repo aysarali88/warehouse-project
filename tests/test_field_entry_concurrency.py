@@ -318,8 +318,54 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertNotIn(damage_move.warehouse_id, [item["id"] for item in main.list_warehouses(program="FTTH", db=db)["warehouses"]])
         report = main.virtual_damage_report(manager_request, db, "FTTH")
         self.assertEqual(report["total_quantity"], 4)
-        self.assertEqual(report["items"][0]["source_warehouse"], warehouse.name)
+        self.assertEqual(report["items"][0]["warehouse"], "Damage")
         self.assertEqual(report["events"][0]["reference"], return_row["return_number"])
+        db.close()
+
+    def test_historical_damaged_returns_import_once_into_central_damage_warehouse(self):
+        from models import MaterialReturn, MaterialReturnItem
+
+        db = SessionLocal()
+        warehouse = Warehouse(name="Historical Damage Source")
+        product = Product(sku="HISTORICAL-DAMAGE-TEST", name="Historical damaged material", unit="PCS")
+        db.add_all([warehouse, product])
+        db.flush()
+        return_row = MaterialReturn(
+            program="FTTH",
+            return_number="RN-HISTORICAL-DAMAGE-TEST",
+            warehouse_id=warehouse.id,
+            status="confirmed",
+            created_by="test",
+        )
+        db.add(return_row)
+        db.flush()
+        line = MaterialReturnItem(
+            return_id=return_row.id,
+            product_id=product.id,
+            quantity=5,
+            condition="Damaged",
+        )
+        db.add(line)
+        db.commit()
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"))
+        )
+        first = main.reconcile_damaged_returns(admin_request, program="FTTH", db=db)
+        second = main.reconcile_damaged_returns(admin_request, program="FTTH", db=db)
+
+        damage = db.query(Warehouse).filter_by(program="FTTH", name="Damage").one()
+        balance = db.query(StockBalance).filter_by(
+            program="FTTH", warehouse_id=damage.id, product_id=product.id,
+        ).one()
+        self.assertEqual(first["migrated_lines"], 1)
+        self.assertEqual(first["migrated_quantity"], 5)
+        self.assertEqual(second["migrated_lines"], 0)
+        self.assertGreaterEqual(second["already_in_damage"], 1)
+        self.assertEqual(balance.quantity, 5)
+        self.assertEqual(db.query(StockMovement).filter_by(
+            program="FTTH", movement_type="damage_in", source_item_id=line.id,
+        ).count(), 1)
         db.close()
 
     def test_receiving_warehouse_can_return_approved_transfer_without_stock_movement(self):
