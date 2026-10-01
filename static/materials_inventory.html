@@ -910,7 +910,7 @@ body.sr-program .login-logo img{
       </div>
       <div class="workflow-lane" id="opsSnapshot"></div>
       <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
-      <div class="viz-panel warehouse-work"><h3>Damaged / Quarantine (Virtual)</h3><div id="damagedStockOverview"></div></div>
+      <div class="viz-panel damage-inventory-panel"><h3>Damaged / Quarantine (Virtual)</h3><div id="damagedStockOverview"></div></div>
       <div class="viz-grid">
         <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
         <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
@@ -2010,7 +2010,7 @@ function exportInventoryExcel(){const q=authQueryParams();q.set('program',curren
 function canEditMaterialVendor(){return ['admin','management','warehousemanager'].includes(roleKey())}
 function inventoryVendorCell(row){const vendor=String(row.vendor||'');if(!canEditMaterialVendor())return esc(vendor||'-');return `<div class="row-actions"><input data-inventory-vendor value="${esc(vendor)}" aria-label="Vendor for ${esc(row.sku)}" placeholder="Vendor" style="width:150px"><button class="btn soft" type="button" onclick="saveInventoryVendor(this,${Number(row.product_id||0)})">Save</button></div>`}
 async function saveInventoryVendor(button,productId){const input=button.closest('td')?.querySelector('[data-inventory-vendor]');if(!input||!productId)return;button.disabled=true;try{const data=await api(`/api/warehouse/products/${productId}/vendor`,{method:'PATCH',body:JSON.stringify({program:currentProgram,vendor:input.value})});const saved=data.product||{};wh.products=(wh.products||[]).map(p=>String(p.id)===String(productId)?{...p,vendor:saved.vendor||''}:p);wh.stockUsage=(wh.stockUsage||[]).map(row=>String(row.product_id)===String(productId)?{...row,vendor:saved.vendor||''}:row);renderWarehouse();toast('Vendor saved')}catch(error){toast(error.message||'Could not save vendor')}finally{button.disabled=false}}
-function renderWarehouse(){renderExecutiveDashboard();animateDashboardSurface(document.getElementById('dashboard'));renderWorkflowQueues();
+function renderWarehouse(){const damagePanel=document.querySelector('.damage-inventory-panel');if(damagePanel)damagePanel.classList.toggle('hidden',!(isAdmin()||isManagement()||canManageWarehouse()));renderExecutiveDashboard();animateDashboardSurface(document.getElementById('dashboard'));renderWorkflowQueues();
 const myMovements=(wh.movements||[]).filter(userOwnsMovement);
 const myAudit=(wh.audit||[]).filter(userOwnsAudit);
 const stockWhFilter=document.getElementById('stockWhFilter');
