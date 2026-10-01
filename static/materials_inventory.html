@@ -827,6 +827,14 @@ body.sr-program .login-logo img{
 <style>
 .replenishment-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}.replenishment-heading h3{margin:0}
 </style>
+<style>
+#mrItemsCard{display:flex;flex-direction:column;min-height:0}
+#mrLines{flex:1 1 auto;min-height:0;max-height:calc(100vh - 270px);overflow-y:auto;overflow-x:hidden}
+#mrLines .mr-line{grid-template-columns:minmax(0,1.5fr) minmax(70px,90px) minmax(0,1fr) 42px;min-width:0}
+#mrLines .field{min-width:0}
+#mrLines input,#mrLines select{width:100%;min-width:0}
+@media(max-width:600px){#mrLines .mr-line{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
 </head>
 <body>
 <div class="program-screen" id="programScreen">
@@ -1159,7 +1167,7 @@ body.sr-program .login-logo img{
           <div class="field full"><label>Requester Comment</label><input id="mrRequesterComment" placeholder="Material to be sent to Misurata-(Maqawba )"></div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="mrItemsCard">
         <h3>بنود المواد</h3>
         <div id="mrLines" class="mr-list"></div>
         <button class="btn soft" onclick="addMrLine()">إضافة بند</button>
