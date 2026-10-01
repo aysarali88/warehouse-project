@@ -235,6 +235,10 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(pending["status"], "pending_warehouse")
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 10)
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"]).count(), 0)
+        self.assertEqual(db.query(Warehouse).filter_by(
+            status=main.VIRTUAL_DAMAGE_WAREHOUSE_STATUS,
+            location=f"source_warehouse_id:{warehouse.id}",
+        ).count(), 0)
 
         manager_request = SimpleNamespace(
             state=SimpleNamespace(current_user=SimpleNamespace(role="Warehouse Manager", name="Warehouse Manager", username="manager", warehouse_name=warehouse.name))
@@ -248,13 +252,19 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         confirmed = approval_result["return"]
         self.assertEqual(confirmed["status"], "confirmed")
         self.assertEqual(approval_result["stock_added_quantity"], 3)
-        self.assertEqual(approval_result["damaged_quantity_not_stocked"], 4)
+        self.assertEqual(approval_result["damaged_quantity_quarantined"], 4)
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 13)
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=damaged_product.id).one().quantity, 20)
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="return_in").count(), 1)
+        damage_move = db.query(StockMovement).filter_by(reference=pending["return_number"], movement_type="damage_in").one()
+        self.assertEqual(damage_move.source_item_id, next(item["id"] for item in confirmed["items"] if item["condition"] == "Damaged"))
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=damage_move.warehouse_id, product_id=damaged_product.id).one().quantity, 4)
+        self.assertNotIn(damage_move.warehouse_id, [item["id"] for item in main.list_warehouses(program="FTTH", db=db)["warehouses"]])
+        with self.assertRaises(HTTPException):
+            main.require_warehouse(db, damage_move.warehouse_id)
         db.close()
 
-    def test_damaged_return_is_recorded_but_never_added_to_stock(self):
+    def test_damaged_return_is_recorded_in_virtual_quarantine_not_usable_stock(self):
         route = next(
             route for route in main.app.routes
             if getattr(route, "path", None) == "/api/warehouse/material-returns"
@@ -290,11 +300,26 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         )
         return_row = result["return"]
         self.assertEqual(result["stock_added_quantity"], 3)
-        self.assertEqual(result["damaged_quantity_not_stocked"], 4)
+        self.assertEqual(result["damaged_quantity_quarantined"], 4)
         self.assertEqual(len(return_row["items"]), 2)
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=good_product.id).one().quantity, 13)
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=damaged_product.id).one().quantity, 20)
         self.assertEqual(db.query(StockMovement).filter_by(reference=return_row["return_number"], movement_type="return_in").count(), 1)
+        damage_move = db.query(StockMovement).filter_by(reference=return_row["return_number"], movement_type="damage_in").one()
+        self.assertEqual(damage_move.source_item_id, next(item["id"] for item in return_row["items"] if item["condition"] == "Damaged"))
+        self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=damage_move.warehouse_id, product_id=damaged_product.id).one().quantity, 4)
+        balances = main.list_stock_balances(manager_request, program="FTTH", db=db)["balances"]
+        usage = main.list_stock_usage(manager_request, program="FTTH", db=db)["usage"]
+        movements = main.list_stock_movements(manager_request, program="FTTH", db=db)["movements"]
+        main.clear_rollout_db_cache()
+        self.assertTrue(all(balance["warehouse_id"] == warehouse.id for balance in balances))
+        self.assertTrue(all(row["warehouse_id"] == warehouse.id for row in usage))
+        self.assertNotIn("damage_in", [movement["type"] for movement in movements])
+        self.assertNotIn(damage_move.warehouse_id, [item["id"] for item in main.list_warehouses(program="FTTH", db=db)["warehouses"]])
+        report = main.virtual_damage_report(manager_request, db, "FTTH")
+        self.assertEqual(report["total_quantity"], 4)
+        self.assertEqual(report["items"][0]["source_warehouse"], warehouse.name)
+        self.assertEqual(report["events"][0]["reference"], return_row["return_number"])
         db.close()
 
     def test_receiving_warehouse_can_return_approved_transfer_without_stock_movement(self):

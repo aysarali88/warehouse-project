@@ -65,6 +65,7 @@ from models import (
 
 WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
+VIRTUAL_DAMAGE_WAREHOUSE_STATUS = "virtual_damage"
 ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
 ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
@@ -1565,9 +1566,104 @@ def allowed_warehouse_ids(request: Request, db: Session, program: str) -> list[i
     scope = user.warehouse_name or user.username or user.name
     return [
         row.id
-        for row in db.query(Warehouse).filter(Warehouse.program == normalize_program(program)).all()
+        for row in db.query(Warehouse).filter(
+            Warehouse.program == normalize_program(program),
+            or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+        ).all()
         if warehouse_scope_matches(scope, row.name)
     ]
+
+
+def regular_warehouse_ids_query(db: Session, program: str):
+    return db.query(Warehouse.id).filter(
+        Warehouse.program == normalize_program(program),
+        or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+    )
+
+
+def get_or_create_virtual_damage_warehouse(db: Session, program: str, source: Warehouse) -> Warehouse:
+    locked_source = db.query(Warehouse).filter(
+        Warehouse.id == source.id,
+        Warehouse.program == normalize_program(program),
+    ).with_for_update().first()
+    if locked_source is None or locked_source.status == VIRTUAL_DAMAGE_WAREHOUSE_STATUS:
+        raise HTTPException(status_code=400, detail="A physical source warehouse is required")
+    name = f"Damaged / Quarantine - {locked_source.name} (Virtual)"
+    row = db.query(Warehouse).filter(
+        Warehouse.program == normalize_program(program),
+        Warehouse.name == name,
+        Warehouse.status == VIRTUAL_DAMAGE_WAREHOUSE_STATUS,
+    ).first()
+    if row is None:
+        row = Warehouse(
+            program=normalize_program(program),
+            name=name,
+            location=f"source_warehouse_id:{locked_source.id}",
+            status=VIRTUAL_DAMAGE_WAREHOUSE_STATUS,
+        )
+        db.add(row)
+        db.flush()
+    return row
+
+
+def virtual_damage_report(request: Request, db: Session, program: str) -> dict:
+    user = current_user(request)
+    role = user.role.strip().lower()
+    if role not in {"admin", "management", "warehouse manager"}:
+        return {"total_quantity": 0, "items": [], "events": []}
+    virtual_rows = db.query(Warehouse).filter(
+        Warehouse.program == normalize_program(program),
+        Warehouse.status == VIRTUAL_DAMAGE_WAREHOUSE_STATUS,
+    ).all()
+    sources = {}
+    for row in virtual_rows:
+        match = re.fullmatch(r"source_warehouse_id:(\d+)", row.location or "")
+        source_id = int(match.group(1)) if match else None
+        source = db.get(Warehouse, source_id) if source_id else None
+        if source and (role != "warehouse manager" or warehouse_scope_matches(user.warehouse_name or user.username or user.name, source.name)):
+            sources[row.id] = (row, source)
+    if not sources:
+        return {"total_quantity": 0, "items": [], "events": []}
+    balances = db.query(StockBalance).options(joinedload(StockBalance.product)).filter(
+        StockBalance.program == normalize_program(program),
+        StockBalance.warehouse_id.in_(list(sources)),
+        StockBalance.quantity > 0,
+    ).all()
+    totals = {}
+    for balance in balances:
+        virtual, source = sources[balance.warehouse_id]
+        key = (source.id, balance.product_id)
+        item = totals.setdefault(key, {
+            "source_warehouse": source.name,
+            "warehouse": virtual.name,
+            "product": product_display_name(balance.product),
+            "sku": balance.product.sku,
+            "part_number": product_part_number(balance.product.sku, balance.product.part_number),
+            "unit": balance.product.unit or "PCS",
+            "quantity": 0,
+        })
+        item["quantity"] += float(balance.quantity or 0)
+    events = db.query(StockMovement).options(
+        joinedload(StockMovement.product), joinedload(StockMovement.warehouse),
+    ).filter(
+        StockMovement.program == normalize_program(program),
+        StockMovement.movement_type == "damage_in",
+        StockMovement.warehouse_id.in_(list(sources)),
+    ).order_by(StockMovement.id.desc()).limit(50).all()
+    return {
+        "total_quantity": sum(item["quantity"] for item in totals.values()),
+        "items": sorted(totals.values(), key=lambda item: (item["source_warehouse"], item["product"])),
+        "events": [{
+            "date": row.created_at.isoformat() if row.created_at else "",
+            "reference": row.reference,
+            "source_item_id": row.source_item_id,
+            "source_warehouse": sources[row.warehouse_id][1].name,
+            "product": product_display_name(row.product),
+            "sku": row.product.sku,
+            "quantity": float(row.quantity or 0),
+            "note": row.note or "",
+        } for row in events],
+    }
 
 
 def require_program_record(row, program: str, label: str):
@@ -1775,7 +1871,7 @@ def require_product(db: Session, product_id: int, program: str = DEFAULT_PROGRAM
 
 def require_warehouse(db: Session, warehouse_id: int, program: str = DEFAULT_PROGRAM) -> Warehouse:
     warehouse = db.get(Warehouse, warehouse_id)
-    if warehouse is None or normalize_program(getattr(warehouse, "program", DEFAULT_PROGRAM)) != normalize_program(program):
+    if warehouse is None or normalize_program(getattr(warehouse, "program", DEFAULT_PROGRAM)) != normalize_program(program) or warehouse.status == VIRTUAL_DAMAGE_WAREHOUSE_STATUS:
         raise HTTPException(status_code=404, detail=f"Warehouse {warehouse_id} not found")
     return warehouse
 
@@ -4541,10 +4637,16 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
     return {
         "success": True,
         "program": program_key,
-        "warehouses": db.query(Warehouse).filter(Warehouse.program == program_key).count(),
+        "warehouses": db.query(Warehouse).filter(
+            Warehouse.program == program_key,
+            or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+        ).count(),
         "technicians": db.query(Technician).filter(Technician.program == program_key).count(),
         "products": db.query(Product).filter(Product.program == program_key).count(),
-        "stock_movements": db.query(StockMovement).filter(StockMovement.program == program_key).count(),
+        "stock_movements": db.query(StockMovement).filter(
+            StockMovement.program == program_key,
+            or_(StockMovement.warehouse_id.is_(None), StockMovement.warehouse_id.in_(regular_warehouse_ids_query(db, program_key))),
+        ).count(),
         "open_serials": db.query(ProductSerial).filter(ProductSerial.program == program_key, ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
         "inventory_receive_total": float(inventory_receive_total or 0),
     }
@@ -4594,6 +4696,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         "transfers": transfers["transfers"],
         "returns": returns["returns"],
         "scanLogs": scans["scans"],
+        "damagedStock": virtual_damage_report(request, db, program_key),
     }
     if not light:
         tech = list_technician_balances(request, program_key, db)
@@ -4611,7 +4714,10 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
 @app.get("/api/warehouse/warehouses")
 def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    rows = db.query(Warehouse).filter(Warehouse.program == program_key).order_by(Warehouse.name).all()
+    rows = db.query(Warehouse).filter(
+        Warehouse.program == program_key,
+        or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+    ).order_by(Warehouse.name).all()
     return {"success": True, "warehouses": [{"id": r.id, "program": program_key, "name": r.name, "location": r.location, "status": r.status} for r in rows]}
 
 
@@ -4769,6 +4875,7 @@ def scan_material(code: str, warehouse_id: int | None = None, program: str = DEF
     balance = None
     balances = []
     if warehouse_id:
+        require_warehouse(db, warehouse_id, program_key)
         balance = (
             db.query(StockBalance)
             .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id, StockBalance.program == program_key)
@@ -4776,6 +4883,7 @@ def scan_material(code: str, warehouse_id: int | None = None, program: str = DEF
         )
     elif serial_row and serial_row.warehouse_id:
         warehouse_id = serial_row.warehouse_id
+        require_warehouse(db, warehouse_id, program_key)
         balance = (
             db.query(StockBalance)
             .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == product.id, StockBalance.program == program_key)
@@ -4786,6 +4894,7 @@ def scan_material(code: str, warehouse_id: int | None = None, program: str = DEF
             db.query(StockBalance)
             .options(joinedload(StockBalance.warehouse))
             .filter(StockBalance.product_id == product.id, StockBalance.program == program_key, StockBalance.quantity > 0)
+            .filter(StockBalance.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)))
             .order_by(StockBalance.quantity.desc())
             .all()
         )
@@ -5063,6 +5172,7 @@ def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
         .filter(StockBalance.program == program_key)
+        .filter(StockBalance.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)))
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
     )
     allowed = allowed_warehouse_ids(request, db, program_key)
@@ -5083,6 +5193,7 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
         .filter(StockBalance.program == program_key)
+        .filter(StockBalance.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)))
         .order_by(StockBalance.warehouse_id, StockBalance.product_id)
     )
     allowed = allowed_warehouse_ids(request, db, program_key)
@@ -5232,6 +5343,7 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     ).filter(
         StockMovement.program == program_key,
         StockMovement.warehouse_id.isnot(None),
+        StockMovement.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)),
         StockMovement.movement_type.in_(["issue_to_technician", "return_in"]),
         StockMovement.created_at >= cutoff,
     )
@@ -5772,10 +5884,12 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse))
         .filter(StockBalance.product_id == selected.id, StockBalance.program == program_key)
+        .filter(StockBalance.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)))
         .order_by(StockBalance.warehouse_id.asc())
         .all()
     )
     allowed = allowed_warehouse_ids(request, db, program_key)
+    regular_ids = {row[0] for row in regular_warehouse_ids_query(db, program_key).all()}
     if allowed is not None:
         balances = [row for row in balances if row.warehouse_id in allowed]
     stock_by_warehouse = [
@@ -5795,7 +5909,7 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
     warehouse_rows = {row["warehouse_id"]: row for row in stock_by_warehouse}
 
     def warehouse_totals(warehouse_id: int | None, warehouse_name: str = "") -> dict | None:
-        if warehouse_id is None or (allowed is not None and warehouse_id not in allowed):
+        if warehouse_id is None or warehouse_id not in regular_ids or (allowed is not None and warehouse_id not in allowed):
             return None
         if warehouse_id not in warehouse_rows:
             warehouse_rows[warehouse_id] = {
@@ -5819,7 +5933,10 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
     if not is_single_ran(program_key):
         warehouses_by_key = {
             normalize_usage_key(row.name): row
-            for row in db.query(Warehouse).filter(Warehouse.program == program_key).all()
+            for row in db.query(Warehouse).filter(
+                Warehouse.program == program_key,
+                or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+            ).all()
         }
         selected_sku = normalize_usage_key(selected.sku)
         for reference in initial_stock_reference_rows():
@@ -6181,6 +6298,8 @@ def list_stock_movements(request: Request, limit: int = 50, program: str = DEFAU
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         query = query.filter(StockMovement.warehouse_id.in_(allowed))
+    else:
+        query = query.filter(or_(StockMovement.warehouse_id.is_(None), StockMovement.warehouse_id.in_(regular_warehouse_ids_query(db, program_key))))
     rows = query.limit(min(limit, 200)).all()
     return {"success": True, "movements": [movement_to_dict(r) for r in rows]}
 
@@ -6510,12 +6629,23 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     name = find_sheet_value(grid, "Warehouse name", "Warehouse")
     row = None
     if name:
-        row = db.query(Warehouse).filter(Warehouse.program == program_key, func.lower(Warehouse.name) == name.lower()).first()
+        row = db.query(Warehouse).filter(
+            Warehouse.program == program_key,
+            or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+            func.lower(Warehouse.name) == name.lower(),
+        ).first()
         if row is None:
             key = normalize_usage_key(name)
-            row = next((w for w in db.query(Warehouse).filter(Warehouse.program == program_key).all() if normalize_usage_key(w.name) == key), None)
+            row = next((w for w in db.query(Warehouse).filter(
+                Warehouse.program == program_key,
+                or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+            ).all() if normalize_usage_key(w.name) == key), None)
     if row is None and default_warehouse_id:
-        row = db.query(Warehouse).filter(Warehouse.id == default_warehouse_id, Warehouse.program == program_key).first()
+        row = db.query(Warehouse).filter(
+            Warehouse.id == default_warehouse_id,
+            Warehouse.program == program_key,
+            or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+        ).first()
     if row is None:
         raise ValueError("Warehouse was not found in the sheet")
     return row
@@ -7549,7 +7679,7 @@ def return_condition_is_damaged(condition: str) -> bool:
 def create_material_return(data: MaterialReturnIn, request: Request, db: Session = Depends(db_session)):
     user = require_roles(request, "Admin", "Management", "Warehouse Manager", "Requester")
     program_key = normalize_program(data.program)
-    require_warehouse(db, data.warehouse_id, program_key)
+    source_warehouse = require_warehouse(db, data.warehouse_id, program_key)
     requester_submission = user.role.strip().lower() == "requester"
     if not requester_submission:
         require_warehouse_access(request, db, data.warehouse_id, program_key)
@@ -7574,38 +7704,49 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     db.flush()
 
     stock_added_quantity = 0
-    damaged_quantity_not_stocked = 0
+    damaged_quantity_quarantined = 0
+    damaged_quantity_pending = 0
+    virtual_warehouse = None
     for index, item in enumerate(data.items, start=1):
         product = require_product(db, item.product_id, program_key)
         damaged = return_condition_is_damaged(item.condition)
-        if damaged:
-            damaged_quantity_not_stocked += item.quantity
-        elif not requester_submission:
+        if requester_submission:
+            if damaged:
+                damaged_quantity_pending += item.quantity
+        elif damaged:
+            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
+            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item.quantity
+            damaged_quantity_quarantined += item.quantity
+        else:
             locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
             stock_added_quantity += item.quantity
-        db.add(
-            MaterialReturnItem(
-                return_id=row.id,
-                line_no=index,
-                product_id=item.product_id,
-                part_nbr=product_part_number(product.sku, product.part_number),
-                description=product_display_name(product),
-                uom=product.unit,
-                quantity=item.quantity,
-                condition=item.condition.strip() or "Good",
-                remark=item.remark.strip(),
-            )
+        return_item = MaterialReturnItem(
+            return_id=row.id,
+            line_no=index,
+            product_id=item.product_id,
+            part_nbr=product_part_number(product.sku, product.part_number),
+            description=product_display_name(product),
+            uom=product.unit,
+            quantity=item.quantity,
+            condition=item.condition.strip() or "Good",
+            remark=item.remark.strip(),
         )
-        if not requester_submission and not damaged:
+        db.add(return_item)
+        db.flush()
+        if not requester_submission:
             db.add(
                 StockMovement(
                     program=program_key,
-                    movement_type="return_in",
+                    movement_type="damage_in" if damaged else "return_in",
                     product_id=item.product_id,
-                    warehouse_id=data.warehouse_id,
+                    warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
                     quantity=item.quantity,
                     reference=row.return_number,
-                    note=f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}",
+                    source_item_id=return_item.id,
+                    note=(
+                        f"Damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}"
+                        if damaged else f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}"
+                    ),
                     created_by=row.created_by,
                 )
             )
@@ -7620,12 +7761,14 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     )
     db.commit()
     db.refresh(row)
+    clear_warehouse_cache()
     return {
         "success": True,
         "return_number": row.return_number,
         "return": material_return_to_dict(row),
         "stock_added_quantity": stock_added_quantity,
-        "damaged_quantity_not_stocked": damaged_quantity_not_stocked,
+        "damaged_quantity_quarantined": damaged_quantity_quarantined,
+        "damaged_quantity_pending": damaged_quantity_pending,
     }
 
 
@@ -7648,11 +7791,28 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
 
     actor = request_actor(request)
     stock_added_quantity = 0
-    damaged_quantity_not_stocked = 0
+    damaged_quantity_quarantined = 0
+    source_warehouse = require_warehouse(db, row.warehouse_id, program_key)
+    virtual_warehouse = None
     for item in row.items:
         require_product(db, item.product_id, program_key)
         if return_condition_is_damaged(item.condition):
-            damaged_quantity_not_stocked += item.quantity
+            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
+            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item.quantity
+            damaged_quantity_quarantined += item.quantity
+            db.add(
+                StockMovement(
+                    program=program_key,
+                    movement_type="damage_in",
+                    product_id=item.product_id,
+                    warehouse_id=virtual_warehouse.id,
+                    quantity=item.quantity,
+                    reference=row.return_number,
+                    source_item_id=item.id,
+                    note=f"Approved damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}",
+                    created_by=actor,
+                )
+            )
             continue
         locked_stock_balance(db, row.warehouse_id, item.product_id, program_key).quantity += item.quantity
         stock_added_quantity += item.quantity
@@ -7674,11 +7834,12 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     log_audit(db, "approve_material_return", "material_return", row.return_number, actor, data.model_dump())
     db.commit()
     db.refresh(row)
+    clear_warehouse_cache()
     return {
         "success": True,
         "return": material_return_to_dict(row),
         "stock_added_quantity": stock_added_quantity,
-        "damaged_quantity_not_stocked": damaged_quantity_not_stocked,
+        "damaged_quantity_quarantined": damaged_quantity_quarantined,
     }
 
 

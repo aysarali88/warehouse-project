@@ -910,6 +910,7 @@ body.sr-program .login-logo img{
       </div>
       <div class="workflow-lane" id="opsSnapshot"></div>
       <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
+      <div class="viz-panel warehouse-work"><h3>Damaged / Quarantine (Virtual)</h3><div id="damagedStockOverview"></div></div>
       <div class="viz-grid">
         <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
         <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
@@ -1088,6 +1089,10 @@ body.sr-program .login-logo img{
   </section>
 
   <section class="view" id="receive">
+    <div class="card" style="margin-bottom:14px">
+      <h3>Local Inventory Snapshot</h3>
+      <div id="localInventoryDashboard"></div>
+    </div>
     <div class="grid two">
       <div class="card">
         <h3>استلام مخزون</h3>
@@ -1544,7 +1549,7 @@ body.sr-program .login-logo img{
 </div>
 <div class="toast" id="toast"></div>
 <script>
-let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,rolloutSource:'',rolloutDailyProgress:[],rolloutDashboardSummaryOnly:false,movements:[],audit:[],mrs:[],receipts:[],transfers:[],returns:[],scanLogs:[]};
+let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,rolloutSource:'',rolloutDailyProgress:[],rolloutDashboardSummaryOnly:false,movements:[],audit:[],mrs:[],receipts:[],transfers:[],returns:[],scanLogs:[],damagedStock:{total_quantity:0,items:[],events:[]}};
 let stockCoverageData={program:'',loading:false,error:'',items:[],monthly_replenishment:[],manual_review:{tripoli:[],misurata:[]},no_recent_consumption:{tripoli:0,misurata:0},window_days:30,critical_days:7,warning_days:14};
 let stockCoverageRequestId=0;
 let materialLedgerState={query:'',productId:0,data:null,loading:false};
@@ -1896,7 +1901,7 @@ function userOwnsAudit(r){if(isAdmin()||isManagement())return true;return normal
 function statusChip(v){return `<span class="status-chip status-${esc(v||'draft')}">${esc(String(v||'draft').replace('_',' '))}</span>`}
 function applyWarehouseData(data,merge=false){
   if(normalizeProgram(data?.program)!==normalizeProgram(currentProgram))return;
-  wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],sites:data.sites||merge&&wh.sites||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],rolloutDashboardSummaryOnly:data.rolloutDashboardSummaryOnly??(merge?wh.rolloutDashboardSummaryOnly:false),movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[]};
+  wh={summary:data.summary||merge&&wh.summary||{},warehouses:data.warehouses||merge&&wh.warehouses||[],sites:data.sites||merge&&wh.sites||[],technicians:data.technicians||merge&&wh.technicians||[],products:data.products||merge&&wh.products||[],stockBalances:data.stockBalances||merge&&wh.stockBalances||[],stockUsage:data.stockUsage||merge&&wh.stockUsage||[],technicianBalances:data.technicianBalances||merge&&wh.technicianBalances||[],rolloutUsage:data.rolloutUsage||merge&&wh.rolloutUsage||[],rolloutRecords:data.rolloutRecords??(merge?wh.rolloutRecords:0),rolloutSource:data.rolloutSource||merge&&wh.rolloutSource||'',rolloutDailyProgress:data.rolloutDailyProgress||merge&&wh.rolloutDailyProgress||[],rolloutDashboardSummaryOnly:data.rolloutDashboardSummaryOnly??(merge?wh.rolloutDashboardSummaryOnly:false),movements:data.movements||merge&&wh.movements||[],audit:data.audit||merge&&wh.audit||[],mrs:data.mrs||merge&&wh.mrs||[],receipts:data.receipts||merge&&wh.receipts||[],transfers:data.transfers||merge&&wh.transfers||[],returns:data.returns||merge&&wh.returns||[],scanLogs:data.scanLogs||merge&&wh.scanLogs||[],damagedStock:data.damagedStock||merge&&wh.damagedStock||{total_quantity:0,items:[],events:[]}};
   if(isSingleRan())clearSingleRanRolloutState(false);
   renderWarehouse();
   fieldEntryUpdateStockRemaining()
@@ -1984,6 +1989,8 @@ document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.ma
 const byWh=new Map();wh.stockUsage.forEach(r=>{const cur=byWh.get(r.warehouse)||{warehouse:r.warehouse,totalStock:0,issued:0,remaining:0,available:0,reserved:0};cur.totalStock+=Number(r.total_received||0);cur.issued+=Number(r.total_consumed||0);cur.remaining+=Number(r.wh_remaining??r.remaining??0);cur.available+=Number(r.available_stock??r.remaining??0);cur.reserved+=Number(r.reserved_pending||0);byWh.set(r.warehouse,cur)});
 const whRows=[...byWh.values()].sort((a,b)=>String(a.warehouse).localeCompare(String(b.warehouse)));
 document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class="warehouse-summary">${whRows.map(r=>`<div class="warehouse-summary-card"><b>${esc(r.warehouse||'Unknown warehouse')}</b><div class="warehouse-summary-metrics"><div><span>Total Stock</span><strong class="total">${fmt(r.totalStock)}</strong></div><div><span>Issued WH</span><strong class="issued">${fmt(r.issued)}</strong></div><div><span>WH Remaining</span><strong class="remaining">${fmt(r.remaining)}</strong></div><div><span>Available</span><strong class="available">${fmt(r.available)}</strong></div><div><span>Reserved Pending</span><strong class="reserved">${fmt(r.reserved)}</strong></div></div></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد أرصدة</div>';
+const damaged=wh.damagedStock||{total_quantity:0,items:[],events:[]};
+document.getElementById('damagedStockOverview').innerHTML=damaged.items?.length?`<div class="status-tile warn"><span>Total quarantined</span><strong>${fmt(damaged.total_quantity)}</strong></div><div class="replenishment-table-wrap"><table class="replenishment-table"><thead><tr><th>Source Warehouse</th><th>Material</th><th>SKU / Part #</th><th>Quarantined</th><th>Unit</th></tr></thead><tbody>${damaged.items.map(r=>`<tr><td>${esc(r.source_warehouse)}</td><td>${esc(r.product)}</td><td>${esc(r.sku||'')}<br>${esc(r.part_number||'')}</td><td>${fmt(r.quantity)}</td><td>${esc(r.unit||'PCS')}</td></tr>`).join('')}</tbody></table></div><details><summary>Recent damage return references (${fmt(damaged.events?.length||0)})</summary><div class="movement-stream">${(damaged.events||[]).map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>${esc(r.reference||'Return')} · ${esc(r.product)}</b><small>${esc(r.source_warehouse)} · ${fmt(r.quantity)} · ${esc(r.note||'')}</small></div></div>`).join('')}</div></details>`:'<div class="empty-soft">No damaged stock in quarantine</div>';
 const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
 document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="movement-stream">${focusRows.map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
 const receiptRows=(wh.receipts||[]).slice(0,5);
@@ -2052,6 +2059,7 @@ await loadWarehouse();
 }catch(e){toast(e.message)}
 }
 function renderReceiveHistory(){
+renderLocalInventoryDashboard();
 const latest=(wh.receipts||[])[0];
 const latestItem=latest?.items?.[0]||null;
 const box=document.getElementById('lastReceivedItem');
@@ -2086,6 +2094,30 @@ if(summary)summary.textContent=isSingleRan()?`Showing ${fmt(rows.length)} of ${f
 const history=document.getElementById('receiveHistory');
 if(history)history.innerHTML=rowsTable([['Source','source'],['التاريخ','receipt_date'],['رقم الايصال','order_number'],['رقم الفاتورة','invoice_number'],['الفاتورة','invoice_file_name',(v,r)=>r.has_invoice_file?`<a href="${esc(withProgramQuery(`/api/warehouse/receive-orders/${r.id}/invoice`))}" target="_blank" rel="noopener">${esc(v||'فتح')}</a>`:'-'],['Vendor','supplier'],['WH','warehouse'],['Part #','part_number'],['SKU','sku'],['QR Code','qr_code'],['اسم المادة','name'],['الكمية','quantity',(v)=>fmt(v)],['الوحدة','unit']],rows.slice(0,260));
 }
+function renderLocalInventoryDashboard(){
+const box=document.getElementById('localInventoryDashboard');
+if(!box)return;
+const products=new Map((wh.products||[]).filter(product=>normalizeText(product.vendor)==='local').map(product=>[String(product.id),product]));
+const balances=(wh.stockBalances||[]).filter(row=>products.has(String(row.product_id))&&Number(row.quantity||0)>0);
+if(!balances.length){box.innerHTML='<div class="empty-soft">No current stock is assigned to Vendor: Local.</div>';return}
+const materialIds=new Set(balances.map(row=>String(row.product_id)));
+const unitTotals=new Map();
+const warehouseTotals=new Map();
+balances.forEach(row=>{
+  const unit=String(row.unit||products.get(String(row.product_id))?.unit||'PCS').trim()||'PCS';
+  const quantity=Number(row.quantity||0);
+  unitTotals.set(unit,(unitTotals.get(unit)||0)+quantity);
+  const warehouse=String(row.warehouse||'Unknown warehouse');
+  const current=warehouseTotals.get(warehouse)||{warehouse,materials:new Set(),units:new Map()};
+  current.materials.add(String(row.product_id));
+  current.units.set(unit,(current.units.get(unit)||0)+quantity);
+  warehouseTotals.set(warehouse,current);
+});
+const formatUnits=units=>[...units].sort((a,b)=>a[0].localeCompare(b[0])).map(([unit,quantity])=>`${fmt(quantity)} ${esc(unit)}`).join(' · ');
+const unitTiles=[...unitTotals].sort((a,b)=>a[0].localeCompare(b[0])).map(([unit,quantity])=>`<div class="status-tile good"><span>On hand · ${esc(unit)}</span><strong>${fmt(quantity)}</strong></div>`).join('');
+const warehouseRows=[...warehouseTotals.values()].sort((a,b)=>a.warehouse.localeCompare(b.warehouse)).map(row=>({warehouse:row.warehouse,materials:row.materials.size,quantity:formatUnits(row.units)}));
+box.innerHTML=`<div class="status-strip"><div class="status-tile"><span>Local materials in stock</span><strong>${fmt(materialIds.size)}</strong></div>${unitTiles}</div><div class="hint" style="margin:8px 0 12px">Current on-hand stock for materials whose Vendor is Local, split by unit and warehouse.</div>${rowsTable([['Warehouse','warehouse'],['Materials','materials',(value)=>fmt(value)],['On hand by unit','quantity',(_value,row)=>row.quantity]],warehouseRows)}`;
+}
 function initReceiveDefaults(){const d=document.getElementById('receiveDate');if(d&&!d.value)d.value=today();const u=document.getElementById('receiveUnit');if(u&&!u.value)u.value='PCS'}
 function returnProductOptionHtml(selected=''){const rows=[...wh.products].sort((a,b)=>String(a.name).localeCompare(String(b.name)));return '<option value="">اختر المادة</option>'+rows.map(p=>`<option value="${p.id}" ${String(p.id)===String(selected)?'selected':''}>${esc(p.name)} (${esc(p.sku)})</option>`).join('')}
 function initReturnDefaults(){const d=document.getElementById('retDate');if(d&&!d.value)d.value=today();if(document.getElementById('retReceivedBy')&&!retReceivedBy.value&&activeUser)retReceivedBy.value=activeUser;const box=document.getElementById('returnLines');if(box&&!box.children.length)addReturnLine();renderReturnPreview()}
@@ -2097,7 +2129,7 @@ function renderReturnPreview(number='Draft'){const box=document.getElementById('
 function userOwnsReturn(r){if(isAdmin()||isManagement())return true;const me=normalizeText(activeUser);if(roleKey()==='warehousemanager')return warehouseScopeMatches(currentWarehouseKey(),r.warehouse);if(roleKey()==='requester')return normalizeText(r.returned_by)===me||normalizeText(r.created_by)===me;return normalizeText(r.created_by)===me}
 function canApproveMaterialReturn(r){return isAdmin()||isManagement()||(roleKey()==='warehousemanager'&&warehouseScopeMatches(currentWarehouseKey(),r.warehouse))}
 const approvingReturnIds=new Set();
-async function approveMaterialReturn(id){const key=String(id);if(approvingReturnIds.has(key))return;const row=(wh.returns||[]).find(r=>String(r.id)===key);if(!row||!canApproveMaterialReturn(row)){toast('Warehouse Manager only');return}approvingReturnIds.add(key);renderReturnsTable();try{const r=await api(`/api/warehouse/material-returns/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Return approved'})});upsertLocalReturn(r.return);syncWarehouseLater();toast(`Return approved: ${fmt(r.stock_added_quantity||0)} added to stock; ${fmt(r.damaged_quantity_not_stocked||0)} damaged not stocked`)}catch(e){toast(e.message)}finally{approvingReturnIds.delete(key);renderReturnsTable()}}
+async function approveMaterialReturn(id){const key=String(id);if(approvingReturnIds.has(key))return;const row=(wh.returns||[]).find(r=>String(r.id)===key);if(!row||!canApproveMaterialReturn(row)){toast('Warehouse Manager only');return}approvingReturnIds.add(key);renderReturnsTable();try{const r=await api(`/api/warehouse/material-returns/${id}/approve`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Return approved'})});upsertLocalReturn(r.return);syncWarehouseLater();toast(`Return approved: ${fmt(r.stock_added_quantity||0)} added to stock; ${fmt(r.damaged_quantity_quarantined||0)} moved to quarantine`)}catch(e){toast(e.message)}finally{approvingReturnIds.delete(key);renderReturnsTable()}}
 async function rejectMaterialReturn(id){const row=(wh.returns||[]).find(r=>String(r.id)===String(id));if(!row||!canApproveMaterialReturn(row)){toast('Warehouse Manager only');return}const comment=(prompt('Reason for rejecting this return?')||'').trim();if(!comment)return;try{const r=await api(`/api/warehouse/material-returns/${id}/reject`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});upsertLocalReturn(r.return);syncWarehouseLater();toast('Return rejected')}catch(e){toast(e.message)}}
 function returnTableAction(r){const approving=approvingReturnIds.has(String(r.id));const approval=r.status==='pending_warehouse'&&canApproveMaterialReturn(r)?`<button class="btn primary" onclick="approveMaterialReturn(${r.id})" ${approving?'disabled':''}>${approving?'Approving...':'Approve'}</button><button class="btn danger" onclick="rejectMaterialReturn(${r.id})" ${approving?'disabled':''}>Reject</button>`:'';return `<div class="row-actions">${approval}<button class="btn soft" onclick="showReturnById(${r.id})">View</button></div>`}
 function renderReturnsTable(){const box=document.getElementById('returnsTable');if(!box)return;const rows=(wh.returns||[]).filter(userOwnsReturn);box.innerHTML=rowsTable([['Return','return_number'],['Date','return_date'],['Site','site_id'],['Address','site_address'],['Warehouse','warehouse'],['Returned By','returned_by'],['Received By','received_by'],['Status','status',(v)=>statusChip(v)],['Action','id',(v,r)=>returnTableAction(r)]],rows)}
@@ -2110,7 +2142,7 @@ if(!items.length){toast('أضف مادة واحدة على الأقل');return}
 const body={return_date:retDate.value,site_id:retSiteId.value,site_address:retSiteAddress.value,warehouse_id:Number(retWarehouse.value),returned_by:retReturnedBy.value.trim(),received_by:retReceivedBy.value.trim()||activeUser,reason:retReason.value.trim(),created_by:activeUser,items};
 toast('جاري حفظ المرتجع...');
 const r=await api('/api/warehouse/material-returns',{method:'POST',body:JSON.stringify(body)});
-toast('تم حفظ المرتجع: '+r.return_number+(r.return?.status==='pending_warehouse'?' بانتظار موافقة المستودع':` | أضيف للمخزون ${fmt(r.stock_added_quantity||0)} | Damaged غير مضافة ${fmt(r.damaged_quantity_not_stocked||0)}`));
+toast('تم حفظ المرتجع: '+r.return_number+(r.return?.status==='pending_warehouse'?' بانتظار موافقة المستودع':` | أضيف للمخزون ${fmt(r.stock_added_quantity||0)} | Damaged في العزل ${fmt(r.damaged_quantity_quarantined||0)}`));
 renderReturnPreview(r.return_number);
 upsertLocalReturn(r.return);
 syncWarehouseLater();
