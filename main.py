@@ -2228,6 +2228,42 @@ def add_bera_w_taleem_x2_boxes(data: dict) -> None:
         existing.add(key)
 
 
+def add_bera_w_taleem_x1_box(data: dict) -> None:
+    additions = (("H5-L3-S4", 3, 50), ("H5-L2-S4", 2, 80))
+    for code, line, length in additions:
+        exists = any(
+            rollout_norm(first_value(row, "Zone", "Area", default="")) in {"berawtaleem", "albera"}
+            and rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")) == "X1"
+            and rollout_code_key(first_value(row, "Box code", default="")) == rollout_code_key(code)
+            for row in data.get("boxes") or []
+        )
+        if exists:
+            continue
+        data.setdefault("boxes", []).append(
+            {
+                "Area": "Bera W Taleem",
+                "Zone": "Bera W Taleem",
+                "City": "Misurata",
+                "Related to XBOX": "X1",
+                "XBOX": "X-BOX01",
+                "Part": "x1-part01",
+                "Hub": "H5",
+                "Line": line,
+                "Splitter": 4,
+                "Box code": code,
+                "Box type": "SUB BOX",
+                "Real length m": "",
+                "Cable length m": length,
+                "Material type": f"Single-Core Distribution Cable_{length}m",
+                "dB": "",
+            }
+        )
+        for plan in data.get("area_plans") or []:
+            if rollout_area_key(plan.get("area")) == rollout_area_key("Bera W Taleem"):
+                plan["targetSubEndBox"] = int(plan.get("targetSubEndBox") or 0) + 1
+                plan["targetCableMeters"] = safe_float(plan.get("targetCableMeters")) + length
+
+
 def rollout_entry_mode(data: dict) -> str:
     text_value = " ".join(
         str(first_value(data, "code_type", "type", "item", "Item", "material type", "Material Type", "material_type", default="") or "")
@@ -2265,6 +2301,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
     ]
     if db is None:
         add_hay_andalus_z1_x4_box(data)
+        add_bera_w_taleem_x1_box(data)
         add_bera_w_taleem_x2_boxes(data)
         return data
     for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
@@ -2302,6 +2339,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         .all()
     ]
     add_hay_andalus_z1_x4_box(data)
+    add_bera_w_taleem_x1_box(data)
     add_bera_w_taleem_x2_boxes(data)
     return data
 
