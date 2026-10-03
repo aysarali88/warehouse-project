@@ -4818,7 +4818,8 @@ def resolved_site_name(db: Session, program: str, site_value: str) -> str:
 
 
 @app.post("/api/warehouse/warehouses")
-def create_warehouse(data: WarehouseIn, db: Session = Depends(db_session)):
+def create_warehouse(data: WarehouseIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
     program_key = normalize_program(data.program)
     row = Warehouse(program=program_key, name=data.name.strip(), location=data.location.strip())
     db.add(row)
@@ -4840,7 +4841,8 @@ def list_technicians(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_se
 
 
 @app.post("/api/warehouse/technicians")
-def create_technician(data: TechnicianIn, db: Session = Depends(db_session)):
+def create_technician(data: TechnicianIn, request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
     program_key = normalize_program(data.program)
     row = Technician(program=program_key, name=data.name.strip(), phone=data.phone.strip())
     db.add(row)
