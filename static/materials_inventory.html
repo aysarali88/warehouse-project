@@ -845,6 +845,9 @@ body.sr-program .login-logo img{
 #mrLines .mr-line{grid-template-columns:minmax(0,1.5fr) minmax(70px,90px) minmax(0,1fr) 42px;min-width:0}
 #mrLines .field{min-width:0}
 #mrLines input,#mrLines select{width:100%;min-width:0}
+.sr-excel-tools{align-items:center;margin-bottom:10px;padding:10px;border:1px solid #c9e1ea;border-radius:7px;background:#f7fbfd}
+.sr-excel-status{font-size:12px;color:var(--muted);font-weight:800;line-height:1.5}
+.sr-excel-status.error{color:var(--red)}
 @media(max-width:600px){#mrLines .mr-line{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
@@ -1181,6 +1184,12 @@ body.sr-program .login-logo img{
       </div>
       <div class="card" id="mrItemsCard">
         <h3>بنود المواد</h3>
+        <div class="actions sr-excel-tools sr-only hidden">
+          <button class="btn soft" type="button" onclick="downloadSrRequestItemsTemplate()">Download Template</button>
+          <button class="btn soft" type="button" onclick="document.getElementById('mrExcelFile').click()">Upload Excel</button>
+          <input class="hidden" id="mrExcelFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="uploadSrRequestItems('mr',this)">
+          <span class="sr-excel-status" id="mrExcelStatus">Part #, Vendor, Description, Quantity, Remark</span>
+        </div>
         <div id="mrLines" class="mr-list"></div>
         <button class="btn soft" onclick="addMrLine()">إضافة بند</button>
         <button class="btn primary" onclick="saveMr()">Submit for Approval</button>
@@ -1250,6 +1259,12 @@ body.sr-program .login-logo img{
         </div>
         <div class="card">
           <h3>بنود التحويل</h3>
+          <div class="actions sr-excel-tools sr-only hidden">
+            <button class="btn soft" type="button" onclick="downloadSrRequestItemsTemplate()">Download Template</button>
+            <button class="btn soft" type="button" onclick="document.getElementById('transferExcelFile').click()">Upload Excel</button>
+            <input class="hidden" id="transferExcelFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="uploadSrRequestItems('transfer',this)">
+            <span class="sr-excel-status" id="transferExcelStatus">Part #, Vendor, Description, Quantity, Remark</span>
+          </div>
           <div id="transferLines" class="mr-list"></div>
           <button class="btn soft" onclick="addTransferLine()">إضافة بند</button>
           <button class="btn primary" onclick="saveTransfer()">Submit Transfer for Approval</button>
@@ -1908,7 +1923,7 @@ function roleKey(){return normalizeText(userRole())}
 function isSingleRan(){return normalizeProgram(currentProgram)==='SINGLE_RAN'}
 function canViewSetup(){return isAdmin()||(isSingleRan()&&roleKey()==='requester')}
 function clearSingleRanRolloutState(clearView=true){wh.rolloutDailyProgress=[];wh.rolloutUsage=[];wh.rolloutRecords=0;wh.rolloutSource='';['rolloutDailyStats','rolloutDailyKpi','rolloutDailyCompare','rolloutDailyMap','rolloutDailyReport','rolloutDailyOperations','rolloutDailyTable'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=id==='rolloutDailyKpi'?'<div class="empty">Rollout Progress is not available for Single RAN.</div>':''});if(clearView&&document.querySelector('.view.active')?.id==='rolloutDaily')switchView('dashboard')}
-function applyProgramBranding(){const title=document.getElementById('brandTitle');if(title)title.textContent=isSingleRan()?'Single RAN Warehouse':'FTTH Operations Center';document.title=isSingleRan()?'Single RAN Warehouse':'Materials Inventory Management';document.body.classList.toggle('sr-program',isSingleRan());document.querySelectorAll('[data-program-logo]').forEach(img=>{img.src=programLogoSrc();img.alt=programLogoAlt()})}
+function applyProgramBranding(){const title=document.getElementById('brandTitle');if(title)title.textContent=isSingleRan()?'Single RAN Warehouse':'FTTH Operations Center';document.title=isSingleRan()?'Single RAN Warehouse':'Materials Inventory Management';document.body.classList.toggle('sr-program',isSingleRan());document.querySelectorAll('[data-program-logo]').forEach(img=>{img.src=programLogoSrc();img.alt=programLogoAlt()});document.querySelectorAll('.sr-only').forEach(el=>el.classList.toggle('hidden',!isSingleRan()))}
 function applyProgramDefaults(){if(isSingleRan()){if(document.getElementById('mrEntity'))mrEntity.value='Single RAN';if(document.getElementById('mrProject'))mrProject.value='Single RAN';if(document.getElementById('mrDomain'))mrDomain.value='RAN';if(document.getElementById('receiveSku'))receiveSku.placeholder='SR-SKU-001';if(document.getElementById('receiveMaterialName'))receiveMaterialName.placeholder='Single RAN material';if(document.getElementById('receiveReceipt'))receiveReceipt.placeholder='SR-GRN-001'}else{if(document.getElementById('mrEntity')&&(!mrEntity.value||mrEntity.value==='Single RAN'))mrEntity.value='Rollout';if(document.getElementById('mrProject')&&(!mrProject.value||mrProject.value==='Single RAN'))mrProject.value='FTTH';if(document.getElementById('mrDomain')&&(!mrDomain.value||mrDomain.value==='RAN'))mrDomain.value='Passive';if(document.getElementById('receiveSku'))receiveSku.placeholder='E00ATB101';if(document.getElementById('receiveMaterialName'))receiveMaterialName.placeholder='ATB / Cable / Box';if(document.getElementById('receiveReceipt'))receiveReceipt.placeholder='GRN-001'}}
 function applyPermissions(){document.body.classList.remove('awaiting-program');applyProgramBranding();const managementView=isAdmin()||isManagement();document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('hidden',btn.classList.contains('admin-only')&&roleKey()!=='admin'));document.querySelectorAll('.program-picker').forEach(el=>el.classList.add('hidden'));document.querySelectorAll('.program-switch').forEach(btn=>btn.classList.toggle('active',normalizeProgram(btn.dataset.program)===normalizeProgram(currentProgram)));const rolloutBtn=document.querySelector('.nav button[data-view="rolloutDaily"]');if(rolloutBtn)rolloutBtn.classList.toggle('hidden',isSingleRan());document.querySelectorAll('.requester-work').forEach(el=>el.classList.toggle('hidden',!canCreateMr()));document.querySelectorAll('.transfer-work').forEach(el=>el.classList.toggle('hidden',!canCreateTransfer()));document.querySelectorAll('.return-work').forEach(el=>el.classList.toggle('hidden',!canReturnMaterials()));document.querySelectorAll('.approver-work').forEach(el=>el.classList.toggle('hidden',!canApprove()));document.querySelectorAll('.warehouse-work').forEach(el=>el.classList.toggle('hidden',!canManageWarehouse()));document.querySelectorAll('.rollout-work').forEach(el=>el.classList.toggle('hidden',isSingleRan()));document.querySelectorAll('.admin-only').forEach(el=>{if(!el.classList.contains('program-picker'))el.classList.toggle('hidden',roleKey()!=='admin')});document.querySelectorAll('.management-visible').forEach(el=>el.classList.toggle('hidden',!managementView));const restrictedRolloutTabs=['compare','map','operations','entry'];document.querySelectorAll('[data-rollout-daily-tab]').forEach(el=>el.classList.toggle('hidden',roleKey()==='warehousemanager'&&restrictedRolloutTabs.includes(el.dataset.rolloutDailyTab)));if(isSingleRan())clearSingleRanRolloutState(false);if(((roleKey()==='warehousemanager'||isManagement())&&document.querySelector('.nav button.active')?.dataset.view==='users')||(isSingleRan()&&document.querySelector('.nav button.active')?.dataset.view==='rolloutDaily'))switchView('dashboard');if(roleKey()==='warehousemanager'&&restrictedRolloutTabs.includes(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab))switchRolloutDailyTab('kpi',false);applyProgramDefaults()}
 function applyRequesterOnlyVisibility(){document.querySelectorAll('.requester-only').forEach(el=>el.classList.toggle('hidden',!['requester','admin'].includes(roleKey())))}
@@ -2381,6 +2396,42 @@ function syncTransferLine(row){
   row.querySelector('.trAvailable').value=selected?fmt(warehouseBalanceQty(document.getElementById('trFromWarehouse')?.value||'',selected)):'';
   if(isSingleRan()&&product){row.querySelector('.trVendor').value=product.vendor||'';row.querySelector('.trMaterialSearch').value=srMaterialLabel(product);refreshSrTransferRow(row)}
   renderTransferPreview()
+}
+function downloadSrRequestItemsTemplate(){
+  if(!isSingleRan()){toast('Excel upload is available for Single RAN only');return}
+  window.location.href=withProgramQuery('/api/warehouse/sr-request-items/template')
+}
+function setSrExcelStatus(kind,message,isError=false){
+  const status=document.getElementById(kind==='transfer'?'transferExcelStatus':'mrExcelStatus');
+  if(!status)return;
+  status.textContent=message;
+  status.classList.toggle('error',isError)
+}
+async function uploadSrRequestItems(kind,input){
+  const file=input?.files?.[0];
+  if(!file)return;
+  if(!isSingleRan()){input.value='';toast('Excel upload is available for Single RAN only');return}
+  const warehouseId=kind==='transfer'?Number(document.getElementById('trFromWarehouse')?.value||0):Number(document.getElementById('mrWarehouse')?.value||0);
+  if(!warehouseId){input.value='';toast(kind==='transfer'?'Choose From Warehouse first':'Choose Warehouse name first');return}
+  const form=new FormData();
+  form.append('workbook',file);
+  form.append('request_kind',kind);
+  form.append('warehouse_id',String(warehouseId));
+  setSrExcelStatus(kind,'Checking '+file.name+'...');
+  try{
+    const data=await api('/api/warehouse/sr-request-items/preview-excel',{method:'POST',body:form});
+    const box=document.getElementById(kind==='transfer'?'transferLines':'mrLines');
+    box.innerHTML='';
+    (data.items||[]).forEach(item=>kind==='transfer'?addTransferLine(item):addMrLine(item));
+    if(kind==='transfer'){renderTransferLines();renderTransferPreview()}
+    else{renderMrLines();renderMrPreview();resetMrSubmissionToken()}
+    const summary=`Loaded ${data.row_count||0} materials · Total ${fmt(data.total_quantity||0)}`;
+    setSrExcelStatus(kind,summary);
+    toast(summary+' — review before Submit')
+  }catch(error){
+    setSrExcelStatus(kind,error.message||'Excel upload failed',true);
+    toast(error.message||'Excel upload failed')
+  }finally{input.value=''}
 }
 function initTransferDefaults(){const d=document.getElementById('trDate');if(d&&!d.value)d.value=today();if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa';const box=document.getElementById('transferLines');if(box&&!box.children.length)addTransferLine()}
 function renderTransferLines(){const box=document.getElementById('transferLines');if(!box)return;if(!box.children.length){addTransferLine();return}const hasSrRows=!!box.querySelector('.trVendor');if(hasSrRows!==isSingleRan()){box.innerHTML='';addTransferLine();return}if(isSingleRan()){[...box.querySelectorAll('.mr-line')].forEach(row=>{refreshSrTransferRow(row);syncTransferLine(row)});return}[...box.querySelectorAll('.trProduct')].forEach(sel=>{const selected=sel.value;sel.innerHTML=transferProductOptionHtml(selected);sel.value=selected;syncTransferLine(sel.closest('.mr-line'))})}

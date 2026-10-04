@@ -6791,6 +6791,182 @@ def parse_import_items(db: Session, grid: list[list[str]], program: str = DEFAUL
     return items
 
 
+SR_REQUEST_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+SR_REQUEST_UPLOAD_MAX_ROWS = 500
+
+
+def find_sr_request_upload_header(row: list[str]) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for index, value in enumerate(row):
+        key = excel_key(value)
+        if key in {"part", "partno", "partnumber", "partnbr"}:
+            mapping["part"] = index
+        elif key in {"vendor", "supplier"}:
+            mapping["vendor"] = index
+        elif key in {"qty", "quantity", "requestedqty", "requestedquantity"}:
+            mapping["quantity"] = index
+        elif key in {"remark", "remarks", "comment", "comments", "note", "notes"}:
+            mapping["remark"] = index
+        elif key in {"description", "itemdescription", "materialdescription"}:
+            mapping["description"] = index
+    return mapping
+
+
+def sr_request_upload_quantity(value, row_number: int) -> float:
+    raw = excel_text(value).replace(",", "")
+    try:
+        quantity = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Row {row_number}: Quantity must be a number") from exc
+    if not math.isfinite(quantity) or quantity <= 0:
+        raise ValueError(f"Row {row_number}: Quantity must be greater than zero")
+    return quantity
+
+
+def parse_sr_request_upload(
+    db: Session,
+    contents: bytes,
+    warehouse_id: int,
+    filename: str = "materials.xlsx",
+) -> dict:
+    if not contents:
+        raise ValueError("Choose an Excel file first")
+    if len(contents) > SR_REQUEST_UPLOAD_MAX_BYTES:
+        raise ValueError("Excel file must be 5 MB or smaller")
+    if not str(filename or "").lower().endswith(".xlsx"):
+        raise ValueError("Only .xlsx files are supported")
+    try:
+        workbook = load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+    except Exception as exc:
+        raise ValueError("Could not read the Excel file") from exc
+
+    sheet = next((candidate for candidate in workbook.worksheets if candidate.sheet_state == "visible"), None)
+    if sheet is None:
+        raise ValueError("The Excel file does not contain a visible sheet")
+
+    header_row = 0
+    header: dict[str, int] = {}
+    for row_number, values in enumerate(sheet.iter_rows(values_only=True), start=1):
+        candidate = find_sr_request_upload_header([excel_text(value) for value in values])
+        if {"part", "vendor", "quantity"}.issubset(candidate):
+            header_row = row_number
+            header = candidate
+            break
+        if row_number >= 20:
+            break
+    if not header_row:
+        raise ValueError("Required columns were not found: Part #, Vendor, Quantity")
+
+    products = (
+        db.query(Product)
+        .filter(Product.program == SINGLE_RAN_PROGRAM, Product.status == "active")
+        .order_by(Product.id)
+        .all()
+    )
+    product_lookup: dict[str, Product | None] = {}
+    for product in products:
+        for value in (product.part_number, product.sku):
+            key = str(value or "").strip().casefold()
+            if not key:
+                continue
+            if key not in product_lookup:
+                product_lookup[key] = product
+            elif product_lookup[key] is not None and product_lookup[key].id != product.id:
+                product_lookup[key] = None
+
+    aggregated: dict[int, dict] = {}
+    errors: list[str] = []
+    populated_rows = 0
+    blank_rows = 0
+    for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
+        def cell(name: str) -> str:
+            column = header.get(name, -1)
+            return excel_text(values[column]) if 0 <= column < len(values) else ""
+
+        part_number = cell("part").strip()
+        vendor = cell("vendor").strip()
+        description = cell("description").strip()
+        quantity_text = cell("quantity").strip()
+        remark = cell("remark").strip()
+        if not part_number and not vendor and not description and not quantity_text and not remark:
+            blank_rows += 1
+            if blank_rows >= 10:
+                break
+            continue
+        blank_rows = 0
+        populated_rows += 1
+        if populated_rows > SR_REQUEST_UPLOAD_MAX_ROWS:
+            errors.append(f"The file exceeds the {SR_REQUEST_UPLOAD_MAX_ROWS}-row limit")
+            break
+        if not part_number:
+            errors.append(f"Row {row_number}: Part # is required")
+            continue
+        if not vendor:
+            errors.append(f"Row {row_number}: Vendor is required")
+            continue
+        try:
+            quantity = sr_request_upload_quantity(quantity_text, row_number)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        product = product_lookup.get(part_number.casefold())
+        if product is None:
+            errors.append(f"Row {row_number}: Part # not found or ambiguous: {part_number}")
+            continue
+        product_vendor = str(product.vendor or "").strip()
+        if vendor.casefold() != product_vendor.casefold():
+            errors.append(
+                f"Row {row_number}: Vendor for {part_number} must be {product_vendor or 'defined in Setup'}"
+            )
+            continue
+        current = aggregated.get(product.id)
+        if current is None:
+            current = {
+                "product_id": product.id,
+                "part_nbr": product_part_number(product.sku, product.part_number),
+                "model": product.sku,
+                "description": product_display_name(product),
+                "vendor": product_vendor,
+                "uom": product.unit or "PCS",
+                "quantity": 0.0,
+                "remark": "",
+            }
+            aggregated[product.id] = current
+        current["quantity"] += quantity
+        if remark and remark not in current["remark"].split("; "):
+            current["remark"] = "; ".join(filter(None, [current["remark"], remark]))
+
+    if errors:
+        summary = "; ".join(errors[:8])
+        if len(errors) > 8:
+            summary += f"; and {len(errors) - 8} more error(s)"
+        raise ValueError(summary)
+    if not aggregated:
+        raise ValueError("No valid material rows were found")
+
+    require_warehouse(db, warehouse_id, SINGLE_RAN_PROGRAM)
+    items = list(aggregated.values())
+    validate_reservable_stock(db, warehouse_id, [MaterialRequisitionItemIn(**item) for item in items], SINGLE_RAN_PROGRAM)
+    reserved = reserved_stock_quantities(db, SINGLE_RAN_PROGRAM)
+    balances = {
+        row.product_id: float(row.quantity or 0)
+        for row in db.query(StockBalance).filter(
+            StockBalance.program == SINGLE_RAN_PROGRAM,
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.product_id.in_(list(aggregated)),
+        )
+    }
+    for item in items:
+        held = float(reserved.get((warehouse_id, item["product_id"]), 0) or 0)
+        item["available_quantity"] = max(balances.get(item["product_id"], 0) - held, 0)
+    return {
+        "sheet": sheet.title,
+        "items": items,
+        "row_count": len(items),
+        "total_quantity": sum(float(item["quantity"]) for item in items),
+    }
+
+
 def find_warehouse_for_import(db: Session, grid: list[list[str]], default_warehouse_id: int = 0, program: str = DEFAULT_PROGRAM) -> Warehouse:
     program_key = normalize_program(program)
     name = find_sheet_value(grid, "Warehouse name", "Warehouse")
@@ -6991,6 +7167,72 @@ def add_previous_mr_numbers_to_notes() -> None:
 
 
 add_previous_mr_numbers_to_notes()
+
+
+@app.get("/api/warehouse/sr-request-items/template")
+def download_sr_request_items_template(request: Request, program: str = DEFAULT_PROGRAM):
+    if normalize_program(program) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Excel request upload is available for Single RAN only")
+    require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Materials"
+    sheet.append(["Part #", "Vendor", "Description", "Quantity", "Remark"])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = "A1:E1"
+    sheet.column_dimensions["A"].width = 24
+    sheet.column_dimensions["B"].width = 18
+    sheet.column_dimensions["C"].width = 56
+    sheet.column_dimensions["D"].width = 14
+    sheet.column_dimensions["E"].width = 42
+    instructions = workbook.create_sheet("Instructions")
+    instructions.append(["Column", "Requirement"])
+    instructions.append(["Part #", "Required. Must exactly match an active Single RAN material."])
+    instructions.append(["Vendor", "Required. Must match the material vendor in Setup."])
+    instructions.append(["Description", "Optional. The system uses the official description saved in Single RAN."])
+    instructions.append(["Quantity", "Required. Enter a number greater than zero."])
+    instructions.append(["Remark", "Optional."])
+    instructions.column_dimensions["A"].width = 18
+    instructions.column_dimensions["B"].width = 70
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="Single-RAN-MR-TR-Items-Template.xlsx"'},
+    )
+
+
+@app.post("/api/warehouse/sr-request-items/preview-excel")
+async def preview_sr_request_items_excel(
+    request: Request,
+    workbook: UploadFile = File(...),
+    request_kind: str = Form("mr"),
+    warehouse_id: int = Form(...),
+    program: str = Form(DEFAULT_PROGRAM),
+    db: Session = Depends(db_session),
+):
+    if normalize_program(program) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Excel request upload is available for Single RAN only")
+    kind = str(request_kind or "").strip().lower()
+    if kind == "mr":
+        require_roles(request, "Admin", "Management", "Requester")
+    elif kind == "transfer":
+        require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
+    else:
+        raise HTTPException(status_code=400, detail="Request type must be MR or Transfer")
+    contents = await workbook.read(SR_REQUEST_UPLOAD_MAX_BYTES + 1)
+    try:
+        result = parse_sr_request_upload(
+            db,
+            contents,
+            warehouse_id,
+            workbook.filename or "materials.xlsx",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, **result}
 
 
 def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
