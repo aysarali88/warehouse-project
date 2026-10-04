@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DDL, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, event, func
+from sqlalchemy import Boolean, Column, DDL, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, event, func
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -42,6 +42,19 @@ class RolloutEntryCounter(Base):
 
     name = Column(String, primary_key=True)
     next_value = Column(Integer, nullable=False)
+
+
+class InstalledPoleOverride(Base):
+    __tablename__ = "installed_pole_overrides"
+    __table_args__ = (UniqueConstraint("program", "city", name="uq_installed_pole_override_program_city"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    program = Column(String, default="FTTH", nullable=False, index=True)
+    city = Column(String, nullable=False, index=True)
+    count = Column(Integer, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    updated_by = Column(String, default="")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class FiberMapArea(Base):

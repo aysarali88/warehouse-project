@@ -28,6 +28,30 @@ def empty_result():
     }
 
 
+def apply_tripoli_installed_override(result, manual_count, enabled=True):
+    """Apply the temporary Tripoli dashboard value without changing Site Survey."""
+    updated = {**result, "by_city": dict(result.get("by_city") or {})}
+    live_tripoli = updated["by_city"].get("Tripoli") if updated.get("available") else None
+    applied = bool(enabled and (live_tripoli is None or live_tripoli < manual_count))
+
+    if enabled and updated.get("available"):
+        updated["by_city"]["Tripoli"] = max(live_tripoli or 0, manual_count)
+    elif applied:
+        updated["by_city"]["Tripoli"] = manual_count
+    else:
+        updated["by_city"]["Tripoli"] = live_tripoli
+
+    if updated.get("available"):
+        misurata = updated["by_city"].get("Misurata")
+        updated["total"] = misurata + updated["by_city"]["Tripoli"] if misurata is not None else None
+    updated["manual_override"] = {
+        "count": manual_count,
+        "enabled": bool(enabled),
+        "applied": applied,
+    }
+    return updated
+
+
 @lru_cache(maxsize=2)
 def _survey_engine(database_url):
     url = database_url.strip()

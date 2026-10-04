@@ -41,6 +41,7 @@ from models import (
     AppUser,
     FiberMapArea,
     FiberMapSchematic,
+    InstalledPoleOverride,
     IssueOrder,
     IssueOrderItem,
     MaterialRequisition,
@@ -63,7 +64,7 @@ from models import (
     TechnicianBalance,
     Warehouse,
 )
-from site_survey_readonly import installed_pole_counts
+from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
 
 WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
@@ -78,6 +79,7 @@ ROLLOUT_CODE_REFERENCE_CACHE: dict[str, tuple[float, list[dict]]] = {}
 ROLLOUT_CODE_REFERENCE_CACHE_TTL = 60
 ROLLOUT_POLE_SUMMARY_CACHE: tuple[float, dict] | None = None
 ROLLOUT_POLE_SUMMARY_CACHE_TTL = 60
+DEFAULT_TRIPOLI_INSTALLED_POLES = 571
 
 # Hay Demashq has no uploaded fiber map yet. These approved HUB codes keep
 # Hub Accessories entry available while preserving Area/XBOX validation.
@@ -1241,6 +1243,11 @@ class WarehouseIn(BaseModel):
 class SiteIn(BaseModel):
     name: str
     program: str = DEFAULT_PROGRAM
+
+
+class TripoliInstalledPoleOverrideIn(BaseModel):
+    count: int = Field(ge=0, le=1_000_000)
+    enabled: bool = True
 
 
 class TechnicianIn(BaseModel):
@@ -4198,6 +4205,18 @@ def rollout_pole_summary(request: Request, force: bool = False, db: Session = De
             totals[city] += float(row.get("quantity") or 0)
 
     survey = installed_pole_counts()
+    user_program = normalize_program(current_user(request).program)
+    manual = (
+        db.query(InstalledPoleOverride)
+        .filter(
+            InstalledPoleOverride.program == user_program,
+            InstalledPoleOverride.city == "Tripoli",
+        )
+        .first()
+    )
+    manual_count = manual.count if manual else DEFAULT_TRIPOLI_INSTALLED_POLES
+    manual_enabled = manual.enabled if manual else True
+    survey = apply_tripoli_installed_override(survey, manual_count, manual_enabled)
     result = {
         "success": True,
         "inventory": {"total": sum(totals.values()), "by_city": totals},
@@ -4206,6 +4225,32 @@ def rollout_pole_summary(request: Request, force: bool = False, db: Session = De
     }
     ROLLOUT_POLE_SUMMARY_CACHE = (now, result)
     return result
+
+
+@app.post("/api/warehouse/rollout-pole-summary/tripoli-override")
+def save_tripoli_installed_pole_override(
+    request: Request,
+    payload: TripoliInstalledPoleOverrideIn,
+    db: Session = Depends(db_session),
+):
+    """Save or disable the temporary Tripoli installed-pole count."""
+    global ROLLOUT_POLE_SUMMARY_CACHE
+    actor = require_roles(request, "Admin")
+    program = normalize_program(actor.program)
+    row = (
+        db.query(InstalledPoleOverride)
+        .filter(InstalledPoleOverride.program == program, InstalledPoleOverride.city == "Tripoli")
+        .first()
+    )
+    if row is None:
+        row = InstalledPoleOverride(program=program, city="Tripoli", count=payload.count)
+        db.add(row)
+    row.count = payload.count
+    row.enabled = payload.enabled
+    row.updated_by = request_actor(request)
+    db.commit()
+    ROLLOUT_POLE_SUMMARY_CACHE = None
+    return {"success": True, "count": row.count, "enabled": row.enabled}
 
 
 @app.get("/api/warehouse/rollout-daily-progress/export")
