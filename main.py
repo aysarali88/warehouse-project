@@ -63,6 +63,7 @@ from models import (
     TechnicianBalance,
     Warehouse,
 )
+from site_survey_readonly import installed_pole_counts
 
 WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
 WAREHOUSE_CACHE_TTL = 25
@@ -75,6 +76,8 @@ ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
 ROLLOUT_ENTRY_ID_CACHE_TTL = 30
 ROLLOUT_CODE_REFERENCE_CACHE: dict[str, tuple[float, list[dict]]] = {}
 ROLLOUT_CODE_REFERENCE_CACHE_TTL = 60
+ROLLOUT_POLE_SUMMARY_CACHE: tuple[float, dict] | None = None
+ROLLOUT_POLE_SUMMARY_CACHE_TTL = 60
 
 # Hay Demashq has no uploaded fiber map yet. These approved HUB codes keep
 # Hub Accessories entry available while preserving Area/XBOX validation.
@@ -4148,6 +4151,60 @@ def rollout_dashboard_summary(request: Request, program: str = DEFAULT_PROGRAM, 
     }
     response["metrics"]["estimated_payload_bytes"] = len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     return response
+
+
+@app.get("/api/warehouse/rollout-pole-summary")
+def rollout_pole_summary(request: Request, force: bool = False, db: Session = Depends(db_session)):
+    """Read pole receipt totals and installed pole counts for the rollout dashboard."""
+    global ROLLOUT_POLE_SUMMARY_CACHE
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    now = time.monotonic()
+    if not force and ROLLOUT_POLE_SUMMARY_CACHE and now - ROLLOUT_POLE_SUMMARY_CACHE[0] < ROLLOUT_POLE_SUMMARY_CACHE_TTL:
+        return ROLLOUT_POLE_SUMMARY_CACHE[1]
+
+    totals = {"Misurata": 0, "Tripoli": 0}
+    receipt_rows = (
+        db.query(Warehouse.name, func.sum(ReceiveOrderItem.quantity).label("quantity"))
+        .join(ReceiveOrderItem, ReceiveOrderItem.product_id == Product.id)
+        .join(ReceiveOrder, ReceiveOrder.id == ReceiveOrderItem.receive_order_id)
+        .join(Warehouse, Warehouse.id == ReceiveOrder.warehouse_id)
+        .filter(
+            Product.program == "FTTH",
+            ReceiveOrder.program == "FTTH",
+            func.lower(func.trim(Product.sku)).in_({"gmb8m-wf", "gmb8m"}),
+            func.lower(func.trim(ReceiveOrder.supplier)) == "local",
+            func.lower(func.trim(ReceiveOrder.status)) == "confirmed",
+        )
+        .group_by(Warehouse.name)
+        .all()
+    )
+    for warehouse, quantity in receipt_rows:
+        warehouse_key = normalize_usage_key(warehouse or "")
+        city = "Misurata" if warehouse_key == "misuratalnet" else "Tripoli" if warehouse_key == "tripoli" else ""
+        if city:
+            totals[city] += float(quantity or 0)
+
+    pole_skus = {"gmb8m-wf", "gmb8m"}
+    for row in initial_stock_reference_rows():
+        sku_key = normalize_usage_key(row.get("sku") or "")
+        if sku_key not in pole_skus or normalize_usage_key(row.get("vendor") or "") != "local":
+            continue
+        warehouse_key = normalize_usage_key(row.get("warehouse") or "")
+        if warehouse_key == "misuratafreezone" and sku_key == "gmb8m":
+            warehouse_key = "misuratalnet"
+        city = "Misurata" if warehouse_key == "misuratalnet" else "Tripoli" if warehouse_key == "tripoli" else ""
+        if city:
+            totals[city] += float(row.get("quantity") or 0)
+
+    survey = installed_pole_counts()
+    result = {
+        "success": True,
+        "inventory": {"total": sum(totals.values()), "by_city": totals},
+        "site_survey": survey,
+        "fetched_at": datetime.now(TRIPOLI_TZ).isoformat(),
+    }
+    ROLLOUT_POLE_SUMMARY_CACHE = (now, result)
+    return result
 
 
 @app.get("/api/warehouse/rollout-daily-progress/export")
