@@ -4165,6 +4165,7 @@ def rollout_pole_summary(request: Request, force: bool = False, db: Session = De
     totals = {"Misurata": 0, "Tripoli": 0}
     receipt_rows = (
         db.query(Warehouse.name, func.sum(ReceiveOrderItem.quantity).label("quantity"))
+        .select_from(Product)
         .join(ReceiveOrderItem, ReceiveOrderItem.product_id == Product.id)
         .join(ReceiveOrder, ReceiveOrder.id == ReceiveOrderItem.receive_order_id)
         .join(Warehouse, Warehouse.id == ReceiveOrder.warehouse_id)
