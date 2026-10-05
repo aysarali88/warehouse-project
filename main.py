@@ -2112,10 +2112,14 @@ def rollout_norm(value) -> str:
 
 def rollout_area_key(value) -> str:
     key = rollout_norm(value)
+    if key in {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}:
+        return "hayalandaluszone1"
     return "hayalandaluszone2" if key in {"hayalandalus", "hayandaluszone2", "hayalandaluszone2"} else key
 
 
 def rollout_area_label(value) -> str:
+    if rollout_area_key(value) == "hayalandaluszone1":
+        return "Hay Al Andalus Z1"
     return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
 
 

@@ -84,6 +84,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertTrue(all(row["area"] == "Hay Al Andalus Zone 2" for row in refs))
         self.assertEqual(main.rollout_area_key("Hay Al Andalus"), main.rollout_area_key("Hay Al Andalus Zone 2"))
 
+    def test_andalus_zone_one_aliases_collapse_to_the_existing_field_entry_name(self):
+        names = ("Hay Al Andalus Z1", "Hay Andalus ZONE 1", "Hay Andalus Zone 1")
+        keys = {main.rollout_area_key(name) for name in names}
+        labels = {main.rollout_area_label(name) for name in names}
+        self.assertEqual(keys, {"hayalandaluszone1"})
+        self.assertEqual(labels, {"Hay Al Andalus Z1"})
+
     def test_mr_site_aliases_use_albera_as_the_single_name(self):
         self.assertEqual(main.canonical_mr_history_area("Bera W Taleem"), "Albera")
         self.assertEqual(main.canonical_mr_history_area("Albera"), "Albera")
