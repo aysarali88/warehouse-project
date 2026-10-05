@@ -91,6 +91,33 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(keys, {"hayalandaluszone1"})
         self.assertEqual(labels, {"Hay Al Andalus Z1"})
 
+    def test_awlad_baeoo_x1_box_changes_are_scoped_and_idempotent(self):
+        def box(xbox, code, length):
+            return {
+                "Area": "Awlad Baeoo", "Zone": "Awlad Baeoo", "Related to XBOX": xbox,
+                "Box code": code, "Cable length m": length,
+            }
+
+        reference = {
+            "boxes": [
+                box("X1", "H4-L1-S4", 30), box("X1", "H6-L3-S1", 20), box("X1", "H4-L2-S4", 10),
+                box("X2", "H4-L1-S4", 30), box("X1", "H4-L1-S3", 25), box("X1", "H4-L4-S3", 20),
+            ],
+            "area_plans": [{"area": "Awlad Baeoo", "targetSubEndBox": 30, "targetCableMeters": 1000}],
+        }
+        main.apply_awlad_baeoo_x1_map_changes(reference)
+        main.apply_awlad_baeoo_x1_map_changes(reference)
+
+        x1_codes = {row["Box code"] for row in reference["boxes"] if row["Related to XBOX"] == "X1"}
+        self.assertFalse(x1_codes & {"H4-L1-S4", "H6-L3-S1", "H4-L2-S4"})
+        self.assertIn("H4-L1-S4", {row["Box code"] for row in reference["boxes"] if row["Related to XBOX"] == "X2"})
+        expected = {"H4-L4-S3": 100, "H4-L4-S4": 50, "H4-L3-S3": 80, "H4-L3-S4": 50}
+        actual = {row["Box code"]: row["Cable length m"] for row in reference["boxes"] if row["Related to XBOX"] == "X1" and row["Box code"] in expected}
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(actual), 4)
+        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 30)
+        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 1200)
+
     def test_mr_site_aliases_use_albera_as_the_single_name(self):
         self.assertEqual(main.canonical_mr_history_area("Bera W Taleem"), "Albera")
         self.assertEqual(main.canonical_mr_history_area("Albera"), "Albera")
@@ -141,12 +168,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         boxes = {row["Box code"]: row for row in reference["boxes"]}
         self.assertEqual(boxes["H4-L1-S3"]["Cable length m"], 80)
         self.assertEqual(boxes["H2-L1-S3"]["Cable length m"], 100)
-        self.assertEqual(len(reference["boxes"]), 2)
-        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 12)
-        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 680)
+        self.assertEqual(boxes["H8-L1-S4"]["Cable length m"], 80)
+        self.assertEqual(len(reference["boxes"]), 3)
+        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 13)
+        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 760)
 
     def test_bera_w_taleem_x1_retired_boxes_are_scoped_to_requested_codes(self):
-        for code in ("H5-L1-S4", "H5-L4-S1", "H5-L4-S2", "H5-L4-S3", "H5-L4-S4"):
+        for code in ("H1-L1-S4", "H5-L1-S4", "H5-L4-S1", "H5-L4-S2", "H5-L4-S3", "H5-L4-S4"):
             self.assertTrue(main.retired_bera_w_taleem_x1_box({
                 "Area": "Bera W Taleem", "Related to XBOX": "X1", "Box code": code,
             }))
@@ -156,6 +184,9 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertFalse(main.retired_bera_w_taleem_x1_box({
             "Area": "Another Area", "Related to XBOX": "X1", "Box code": "H5-L4-S1",
         }))
+        self.assertFalse(main.retired_bera_w_taleem_x1_box({
+            "Area": "Bera W Taleem", "Related to XBOX": "X2", "Box code": "H1-L1-S4",
+        }))
 
     def test_bera_w_taleem_x1_h5_splitters_are_available_with_requested_cables(self):
         reference = {"boxes": [], "area_plans": [{"area": "Bera W Taleem", "targetSubEndBox": 10, "targetCableMeters": 500}]}
@@ -163,12 +194,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         main.add_bera_w_taleem_x1_box(reference)
 
         boxes = {box["Box code"]: box for box in reference["boxes"]}
-        self.assertEqual(len(boxes), 2)
+        self.assertEqual(len(boxes), 3)
         self.assertEqual(boxes["H5-L3-S4"]["Cable length m"], 50)
         self.assertEqual(boxes["H5-L2-S4"]["Cable length m"], 80)
+        self.assertEqual(boxes["H2-L3-S4"]["Cable length m"], 80)
         self.assertTrue(all(box["Related to XBOX"] == "X1" for box in boxes.values()))
-        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 12)
-        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 630)
+        self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 13)
+        self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 710)
 
     def test_hub_codes_are_available_from_map_parent_hub_field(self):
         refs = main.rollout_code_reference_rows()

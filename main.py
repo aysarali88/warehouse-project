@@ -2161,7 +2161,75 @@ def retired_bera_w_taleem_x1_box(row: dict) -> bool:
     if rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", "xbox", default="")) != "X1":
         return False
     code = rollout_code_key(first_value(row, "Box code", "box_code", default=""))
-    return code == "H5L1S4" or code in {f"H5L4S{sequence}" for sequence in range(1, 5)}
+    return code in {"H1L1S4", "H5L1S4"} or code in {f"H5L4S{sequence}" for sequence in range(1, 5)}
+
+
+def awlad_baeoo_x1_row(row: dict) -> bool:
+    area = rollout_norm(first_value(row, "Area", "area", "Zone", "zone", default=""))
+    return area in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"} and rollout_xbox_key(
+        first_value(row, "Related to XBOX", "related to xbox", "XBOX", "xbox", default="")
+    ) == "X1"
+
+
+def apply_awlad_baeoo_x1_map_changes(data: dict) -> None:
+    deletions = {"H4L1S4", "H6L3S1", "H4L2S4"}
+    additions = (("H4-L4-S3", 4, 3, 100), ("H4-L4-S4", 4, 4, 50), ("H4-L3-S3", 3, 3, 80), ("H4-L3-S4", 3, 4, 50))
+    removed = [
+        row for row in data.get("boxes") or []
+        if awlad_baeoo_x1_row(row) and rollout_code_key(first_value(row, "Box code", "box_code", default="")) in deletions
+    ]
+    if removed:
+        data["boxes"] = [row for row in data.get("boxes") or [] if row not in removed]
+        for plan in data.get("area_plans") or []:
+            if rollout_norm(plan.get("area")) in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"}:
+                plan["targetSubEndBox"] = max(0, int(plan.get("targetSubEndBox") or 0) - len(removed))
+                plan["targetCableMeters"] = max(
+                    0,
+                    safe_float(plan.get("targetCableMeters"))
+                    - sum(safe_float(first_value(row, "Cable length m", "cable_length_m", default=0)) for row in removed),
+                )
+
+    for code, line, splitter, length in additions:
+        existing = next(
+            (
+                row for row in data.get("boxes") or []
+                if awlad_baeoo_x1_row(row)
+                and rollout_code_key(first_value(row, "Box code", "box_code", default="")) == rollout_code_key(code)
+            ),
+            None,
+        )
+        if existing is not None:
+            old_length = safe_float(first_value(existing, "Cable length m", "cable_length_m", default=0))
+            existing["Cable length m"] = length
+            existing["Material type"] = f"Single-Core Distribution Cable_{length}m"
+            for plan in data.get("area_plans") or []:
+                if rollout_norm(plan.get("area")) in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"}:
+                    plan["targetCableMeters"] = max(0, safe_float(plan.get("targetCableMeters")) + length - old_length)
+            continue
+
+        data.setdefault("boxes", []).append(
+            {
+                "Area": "Awlad Baeoo",
+                "Zone": "Awlad Baeoo",
+                "City": "Misurata",
+                "Related to XBOX": "X1",
+                "XBOX": "X-BOX01",
+                "Part": "x1-part01",
+                "Hub": "H4",
+                "Line": line,
+                "Splitter": splitter,
+                "Box code": code,
+                "Box type": "SUB BOX",
+                "Real length m": "",
+                "Cable length m": length,
+                "Material type": f"Single-Core Distribution Cable_{length}m",
+                "dB": "",
+            }
+        )
+        for plan in data.get("area_plans") or []:
+            if rollout_norm(plan.get("area")) in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"}:
+                plan["targetSubEndBox"] = int(plan.get("targetSubEndBox") or 0) + 1
+                plan["targetCableMeters"] = safe_float(plan.get("targetCableMeters")) + length
 
 
 def add_hay_andalus_z1_x4_box(data: dict) -> None:
@@ -2202,7 +2270,7 @@ def add_hay_andalus_z1_x4_box(data: dict) -> None:
 
 
 def add_bera_w_taleem_x2_boxes(data: dict) -> None:
-    additions = (("H4-L1-S3", 4, 3, 80), ("H2-L1-S3", 2, 3, 100))
+    additions = (("H4-L1-S3", 4, 3, 80), ("H2-L1-S3", 2, 3, 100), ("H8-L1-S4", 8, 4, 80))
     existing = {
         (
             rollout_area_key(first_value(row, "Zone", "Area", default="")),
@@ -2214,7 +2282,24 @@ def add_bera_w_taleem_x2_boxes(data: dict) -> None:
     area_key = rollout_area_key("Bera W Taleem")
     for code, hub, splitter, length in additions:
         key = (area_key, "X2", rollout_code_key(code))
-        if key in existing:
+        current = next(
+            (
+                row for row in data.get("boxes") or []
+                if (
+                    rollout_area_key(first_value(row, "Zone", "Area", default="")),
+                    rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")),
+                    rollout_code_key(first_value(row, "Box code", default="")),
+                ) == key
+            ),
+            None,
+        )
+        if current is not None:
+            old_length = safe_float(first_value(current, "Cable length m", "cable_length_m", default=0))
+            current["Cable length m"] = length
+            current["Material type"] = f"Single-Core Distribution Cable_{length}m"
+            for plan in data.get("area_plans") or []:
+                if rollout_area_key(plan.get("area")) == area_key:
+                    plan["targetCableMeters"] = max(0, safe_float(plan.get("targetCableMeters")) + length - old_length)
             continue
         data.setdefault("boxes", []).append(
             {
@@ -2243,16 +2328,23 @@ def add_bera_w_taleem_x2_boxes(data: dict) -> None:
 
 
 def add_bera_w_taleem_x1_box(data: dict) -> None:
-    additions = (("H5-L3-S4", 3, 50), ("H5-L2-S4", 2, 80))
-    for code, line, length in additions:
-        exists = any(
-            rollout_norm(first_value(row, "Zone", "Area", default="")) in {"berawtaleem", "albera"}
+    additions = (("H5-L3-S4", 5, 3, 4, 50), ("H5-L2-S4", 5, 2, 4, 80), ("H2-L3-S4", 2, 3, 4, 80))
+    for code, hub, line, splitter, length in additions:
+        existing = next((
+            row for row in data.get("boxes") or []
+            if rollout_norm(first_value(row, "Zone", "Area", default="")) in {"berawtaleem", "albera"}
             and rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")) == "X1"
             and rollout_code_key(first_value(row, "Box code", default="")) == rollout_code_key(code)
-            for row in data.get("boxes") or []
-        )
-        if exists:
+        ), None)
+        if existing is not None:
+            old_length = safe_float(first_value(existing, "Cable length m", "cable_length_m", default=0))
+            existing["Cable length m"] = length
+            existing["Material type"] = f"Single-Core Distribution Cable_{length}m"
+            for plan in data.get("area_plans") or []:
+                if rollout_area_key(plan.get("area")) == rollout_area_key("Bera W Taleem"):
+                    plan["targetCableMeters"] = max(0, safe_float(plan.get("targetCableMeters")) + length - old_length)
             continue
+
         data.setdefault("boxes", []).append(
             {
                 "Area": "Bera W Taleem",
@@ -2261,9 +2353,9 @@ def add_bera_w_taleem_x1_box(data: dict) -> None:
                 "Related to XBOX": "X1",
                 "XBOX": "X-BOX01",
                 "Part": "x1-part01",
-                "Hub": "H5",
+                "Hub": f"H{hub}",
                 "Line": line,
-                "Splitter": 4,
+                "Splitter": splitter,
                 "Box code": code,
                 "Box type": "SUB BOX",
                 "Real length m": "",
@@ -2317,6 +2409,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         add_hay_andalus_z1_x4_box(data)
         add_bera_w_taleem_x1_box(data)
         add_bera_w_taleem_x2_boxes(data)
+        apply_awlad_baeoo_x1_map_changes(data)
         return data
     for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
         try:
@@ -2355,6 +2448,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
     add_hay_andalus_z1_x4_box(data)
     add_bera_w_taleem_x1_box(data)
     add_bera_w_taleem_x2_boxes(data)
+    apply_awlad_baeoo_x1_map_changes(data)
     return data
 
 
