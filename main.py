@@ -75,7 +75,7 @@ ROLLOUT_DB_CACHE: tuple[float, list[dict]] | None = None
 ROLLOUT_DB_CACHE_TTL = 30
 ROLLOUT_ENTRY_ID_CACHE: tuple[float, str] | None = None
 ROLLOUT_ENTRY_ID_CACHE_TTL = 30
-ROLLOUT_CODE_REFERENCE_CACHE: dict[str, tuple[float, list[dict]]] = {}
+ROLLOUT_CODE_REFERENCE_CACHE: dict[str, tuple[float, list[dict], int]] = {}
 ROLLOUT_CODE_REFERENCE_CACHE_TTL = 60
 ROLLOUT_POLE_SUMMARY_CACHE: tuple[float, dict] | None = None
 ROLLOUT_POLE_SUMMARY_CACHE_TTL = 60
@@ -1250,6 +1250,23 @@ class TripoliInstalledPoleOverrideIn(BaseModel):
     enabled: bool = True
 
 
+class FiberMapBoxSelectionIn(BaseModel):
+    xbox: str
+    code: str
+    box_type: str = ""
+    cable_length_m: float | None = Field(default=None, ge=1, le=100_000)
+
+
+class FiberMapChangeIn(BaseModel):
+    area: str
+    action: Literal["add", "delete"]
+    selections: list[FiberMapBoxSelectionIn] = Field(min_length=1, max_length=100)
+    expected_revision: str
+    start_date: str = ""
+    end_date: str = ""
+    target_users: int = Field(default=0, ge=0, le=10_000_000)
+
+
 class TechnicianIn(BaseModel):
     name: str
     phone: str = ""
@@ -2401,9 +2418,19 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         logger.warning("Fiber map reference not found: %s", FIBER_MAP_REFERENCE_PATH)
     except Exception:
         logger.exception("Could not read fiber map reference")
+    saved_areas = []
+    managed_area_keys: set[str] = set()
+    if db is not None:
+        saved_areas = db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all()
+        managed_area_keys = {fiber_map_manager_area_key(row.area) for row in saved_areas}
     data["boxes"] = [
         row for row in data["boxes"]
-        if not retired_hay_andalus_z1_box(row) and not retired_bera_w_taleem_x1_box(row)
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) not in managed_area_keys
+        and not retired_hay_andalus_z1_box(row) and not retired_bera_w_taleem_x1_box(row)
+    ]
+    data["routes"] = [
+        row for row in data["routes"]
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) not in managed_area_keys
     ]
     if db is None:
         add_hay_andalus_z1_x4_box(data)
@@ -2411,16 +2438,13 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         add_bera_w_taleem_x2_boxes(data)
         apply_awlad_baeoo_x1_map_changes(data)
         return data
-    for saved_area in db.query(FiberMapArea).filter(FiberMapArea.program == normalize_program(program)).all():
+    for saved_area in saved_areas:
         try:
             payload = json.loads(saved_area.design_data or "{}")
         except (TypeError, ValueError):
             logger.warning("Ignoring unreadable saved fiber map for %s", saved_area.area)
             continue
-        boxes = [
-            row for row in payload.get("boxes") or []
-            if not retired_hay_andalus_z1_box(row) and not retired_bera_w_taleem_x1_box(row)
-        ]
+        boxes = list(payload.get("boxes") or [])
         data["boxes"].extend(boxes)
         data["routes"].extend(payload.get("routes") or [])
         data["area_plans"].append(
@@ -2445,17 +2469,28 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         .order_by(FiberMapSchematic.area, FiberMapSchematic.xbox, FiberMapSchematic.sheet_name)
         .all()
     ]
-    add_hay_andalus_z1_x4_box(data)
-    add_bera_w_taleem_x1_box(data)
-    add_bera_w_taleem_x2_boxes(data)
-    apply_awlad_baeoo_x1_map_changes(data)
+    if fiber_map_manager_area_key("Hay Al Andalus Z1") not in managed_area_keys:
+        add_hay_andalus_z1_x4_box(data)
+    if fiber_map_manager_area_key("Bera W Taleem") not in managed_area_keys:
+        add_bera_w_taleem_x1_box(data)
+        add_bera_w_taleem_x2_boxes(data)
+    if fiber_map_manager_area_key("Awlad Baeoo") not in managed_area_keys:
+        apply_awlad_baeoo_x1_map_changes(data)
     return data
 
 
 def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
     program_key = normalize_program(program)
+    map_revision = 0
+    if db is not None:
+        map_revision = int(
+            db.query(func.max(AuditLog.id))
+            .filter(AuditLog.action.in_(("fiber_map_add_sub_end_cable", "fiber_map_delete_sub_end_cable")))
+            .scalar()
+            or 0
+        )
     cached = ROLLOUT_CODE_REFERENCE_CACHE.get(program_key)
-    if cached and time.monotonic() - cached[0] < ROLLOUT_CODE_REFERENCE_CACHE_TTL:
+    if cached and cached[2] == map_revision and time.monotonic() - cached[0] < ROLLOUT_CODE_REFERENCE_CACHE_TTL:
         return cached[1]
 
     ref = load_fiber_map_reference(db, program_key)
@@ -2604,7 +2639,7 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
             and rollout_code_key(row.get("code")) in {rollout_code_key(code) for code in removed_x9_codes}
         )
     ]
-    ROLLOUT_CODE_REFERENCE_CACHE[program_key] = (time.monotonic(), rows)
+    ROLLOUT_CODE_REFERENCE_CACHE[program_key] = (time.monotonic(), rows, map_revision)
     return rows
 
 
@@ -2961,7 +2996,345 @@ def area_builder_metadata(area: str, city: str, start_date: str, end_date: str, 
 @app.get("/api/warehouse/fiber-map-reference")
 def fiber_map_reference(request: Request, db: Session = Depends(db_session)):
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
-    return {"success": True, **load_fiber_map_reference(db, program_key)}
+    reference = load_fiber_map_reference(db, program_key)
+    return JSONResponse({"success": True, "revision": fiber_map_global_version(db), **reference}, headers={"Cache-Control": "no-store"})
+
+
+def fiber_map_global_version(db: Session) -> str:
+    version = db.query(func.max(AuditLog.id)).filter(
+        AuditLog.action.in_(
+            ("publish_fiber_map_area", "fiber_map_add_sub_end_cable", "fiber_map_delete_sub_end_cable")
+        )
+    ).scalar()
+    return str(version or 0)
+
+
+def fiber_map_manager_area_key(value: str) -> str:
+    key = rollout_area_key(value)
+    if key in {"berawtaleem", "albera"}:
+        return "berawtaleem"
+    if key in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"}:
+        return "awladbaeoo"
+    return key
+
+
+def fiber_map_manager_area_label(value: str) -> str:
+    key = fiber_map_manager_area_key(value)
+    if key == "berawtaleem":
+        return "Bera W Taleem"
+    if key == "awladbaeoo":
+        return "Awlad Baeoo"
+    if key == "hayalandaluszone1":
+        return "Hay Al Andalus Z1"
+    return str(value or "").strip()
+
+
+def fiber_map_manager_box_key(row: dict) -> tuple[str, str, str]:
+    return (
+        rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")),
+        rollout_code_key(first_value(row, "Box code", "box_code", default="")),
+        rollout_norm(first_value(row, "Box type", "box_type", default="")),
+    )
+
+
+def fiber_map_manager_line_key(value) -> str:
+    match = re.fullmatch(r"L?(\d+)", rollout_code_key(value))
+    return f"L{int(match.group(1))}" if match else ""
+
+
+def fiber_map_manager_snapshot(reference: dict, area: str) -> dict:
+    area_key = fiber_map_manager_area_key(area)
+    boxes = [
+        row for row in reference.get("boxes") or []
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == area_key
+    ]
+    routes = [
+        row for row in reference.get("routes") or []
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == area_key
+    ]
+    normalized = {
+        "boxes": sorted(boxes, key=lambda row: fiber_map_manager_box_key(row)),
+        "routes": sorted(routes, key=lambda row: str(first_value(row, "Route code", "Cable code", default=""))),
+    }
+    revision = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return {**normalized, "revision": revision}
+
+
+def fiber_map_manager_catalog(db: Session, program: str, reference: dict) -> list[dict]:
+    try:
+        with open(FIBER_MAP_REFERENCE_PATH, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, ValueError):
+        raw = {}
+    catalog = list((raw or {}).get("boxes") or []) + list(reference.get("boxes") or [])
+    for audit in (
+        db.query(AuditLog)
+        .filter(AuditLog.action == "fiber_map_delete_sub_end_cable")
+        .order_by(AuditLog.id.desc())
+        .limit(1000)
+        .all()
+    ):
+        try:
+            details = json.loads(audit.details or "{}")
+        except (TypeError, ValueError):
+            continue
+        if normalize_program(details.get("program", DEFAULT_PROGRAM)) == normalize_program(program):
+            catalog.extend(details.get("before") or [])
+    return catalog
+
+
+def fiber_map_manager_options(db: Session, program: str) -> dict:
+    reference = load_fiber_map_reference(db, program)
+    catalog = fiber_map_manager_catalog(db, program, reference)
+    area_names: dict[str, dict] = {}
+    catalog_by_area: dict[str, dict[tuple[str, str, str], dict]] = {}
+    active_by_area: dict[str, dict[tuple[str, str, str], dict]] = {}
+    topology_by_area: dict[str, dict[str, dict[str, set[str]]]] = {}
+    cable_lengths: set[int] = set()
+
+    def add_candidate(row: dict, target: dict, active: bool = False) -> None:
+        raw_area = str(first_value(row, "Area", "Zone", default="") or "").strip()
+        area_key = fiber_map_manager_area_key(raw_area)
+        code = str(first_value(row, "Box code", "box_code", default="") or "").strip()
+        box_type = str(first_value(row, "Box type", "box_type", default="") or "").strip()
+        if not area_key or not code or not re.fullmatch(r"H\d+L\d+S\d+", rollout_code_key(code)):
+            return
+        if not any(token in rollout_norm(box_type) for token in ("sub", "end")):
+            return
+        length = safe_float(first_value(row, "Cable length m", "cable_length_m", "Real length m", default=0))
+        if length <= 0:
+            return
+        xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default=""))
+        key = (xbox, rollout_code_key(code), rollout_norm(box_type))
+        target.setdefault(area_key, {})[key] = {
+            "xbox": xbox,
+            "code": code,
+            "box_type": box_type,
+            "cable_length_m": length,
+            "row": row,
+        }
+        label = fiber_map_manager_area_label(raw_area)
+        area_names.setdefault(area_key, {
+            "name": label,
+            "city": str(first_value(row, "City", "city", default="") or "").strip(),
+        })
+
+    for row in catalog:
+        add_candidate(row, catalog_by_area)
+    for row in reference.get("boxes") or []:
+        add_candidate(row, active_by_area, True)
+    for row in catalog:
+        raw_area = str(first_value(row, "Area", "Zone", default="") or "").strip()
+        area_key = fiber_map_manager_area_key(raw_area)
+        xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default=""))
+        hub_match = re.fullmatch(r"H(\d+)", rollout_code_key(first_value(row, "Hub", "hub", default="")))
+        line = fiber_map_manager_line_key(first_value(row, "Line", "line", default=""))
+        if area_key and xbox and hub_match and line:
+            topology_by_area.setdefault(area_key, {}).setdefault(xbox, {}).setdefault(f"H{int(hub_match.group(1))}", set()).add(line)
+        cable_length = safe_float(first_value(row, "Cable length m", "Real length m", "Used length m", default=0))
+        if cable_length > 0 and float(cable_length).is_integer():
+            cable_lengths.add(int(cable_length))
+
+    areas = []
+    for key, info in sorted(area_names.items(), key=lambda item: item[1]["name"].casefold()):
+        snapshot = fiber_map_manager_snapshot(reference, info["name"])
+        active = active_by_area.get(key, {})
+        candidates = catalog_by_area.get(key, {}).copy()
+        candidates.update(active)
+        def public_option(option_key: tuple[str, str, str], value: dict) -> dict:
+            return {
+                "xbox": option_key[0],
+                "code": value["code"],
+                "box_type": value["box_type"],
+                "cable_length_m": value["cable_length_m"],
+            }
+        areas.append({
+            "name": info["name"],
+            "city": info["city"],
+            "revision": snapshot["revision"],
+            "active": [public_option(k, v) for k, v in sorted(active.items())],
+            "available": [public_option(k, v) for k, v in sorted(candidates.items()) if k not in active],
+            "topology": [
+                {
+                    "xbox": xbox,
+                    "hubs": [
+                        {"hub": hub, "lines": sorted(lines, key=lambda value: int(value[1:]))}
+                        for hub, lines in sorted(hubs.items(), key=lambda item: int(item[0][1:]))
+                    ],
+                }
+                for xbox, hubs in sorted(topology_by_area.get(key, {}).items())
+            ],
+            "cable_lengths": sorted(cable_lengths),
+        })
+    return {"areas": areas}
+
+
+@app.get("/api/warehouse/fiber-map-manager/options")
+def fiber_map_manager_get_options(request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin")
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    return JSONResponse(
+        {"success": True, **fiber_map_manager_options(db, program_key)},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/warehouse/fiber-map-reference/version")
+def fiber_map_reference_version(request: Request, db: Session = Depends(db_session)):
+    current_user(request)
+    return JSONResponse({"success": True, "revision": fiber_map_global_version(db)}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/warehouse/fiber-map-manager/change")
+def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Session = Depends(db_session)):
+    user = require_roles(request, "Admin")
+    actor = user.name or user.username
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    locked_saved_rows = db.query(FiberMapArea).filter(FiberMapArea.program == program_key).with_for_update().all()
+    current = load_fiber_map_reference(db, program_key)
+    options = fiber_map_manager_options(db, program_key)["areas"]
+    area_option = next(
+        (row for row in options if fiber_map_manager_area_key(row["name"]) == fiber_map_manager_area_key(data.area)),
+        None,
+    )
+    if area_option is None:
+        raise HTTPException(status_code=404, detail="Area is not available in the approved map catalog")
+    area_name = area_option["name"]
+    snapshot = fiber_map_manager_snapshot(current, area_name)
+    if not hmac.compare_digest(snapshot["revision"], data.expected_revision):
+        raise HTTPException(status_code=409, detail="The map changed. Refresh the options and review your selection again.")
+
+    selected_keys = [(rollout_xbox_key(row.xbox), rollout_code_key(row.code)) for row in data.selections]
+    if len(set(selected_keys)) != len(selected_keys):
+        raise HTTPException(status_code=400, detail="A box code was selected more than once")
+    area_boxes = list(snapshot["boxes"])
+    before_rows = []
+    after_rows = []
+    if data.action == "delete":
+        allowed_by_key = {
+            (row["xbox"], rollout_code_key(row["code"])): row
+            for row in area_option["active"]
+        }
+        if any(key not in allowed_by_key for key in selected_keys):
+            raise HTTPException(status_code=409, detail="One or more selected boxes are no longer available for this action")
+        selected = set(selected_keys)
+        before_rows = [row for row in area_boxes if (fiber_map_manager_box_key(row)[0], fiber_map_manager_box_key(row)[1]) in selected]
+        if len(before_rows) != len(selected_keys):
+            raise HTTPException(status_code=409, detail="The selected box list no longer matches the current map")
+        area_boxes = [row for row in area_boxes if row not in before_rows]
+    else:
+        topology = {
+            row["xbox"]: {hub["hub"]: set(hub["lines"]) for hub in row["hubs"]}
+            for row in area_option["topology"]
+        }
+        active_keys = {(fiber_map_manager_box_key(row)[0], fiber_map_manager_box_key(row)[1]) for row in area_boxes}
+        allowed_lengths = {int(value) for value in area_option["cable_lengths"]}
+        area_rows = [row for row in current.get("boxes") or [] if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
+        seed_rows = [row for row in fiber_map_manager_catalog(db, program_key, current) if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
+        for selection, key in zip(data.selections, selected_keys):
+            code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-4])", key[1])
+            if not code_match:
+                raise HTTPException(status_code=400, detail="Generated box code must use H-L-S1 to S4 format")
+            hub = f"H{int(code_match.group(1))}"
+            line = f"L{int(code_match.group(2))}"
+            splitter = int(code_match.group(3))
+            if line not in topology.get(key[0], {}).get(hub, set()):
+                raise HTTPException(status_code=400, detail="Selected XBOX, hub, and line do not exist in this area's map")
+            box_type_key = rollout_norm(selection.box_type)
+            if box_type_key not in {"subbox", "endbox"}:
+                raise HTTPException(status_code=400, detail="Choose SUB BOX or END BOX")
+            if selection.cable_length_m is None or not float(selection.cable_length_m).is_integer() or int(selection.cable_length_m) not in allowed_lengths:
+                raise HTTPException(status_code=400, detail="Choose a cable length from the approved map lengths")
+            if key in active_keys:
+                raise HTTPException(status_code=409, detail="One or more selected boxes are already on the map")
+            source = next(
+                (row for row in area_rows + seed_rows
+                 if rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")) == key[0]
+                 and rollout_code_key(first_value(row, "Hub", "hub", default="")) == hub
+                 and fiber_map_manager_line_key(first_value(row, "Line", "line", default="")) == line),
+                None,
+            )
+            if source is None:
+                raise HTTPException(status_code=409, detail="Map topology changed; reload the options and try again")
+            added = json.loads(json.dumps(source))
+            length = int(selection.cable_length_m)
+            added.update({
+                "Area": area_name,
+                "Zone": area_name,
+                "City": area_option["city"] or str(first_value(source, "City", "city", default="") or ""),
+                "Related to XBOX": key[0],
+                "Hub": hub,
+                "Line": int(line[1:]),
+                "Splitter": splitter,
+                "Box code": f"{hub}-L{int(line[1:])}-S{splitter}",
+                "Box type": "SUB BOX" if box_type_key == "subbox" else "END BOX",
+                "Real length m": "",
+                "Cable length m": length,
+                "Material type": f"Single-Core Distribution Cable_{length}m",
+                "dB": "",
+            })
+            area_boxes.append(added)
+            after_rows.append(added)
+            active_keys.add(key)
+
+    area_rows = [row for row in current.get("boxes") or [] if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
+    city = area_option["city"] or str(first_value(area_rows[0], "City", "city", default="") if area_rows else "")
+    matching_saved = [row for row in locked_saved_rows if fiber_map_manager_area_key(row.area) == fiber_map_manager_area_key(area_name)]
+    if len(matching_saved) > 1:
+        raise HTTPException(status_code=409, detail="Multiple saved maps use this area name; resolve the duplicate before editing")
+    saved = matching_saved[0] if matching_saved else None
+    area_routes = list(snapshot["routes"])
+    if saved is None:
+        saved = FiberMapArea(
+            program=program_key,
+            area=area_name,
+            city=city,
+            start_date=data.start_date,
+            end_date=data.end_date,
+            target_users=data.target_users,
+            design_data="{}",
+            created_by=actor,
+        )
+        db.add(saved)
+    else:
+        saved.city = saved.city or city
+        saved.start_date = saved.start_date or data.start_date
+        saved.end_date = saved.end_date or data.end_date
+        if not saved.target_users:
+            saved.target_users = data.target_users
+    saved.design_data = json.dumps({"boxes": area_boxes, "routes": area_routes}, ensure_ascii=False)
+    action_rows = before_rows if data.action == "delete" else after_rows
+    try:
+        log_audit(
+            db,
+            f"fiber_map_{data.action}_sub_end_cable",
+            "fiber_map_area",
+            area_name,
+            actor,
+            {
+                "city": city,
+                "program": program_key,
+                "codes": [{"xbox": row.xbox, "code": row.code} for row in data.selections],
+                "before": action_rows if data.action == "delete" else [],
+                "after": action_rows if data.action == "add" else [],
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Map changed concurrently. Refresh and try again.") from exc
+    except Exception:
+        db.rollback()
+        raise
+    clear_rollout_db_cache()
+    updated = load_fiber_map_reference(db, program_key)
+    return {
+        "success": True,
+        "area": area_name,
+        "action": data.action,
+        "changed": len(data.selections),
+        "revision": fiber_map_manager_snapshot(updated, area_name)["revision"],
+    }
 
 
 @app.get("/api/warehouse/fiber-map-schematic")

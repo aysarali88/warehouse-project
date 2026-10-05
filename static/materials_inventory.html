@@ -615,6 +615,9 @@ body.sr-program .login-logo img{
 #topStockOut .chart-row b{white-space:normal;line-height:1.25}
 #topStockOut .chart-row b small{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:800}
 .area-builder-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.area-builder-actions .btn[disabled]{opacity:.45;cursor:not-allowed}.area-builder-review-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}.area-builder-review-table th,.area-builder-review-table td{padding:7px;border-bottom:1px solid var(--line);text-align:left}.area-builder-review-table th{color:#075b78;background:#edf8fa}.area-builder-map-preview{margin-top:14px;border:1px solid #c8e3e7;border-radius:8px;background:#fff;padding:14px}.area-builder-map-preview.hidden{display:none}.area-builder-map-preview h3{margin:0;color:#075b78;font-size:17px}.area-builder-map-preview p{margin:5px 0 12px;color:var(--muted);font-size:12px;font-weight:800}.area-builder-map-preview .map-stage{overflow:auto}.area-builder-map-preview .fiber-map-svg{width:2400px;max-width:none;min-width:1500px}.fiber-map-schematic-list{display:grid;gap:14px}.fiber-map-schematic-card{border:1px solid #d7e6ed;border-radius:8px;background:#fff;overflow:auto}.fiber-map-schematic-card h4{margin:0;padding:10px 12px;border-bottom:1px solid #e6f0f4;color:#075b78;font-size:14px}.fiber-map-schematic-card img{display:block;width:100%;min-width:1080px;height:auto;background:#fff}.static-map-stage{display:grid;gap:14px;overflow:visible}.static-map-card{background:#fff;border:1.5px solid #ff00d4;overflow:hidden}.static-fiber-map-image{display:block;width:100%;max-width:100%;height:auto;background:#fff}.map-view-tabs{display:flex;gap:7px;align-items:center}.map-view-tabs button{border:1px solid #b8d7e4;border-radius:7px;background:#fff;color:#0b4d75;padding:7px 11px;font-weight:800;font-size:12px;cursor:pointer}.map-view-tabs button.active{background:#087da8;border-color:#087da8;color:#fff}
+.map-manager-notice{margin:12px 0;padding:10px 12px;border-left:3px solid #087da8;background:#eff8fb;color:#36566a;font-size:12px;font-weight:800}.map-manager-options{max-height:420px;overflow:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.map-manager-option{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 5px;border-bottom:1px solid #e8eef2}.map-manager-option:last-child{border-bottom:0}.map-manager-option label{font-weight:800;overflow-wrap:anywhere;cursor:pointer}.map-manager-option small{color:var(--muted);font-weight:700;white-space:nowrap}.map-manager-review{min-height:110px}.map-manager-review ul{margin:10px 0;padding-left:20px}.map-manager-review li{padding:4px 0;font-weight:800}
+.map-manager-builder{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.map-manager-builder .field{min-width:0}.map-manager-generated{display:grid;align-content:center;gap:4px;border-left:3px solid #14a3a2;padding:5px 10px;background:#eff8fb}.map-manager-generated span{color:var(--muted);font-size:11px;font-weight:800}.map-manager-generated strong{color:#0b4d75;overflow-wrap:anywhere}.map-manager-builder button{align-self:center}.map-manager-staged{padding:10px 12px;border-bottom:1px solid var(--line)}.map-manager-staged>strong{display:block;margin-bottom:6px;color:#0b4d75}.map-manager-option .map-manager-remove{min-height:28px;padding:2px 9px;font-size:17px;line-height:1}@media(max-width:700px){.map-manager-builder{grid-template-columns:1fr}}
+.map-manager-staged .map-manager-option{grid-template-columns:minmax(0,1fr) auto auto}
 </style>
 <style>
 .static-map-card{border:0}
@@ -1038,6 +1041,7 @@ body.sr-program .login-logo img{
     <div class="tabs no-print">
       <button class="tab active" data-setup-workspace="inventory">Inventory Setup</button>
       <button class="tab admin-only" data-setup-workspace="areaBuilder">Area Builder</button>
+      <button class="tab admin-only" data-setup-workspace="mapManager">Map Changes</button>
     </div>
     <div class="setup-workspace active" id="setupInventory">
     <div class="grid three admin-only">
@@ -1108,6 +1112,30 @@ body.sr-program .login-logo img{
         </div>
       </div>
       <div class="area-builder-map-preview hidden" id="areaBuilderMapPreview"></div>
+    </div>
+    <div class="setup-workspace admin-only" id="setupMapManager">
+      <div class="area-builder-hero">
+        <div><h3>Map Changes</h3><p>Add or remove multiple approved SUB / END boxes together with their matching single-core distribution cables.</p></div>
+        <span class="area-builder-badge">Admin only</span>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <div class="form">
+            <div class="field"><label>Area</label><select id="mapManagerArea" onchange="changeMapManagerScope()"><option value="">Select area</option></select></div>
+            <div class="field"><label>Action</label><select id="mapManagerAction" onchange="changeMapManagerScope()"><option value="add">Add</option><option value="delete">Delete</option></select></div>
+          </div>
+          <div class="map-manager-notice">Each selection applies to the SUB / END box and its cable as one item. Both use the same code. Cable-only changes are not available.</div>
+          <div id="mapManagerOptions" class="map-manager-options"><div class="empty">Select an area and action.</div></div>
+          <div class="area-builder-actions">
+            <button class="btn soft" type="button" id="mapManagerReviewButton" onclick="reviewMapManagerChange()" disabled>Review selection</button>
+            <button class="btn primary" type="button" id="mapManagerApplyButton" onclick="applyMapManagerChange()" disabled>Confirm change</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Review</h3>
+          <div id="mapManagerReview" class="map-manager-review"><div class="empty">No pending changes.</div></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1724,6 +1752,8 @@ function withProgramQuery(path){if(!String(path||'').startsWith('/api/warehouse'
 function scopedJsonBody(body){if(!body||typeof body!=='string')return body;try{const data=JSON.parse(body);if(data&&typeof data==='object'&&!Array.isArray(data)&&!data.program){data.program=normalizeProgram(currentProgram);return JSON.stringify(data)}}catch(e){}return body}
 async function refreshCsrfToken(){const res=await fetch('/api/auth/me',{cache:'no-store',credentials:'same-origin'});const data=await res.json().catch(()=>({}));if(!res.ok||!data.csrf_token)return false;csrfToken=data.csrf_token;session=data.user||session;return true}
 let areaBuilderPreviewState=null;
+let mapManagerState={areas:[],options:[],revision:'',staged:[],builder:{}};
+let mapManagerReviewed=[];
 function areaBuilderFormData(confirmed=''){
   const file=document.getElementById('areaBuilderWorkbook')?.files?.[0];
   if(!file)throw new Error('Choose the structured Excel workbook first');
@@ -2250,7 +2280,7 @@ await loadWarehouse();
 }catch(e){toast(e.message)}
 }
 async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
-function setSetupWorkspace(workspace='inventory'){if(workspace==='areaBuilder'&&!isAdmin())workspace='inventory';const builder=workspace==='areaBuilder';document.querySelectorAll('[data-setup-workspace]').forEach(button=>button.classList.toggle('active',(button.dataset.setupWorkspace==='areaBuilder')===builder));document.getElementById('setupInventory')?.classList.toggle('active',!builder);document.getElementById('setupAreaBuilder')?.classList.toggle('active',builder)}
+function setSetupWorkspace(workspace='inventory'){if(['areaBuilder','mapManager'].includes(workspace)&&!isAdmin())workspace='inventory';document.querySelectorAll('[data-setup-workspace]').forEach(button=>button.classList.toggle('active',button.dataset.setupWorkspace===workspace));document.getElementById('setupInventory')?.classList.toggle('active',workspace==='inventory');document.getElementById('setupAreaBuilder')?.classList.toggle('active',workspace==='areaBuilder');document.getElementById('setupMapManager')?.classList.toggle('active',workspace==='mapManager');if(workspace==='mapManager')loadMapManagerOptions()}
 function setBalanceTab(tab='stockBalances',persist=true){if(tab==='rolloutUsage')tab='stockBalances';document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));if(document.getElementById('stockBalances'))stockBalances.style.display=tab==='stockBalances'?'block':'none';if(document.getElementById('materialLedger'))materialLedger.style.display=tab==='materialLedger'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(persist)saveUiState({balanceTab:tab})}
 function setMrMode(mode='mrForm',persist=true){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.toggle('active',x.dataset.mrMode===mode));document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===mode?'block':'none');if(mode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}if(mode==='returnForm'){renderReturnLines();renderReturnsTable()}if(persist)saveUiState({mrMode:mode})}
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.program)switchProgram(b.dataset.program);else switchView(b.dataset.view)}));
@@ -2259,6 +2289,101 @@ if(b.dataset.balance){setBalanceTab(b.dataset.balance);return}
 if(b.dataset.setupWorkspace){setSetupWorkspace(b.dataset.setupWorkspace);return}
 if(b.dataset.mrMode){setMrMode(b.dataset.mrMode)}
 }));
+async function loadMapManagerOptions(preferredArea=''){
+  if(!isAdmin())return;
+  const picker=document.getElementById('mapManagerArea');if(!picker)return;
+  try{
+    const data=await api('/api/warehouse/fiber-map-manager/options');
+    mapManagerState.areas=data.areas||[];
+    const selected=preferredArea||picker.value;
+    picker.innerHTML='<option value="">Select area</option>'+mapManagerState.areas.map(row=>`<option value="${esc(row.name)}">${esc(row.name)}${row.city?` · ${esc(row.city)}`:''}</option>`).join('');
+    if(mapManagerState.areas.some(row=>row.name===selected))picker.value=selected;
+    renderMapManagerOptions(true);
+  }catch(error){document.getElementById('mapManagerOptions').innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+}
+function changeMapManagerScope(){mapManagerState.staged=[];mapManagerState.builder={};renderMapManagerOptions(true)}
+function mapManagerSelect(id,label,options,value,onchange='mapManagerBuilderChanged()'){
+  const rows=options.map(option=>{const key=typeof option==='string'?option:option.value;const text=typeof option==='string'?option:option.label;return `<option value="${esc(key)}" ${String(key)===String(value)?'selected':''}>${esc(text)}</option>`}).join('');
+  return `<div class="field"><label>${esc(label)}</label><select id="${id}" onchange="${onchange}"><option value="">Select ${esc(label)}</option>${rows}</select></div>`
+}
+function mapManagerRenderAddBuilder(area){
+  const topology=area.topology||[],builder=mapManagerState.builder||{};
+  const xbox=topology.some(row=>row.xbox===builder.xbox)?builder.xbox:(topology[0]?.xbox||'');
+  const xboxRow=topology.find(row=>row.xbox===xbox),hubs=xboxRow?.hubs||[];
+  const hub=hubs.some(row=>row.hub===builder.hub)?builder.hub:(hubs[0]?.hub||'');
+  const hubRow=hubs.find(row=>row.hub===hub),lines=hubRow?.lines||[];
+  const line=lines.includes(builder.line)?builder.line:(lines[0]||'');
+  const occupied=new Set([...(area.active||[]),...mapManagerState.staged].filter(row=>row.xbox===xbox).map(row=>String(row.code).replaceAll('-','').toUpperCase()));
+  const splitters=[1,2,3,4].filter(n=>!occupied.has(`H${Number(String(hub).slice(1))}L${Number(String(line).slice(1))}S${n}`));
+  const splitter=splitters.includes(Number(builder.splitter))?Number(builder.splitter):(splitters[0]||'');
+  mapManagerState.builder={xbox,hub,line,splitter,box_type:builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m||area.cable_lengths?.[0]||''};
+  const typeOptions=['SUB BOX','END BOX'];
+  const html=`<div class="form map-manager-builder">
+    ${mapManagerSelect('mapManagerXbox','XBOX',topology.map(row=>row.xbox),xbox)}
+    ${mapManagerSelect('mapManagerHub','HUB',hubs.map(row=>row.hub),hub)}
+    ${mapManagerSelect('mapManagerLine','LINE',lines,line)}
+    ${mapManagerSelect('mapManagerSplitter','Splitter',splitters.map(n=>({value:n,label:`S${n}`})),splitter)}
+    ${mapManagerSelect('mapManagerBoxType','Box type',typeOptions,mapManagerState.builder.box_type)}
+    ${mapManagerSelect('mapManagerCableLength','Cable length (m)',area.cable_lengths||[],mapManagerState.builder.cable_length_m)}
+    <div class="map-manager-generated"><span>Generated code</span><strong>${hub&&line&&splitter?`${hub}-${line}-S${splitter}`:'No unused splitter available'}</strong></div>
+    <button class="btn soft" type="button" onclick="stageMapManagerAdd()" ${!splitter||!mapManagerState.builder.cable_length_m?'disabled':''}>Add to batch</button>
+  </div>
+  ${mapManagerState.staged.length?`<div class="map-manager-staged"><strong>Pending additions (${mapManagerState.staged.length})</strong>${mapManagerState.staged.map((row,index)=>`<div class="map-manager-option"><span>${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)}</span><small>${fmt(row.cable_length_m)} m</small><button class="btn soft map-manager-remove" type="button" onclick="removeStagedMapManagerAdd(${index})" title="Remove from batch">×</button></div>`).join('')}</div>`:''}`;
+  document.getElementById('mapManagerOptions').innerHTML=html;
+}
+function mapManagerBuilderChanged(){
+  const ids={mapManagerXbox:'xbox',mapManagerHub:'hub',mapManagerLine:'line',mapManagerSplitter:'splitter',mapManagerBoxType:'box_type',mapManagerCableLength:'cable_length_m'};
+  for(const [id,key] of Object.entries(ids)){const control=document.getElementById(id);if(control)mapManagerState.builder[key]=control.value}
+  renderMapManagerOptions(false);
+}
+function stageMapManagerAdd(){
+  const area=mapManagerState.areas.find(row=>row.name===document.getElementById('mapManagerArea').value);if(!area)return;
+  const {xbox,hub,line,splitter,box_type,cable_length_m}=mapManagerState.builder||{};
+  if(!xbox||!hub||!line||!splitter||!box_type||!cable_length_m){toast('Complete all map selections first');return}
+  const code=`${hub}-${line}-S${splitter}`,normalized=code.replaceAll('-','').toUpperCase();
+  if([...(area.active||[]),...mapManagerState.staged].some(row=>row.xbox===xbox&&String(row.code).replaceAll('-','').toUpperCase()===normalized)){toast('This box code is already selected or installed');return}
+  mapManagerState.staged.push({xbox,code,box_type,cable_length_m:Number(cable_length_m)});
+  mapManagerReviewed=[];document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=false;
+  renderMapManagerOptions(false);
+}
+function removeStagedMapManagerAdd(index){mapManagerState.staged.splice(index,1);mapManagerReviewed=[];document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=!mapManagerState.staged.length;renderMapManagerOptions(false)}
+function renderMapManagerOptions(resetBatch=false){
+  const area=document.getElementById('mapManagerArea')?.value||'',action=document.getElementById('mapManagerAction')?.value||'add';
+  const selected=mapManagerState.areas.find(row=>row.name===area);const target=document.getElementById('mapManagerOptions');
+  if(resetBatch){mapManagerState.staged=[];mapManagerState.builder={}}
+  mapManagerState.options=selected?(action==='add'?[]:selected.active):[];mapManagerState.revision=selected?.revision||'';mapManagerReviewed=[];
+  document.getElementById('mapManagerReview').innerHTML='<div class="empty">No pending changes.</div>';
+  document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=action==='add'?!mapManagerState.staged.length:!mapManagerState.options.length;
+  if(!target)return;
+  if(!area){target.innerHTML='<div class="empty">Select an area first.</div>';return}
+  if(action==='add'){mapManagerRenderAddBuilder(selected);return}
+  if(!mapManagerState.options.length){target.innerHTML='<div class="empty">No installed SUB / END boxes for this area.</div>';return}
+  target.innerHTML=mapManagerState.options.map((row,index)=>`<div class="map-manager-option"><input type="checkbox" id="mapManagerChoice${index}" data-map-manager-index="${index}" onchange="mapManagerSelectionChanged()"><label for="mapManagerChoice${index}">${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)}</label><small>${fmt(row.cable_length_m)} m</small></div>`).join('');
+}
+function mapManagerSelectionChanged(){mapManagerReviewed=[];document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=!selectedMapManagerOptions().length;document.getElementById('mapManagerReview').innerHTML='<div class="empty">Selection changed. Review it again.</div>'}
+function selectedMapManagerOptions(){return [...document.querySelectorAll('[data-map-manager-index]:checked')].map(input=>mapManagerState.options[Number(input.dataset.mapManagerIndex)]).filter(Boolean)}
+function reviewMapManagerChange(){
+  const action=document.getElementById('mapManagerAction').value;const rows=action==='add'?[...mapManagerState.staged]:selectedMapManagerOptions();if(!rows.length){toast('Select or add at least one box');return}
+  mapManagerReviewed=rows;const area=document.getElementById('mapManagerArea').value;
+  const cable=rows.reduce((sum,row)=>sum+Number(row.cable_length_m||0),0);
+  document.getElementById('mapManagerReview').innerHTML=`<strong>${action==='add'?'Add':'Delete'} ${fmt(rows.length)} SUB / END box(es) with cable in ${esc(area)}</strong><p>Total distribution cable: ${fmt(cable)} m</p><ul>${rows.map(row=>`<li>${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)} · ${fmt(row.cable_length_m)} m</li>`).join('')}</ul>`;
+  document.getElementById('mapManagerApplyButton').disabled=false;
+}
+async function applyMapManagerChange(){
+  const rows=mapManagerReviewed;if(!rows.length){toast('Review the selected boxes first');return}
+  const action=document.getElementById('mapManagerAction').value,area=document.getElementById('mapManagerArea').value;
+  if(!confirm(`${action==='add'?'Add':'Delete'} ${rows.length} SUB / END box(es) and their cables in ${area}?`))return;
+  const plan=ROLLOUT_DASHBOARD_PLAN.find(row=>sameRolloutDashboardArea(row.area,area));
+  const button=document.getElementById('mapManagerApplyButton');button.disabled=true;
+  try{
+    const result=await api('/api/warehouse/fiber-map-manager/change',{method:'POST',body:JSON.stringify({area,action,selections:rows.map(row=>({xbox:row.xbox,code:row.code,box_type:row.box_type||'',cable_length_m:row.cable_length_m??null})),expected_revision:mapManagerState.revision,start_date:plan?.start||'',end_date:plan?.end||'',target_users:plan?.targetUsers||0})});
+    warehouseFiberReference=null;await ensureRolloutDashboardDesignReference(true);renderExecutiveDashboard();
+    if(fieldEntryState.loaded)await loadFieldEntryReference();
+    await loadMapManagerOptions(result.area);
+    toast(`${action==='add'?'Added':'Deleted'} ${fmt(result.changed)} box(es) and cables`);
+  }catch(error){toast(error.message);if(error.message.includes('map changed')||error.message.includes('no longer available'))await loadMapManagerOptions(area)}
+  finally{button.disabled=false}
+}
 function today(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 function formatDate(v){if(!v)return'';const d=new Date(v+'T00:00:00');return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-')}
 function initMrDefaults(){mrCreationDate.value=today();mrShipTime.value=today();mrArriveTime.value=today();const box=document.getElementById('mrLines');if(box&&!box.children.length)addMrLine()}
@@ -3093,16 +3218,18 @@ window.addEventListener('hashchange',applyPageLink);
 setInterval(()=>pollNotifications(true),45000);
 setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
+var warehouseFiberReferenceRevision='';
 var warehouseFiberReferenceLoading=false;
 const HIDDEN_DYNAMIC_MAP_AREAS=new Set();
 function applyFiberMapReference(data){
   warehouseFiberReference=data||{boxes:[],routes:[],area_plans:[]};
+  warehouseFiberReferenceRevision=String(data?.revision||warehouseFiberReferenceRevision||'');
   (warehouseFiberReference.area_plans||[]).forEach(plan=>{
     const city=String(plan.city||'').trim(),area=String(plan.area||'').trim();if(!city||!area)return;
     if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
     if(!ROLLOUT_DASHBOARD_AREAS[city].some(value=>wfmMapAreaKey(value)===wfmMapAreaKey(area)))ROLLOUT_DASHBOARD_AREAS[city].push(area);
     const index=ROLLOUT_DASHBOARD_PLAN.findIndex(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area));
-    if(index>=0)ROLLOUT_DASHBOARD_PLAN.splice(index,1,{...ROLLOUT_DASHBOARD_PLAN[index],...plan,city,area});else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
+    if(index>=0){const previous=ROLLOUT_DASHBOARD_PLAN[index],merged={...previous,...plan,city,area};if(!plan.targetUsers)merged.targetUsers=previous.targetUsers;if(!plan.start)merged.start=previous.start;if(!plan.end)merged.end=previous.end;ROLLOUT_DASHBOARD_PLAN.splice(index,1,merged)}else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
     if(HIDDEN_DYNAMIC_MAP_AREAS.has(wfmMapAreaKey(area)))return;
     const xboxes=[...new Set((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)).map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
     xboxes.forEach(xbox=>{const id=`${wfmMapAreaKey(area).replace(/[^a-z0-9]+/g,'-')}-${xbox.toLowerCase()}`;if(!WFM_MAP_SCOPES.some(scope=>scope.id===id))WFM_MAP_SCOPES.push({id,title:`${area} - X-BOX${xbox.replace(/^X/,'')}`,area,xbox})});
@@ -3119,6 +3246,18 @@ async function ensureRolloutDashboardDesignReference(force=false){
     if(document.querySelector('.view.active')?.id==='rolloutDaily'&&document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map')setTimeout(()=>renderRolloutMapPanel(),0);
   }
 }
+async function checkFiberMapReferenceVersion(){
+  if(!session||!activeUser||!csrfToken)return;
+  try{
+    const data=await api('/api/warehouse/fiber-map-reference/version');
+    if(!data.revision||!warehouseFiberReferenceRevision){warehouseFiberReferenceRevision=data.revision||warehouseFiberReferenceRevision;return}
+    if(data.revision===warehouseFiberReferenceRevision)return;
+    warehouseFiberReferenceRevision=data.revision;warehouseFiberReference=null;
+    await ensureRolloutDashboardDesignReference(true);renderExecutiveDashboard();
+    if(fieldEntryState.loaded)await loadFieldEntryReference();
+  }catch(error){}
+}
+setInterval(checkFiberMapReferenceVersion,30000);
 
 function wfmValue(row,names){
   const wanted=(Array.isArray(names)?names:[names]).map(v=>String(v).toLowerCase());
