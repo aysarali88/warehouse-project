@@ -73,7 +73,7 @@ class FiberMapManagerTests(unittest.TestCase):
         self.db.close()
 
     @staticmethod
-    def make_request(role):
+    def make_request(role, program="FTTH"):
         return Request({
             "type": "http",
             "method": "POST",
@@ -81,7 +81,7 @@ class FiberMapManagerTests(unittest.TestCase):
             "headers": [],
             "query_string": b"",
             "state": {
-                "program": "FTTH",
+                "program": program,
                 "current_user": SimpleNamespace(role=role, name="Test Admin", username="testadmin"),
             },
         })
@@ -138,7 +138,29 @@ class FiberMapManagerTests(unittest.TestCase):
             related = [item for item in field_codes if item["area"] == "Test Map Manager" and item["xbox"] == row["xbox"] and main.rollout_code_key(item["code"]) == main.rollout_code_key(row["code"])]
             self.assertEqual({item["type"] for item in related}, {"box", "cable"})
 
-    def test_non_admin_cannot_change_map(self):
+    def test_requester_can_add_and_delete_map_boxes(self):
+        request = self.make_request("Requester")
+        options = main.fiber_map_manager_get_options(request, self.db)
+        self.assertEqual(options.status_code, 200)
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
+        selected = area["active"][0]
+        removed = main.fiber_map_manager_change(main.FiberMapChangeIn(
+            area=area["name"],
+            action="delete",
+            selections=[{"xbox": selected["xbox"], "code": selected["code"]}],
+            expected_revision=area["revision"],
+        ), request, self.db)
+        self.assertEqual(removed["changed"], 1)
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
+        restored = main.fiber_map_manager_change(main.FiberMapChangeIn(
+            area=area["name"],
+            action="add",
+            selections=[{"xbox": selected["xbox"], "code": selected["code"], "box_type": selected["box_type"], "cable_length_m": selected["cable_length_m"]}],
+            expected_revision=updated["revision"],
+        ), request, self.db)
+        self.assertEqual(restored["changed"], 1)
+
+    def test_management_role_cannot_change_map(self):
         area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["active"])
         payload = main.FiberMapChangeIn(
             area=area["name"],
@@ -147,7 +169,12 @@ class FiberMapManagerTests(unittest.TestCase):
             expected_revision=area["revision"],
         )
         with self.assertRaises(HTTPException) as denied:
-            main.fiber_map_manager_change(payload, self.make_request("Requester"), self.db)
+            main.fiber_map_manager_change(payload, self.make_request("Management"), self.db)
+        self.assertEqual(denied.exception.status_code, 403)
+
+    def test_requester_map_access_is_limited_to_ftth(self):
+        with self.assertRaises(HTTPException) as denied:
+            main.fiber_map_manager_get_options(self.make_request("Requester", "SINGLE_RAN"), self.db)
         self.assertEqual(denied.exception.status_code, 403)
 
     def test_generated_code_adds_to_map_and_field_entry_without_catalog_row(self):

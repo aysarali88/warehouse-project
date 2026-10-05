@@ -3171,8 +3171,11 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
 
 @app.get("/api/warehouse/fiber-map-manager/options")
 def fiber_map_manager_get_options(request: Request, db: Session = Depends(db_session)):
-    require_roles(request, "Admin")
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    if program_key == DEFAULT_PROGRAM:
+        require_roles(request, "Admin", "Requester")
+    else:
+        require_roles(request, "Admin")
     return JSONResponse(
         {"success": True, **fiber_map_manager_options(db, program_key)},
         headers={"Cache-Control": "no-store"},
@@ -3187,9 +3190,9 @@ def fiber_map_reference_version(request: Request, db: Session = Depends(db_sessi
 
 @app.post("/api/warehouse/fiber-map-manager/change")
 def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin")
-    actor = user.name or user.username
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    user = require_roles(request, "Admin", "Requester") if program_key == DEFAULT_PROGRAM else require_roles(request, "Admin")
+    actor = user.name or user.username
     locked_saved_rows = db.query(FiberMapArea).filter(FiberMapArea.program == program_key).with_for_update().all()
     current = load_fiber_map_reference(db, program_key)
     options = fiber_map_manager_options(db, program_key)["areas"]
