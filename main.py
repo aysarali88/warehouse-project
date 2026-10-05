@@ -3228,7 +3228,6 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
             for row in area_option["topology"]
         }
         active_keys = {(fiber_map_manager_box_key(row)[0], fiber_map_manager_box_key(row)[1]) for row in area_boxes}
-        allowed_lengths = {int(value) for value in area_option["cable_lengths"]}
         area_rows = [row for row in current.get("boxes") or [] if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         seed_rows = [row for row in fiber_map_manager_catalog(db, program_key, current) if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         for selection, key in zip(data.selections, selected_keys):
@@ -3243,8 +3242,8 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
             box_type_key = rollout_norm(selection.box_type)
             if box_type_key not in {"subbox", "endbox"}:
                 raise HTTPException(status_code=400, detail="Choose SUB BOX or END BOX")
-            if selection.cable_length_m is None or not float(selection.cable_length_m).is_integer() or int(selection.cable_length_m) not in allowed_lengths:
-                raise HTTPException(status_code=400, detail="Choose a cable length from the approved map lengths")
+            if selection.cable_length_m is None or not math.isfinite(selection.cable_length_m) or selection.cable_length_m < 1 or selection.cable_length_m > 100_000:
+                raise HTTPException(status_code=400, detail="Cable length must be a positive number no greater than 100,000 m")
             if key in active_keys:
                 raise HTTPException(status_code=409, detail="One or more selected boxes are already on the map")
             source = next(
@@ -3257,7 +3256,7 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
             if source is None:
                 raise HTTPException(status_code=409, detail="Map topology changed; reload the options and try again")
             added = json.loads(json.dumps(source))
-            length = int(selection.cable_length_m)
+            length = float(selection.cable_length_m)
             added.update({
                 "Area": area_name,
                 "Zone": area_name,

@@ -2303,20 +2303,25 @@ async function loadMapManagerOptions(preferredArea=''){
 }
 function changeMapManagerScope(){mapManagerState.staged=[];mapManagerState.builder={};renderMapManagerOptions(true)}
 function mapManagerSelect(id,label,options,value,onchange='mapManagerBuilderChanged()'){
-  const rows=options.map(option=>{const key=typeof option==='string'?option:option.value;const text=typeof option==='string'?option:option.label;return `<option value="${esc(key)}" ${String(key)===String(value)?'selected':''}>${esc(text)}</option>`}).join('');
+  const rows=options.map(option=>{const key=typeof option==='object'?option.value:option;const text=typeof option==='object'?option.label:option;return `<option value="${esc(key)}" ${String(key)===String(value)?'selected':''}>${esc(text)}</option>`}).join('');
   return `<div class="field"><label>${esc(label)}</label><select id="${id}" onchange="${onchange}"><option value="">Select ${esc(label)}</option>${rows}</select></div>`
 }
 function mapManagerRenderAddBuilder(area){
   const topology=area.topology||[],builder=mapManagerState.builder||{};
-  const xbox=topology.some(row=>row.xbox===builder.xbox)?builder.xbox:(topology[0]?.xbox||'');
-  const xboxRow=topology.find(row=>row.xbox===xbox),hubs=xboxRow?.hubs||[];
-  const hub=hubs.some(row=>row.hub===builder.hub)?builder.hub:(hubs[0]?.hub||'');
-  const hubRow=hubs.find(row=>row.hub===hub),lines=hubRow?.lines||[];
-  const line=lines.includes(builder.line)?builder.line:(lines[0]||'');
-  const occupied=new Set([...(area.active||[]),...mapManagerState.staged].filter(row=>row.xbox===xbox).map(row=>String(row.code).replaceAll('-','').toUpperCase()));
-  const splitters=[1,2,3,4].filter(n=>!occupied.has(`H${Number(String(hub).slice(1))}L${Number(String(line).slice(1))}S${n}`));
+  const occupied=new Set([...(area.active||[]),...mapManagerState.staged].map(row=>`${row.xbox}:${String(row.code).replaceAll('-','').toUpperCase()}`));
+  const freeFor=(box,hubName,lineName)=>[1,2,3,4].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
+  let xbox=topology.some(row=>row.xbox===builder.xbox)?builder.xbox:(topology[0]?.xbox||'');
+  let xboxRow=topology.find(row=>row.xbox===xbox),hubs=xboxRow?.hubs||[];
+  let hub=hubs.some(row=>row.hub===builder.hub)?builder.hub:(hubs[0]?.hub||'');
+  let hubRow=hubs.find(row=>row.hub===hub),lines=hubRow?.lines||[];
+  let line=lines.includes(builder.line)?builder.line:(lines[0]||''),splitters=freeFor(xbox,hub,line);
+  if(!splitters.length){
+    const available=topology.filter(row=>row.xbox===xbox).flatMap(row=>row.hubs.flatMap(item=>item.lines.map(value=>({hub:item.hub,line:value,splitters:freeFor(xbox,item.hub,value)})))).find(item=>item.splitters.length)
+      ||topology.flatMap(row=>row.hubs.flatMap(item=>item.lines.map(value=>({xbox:row.xbox,hub:item.hub,line:value,splitters:freeFor(row.xbox,item.hub,value)})))).find(item=>item.splitters.length);
+    if(available){xbox=available.xbox||xbox;hub=available.hub;line=available.line;splitters=available.splitters;xboxRow=topology.find(row=>row.xbox===xbox);hubs=xboxRow?.hubs||[];hubRow=hubs.find(row=>row.hub===hub);lines=hubRow?.lines||[]}
+  }
   const splitter=splitters.includes(Number(builder.splitter))?Number(builder.splitter):(splitters[0]||'');
-  mapManagerState.builder={xbox,hub,line,splitter,box_type:builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m||area.cable_lengths?.[0]||''};
+  mapManagerState.builder={xbox,hub,line,splitter,box_type:builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m??''};
   const typeOptions=['SUB BOX','END BOX'];
   const html=`<div class="form map-manager-builder">
     ${mapManagerSelect('mapManagerXbox','XBOX',topology.map(row=>row.xbox),xbox)}
@@ -2324,18 +2329,19 @@ function mapManagerRenderAddBuilder(area){
     ${mapManagerSelect('mapManagerLine','LINE',lines,line)}
     ${mapManagerSelect('mapManagerSplitter','Splitter',splitters.map(n=>({value:n,label:`S${n}`})),splitter)}
     ${mapManagerSelect('mapManagerBoxType','Box type',typeOptions,mapManagerState.builder.box_type)}
-    ${mapManagerSelect('mapManagerCableLength','Cable length (m)',area.cable_lengths||[],mapManagerState.builder.cable_length_m)}
+    <div class="field"><label for="mapManagerCableLength">Cable length (m)</label><input id="mapManagerCableLength" type="number" min="1" max="100000" step="any" inputmode="decimal" placeholder="Enter length" value="${esc(mapManagerState.builder.cable_length_m)}" oninput="mapManagerState.builder.cable_length_m=this.value;mapManagerUpdateAddButton()" required></div>
     <div class="map-manager-generated"><span>Generated code</span><strong>${hub&&line&&splitter?`${hub}-${line}-S${splitter}`:'No unused splitter available'}</strong></div>
-    <button class="btn soft" type="button" onclick="stageMapManagerAdd()" ${!splitter||!mapManagerState.builder.cable_length_m?'disabled':''}>Add to batch</button>
+    <button class="btn soft" id="mapManagerStageButton" type="button" onclick="stageMapManagerAdd()" ${!splitter||!mapManagerState.builder.cable_length_m?'disabled':''}>Add to batch</button>
   </div>
   ${mapManagerState.staged.length?`<div class="map-manager-staged"><strong>Pending additions (${mapManagerState.staged.length})</strong>${mapManagerState.staged.map((row,index)=>`<div class="map-manager-option"><span>${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)}</span><small>${fmt(row.cable_length_m)} m</small><button class="btn soft map-manager-remove" type="button" onclick="removeStagedMapManagerAdd(${index})" title="Remove from batch">×</button></div>`).join('')}</div>`:''}`;
   document.getElementById('mapManagerOptions').innerHTML=html;
 }
 function mapManagerBuilderChanged(){
-  const ids={mapManagerXbox:'xbox',mapManagerHub:'hub',mapManagerLine:'line',mapManagerSplitter:'splitter',mapManagerBoxType:'box_type',mapManagerCableLength:'cable_length_m'};
+  const ids={mapManagerXbox:'xbox',mapManagerHub:'hub',mapManagerLine:'line',mapManagerSplitter:'splitter',mapManagerBoxType:'box_type'};
   for(const [id,key] of Object.entries(ids)){const control=document.getElementById(id);if(control)mapManagerState.builder[key]=control.value}
   renderMapManagerOptions(false);
 }
+function mapManagerUpdateAddButton(){const input=document.getElementById('mapManagerCableLength'),value=Number(input?.value);const button=document.getElementById('mapManagerStageButton');if(button)button.disabled=!mapManagerState.builder.splitter||!Number.isFinite(value)||value<1||value>100000}
 function stageMapManagerAdd(){
   const area=mapManagerState.areas.find(row=>row.name===document.getElementById('mapManagerArea').value);if(!area)return;
   const {xbox,hub,line,splitter,box_type,cable_length_m}=mapManagerState.builder||{};

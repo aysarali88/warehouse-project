@@ -155,7 +155,7 @@ class FiberMapManagerTests(unittest.TestCase):
         payload = main.FiberMapChangeIn(
             area=area["name"],
             action="add",
-            selections=[{"xbox": "X1", "code": "H1-L1-S4", "box_type": "END BOX", "cable_length_m": 80}],
+            selections=[{"xbox": "X1", "code": "H1-L1-S4", "box_type": "END BOX", "cable_length_m": 37.5}],
             expected_revision=area["revision"],
         )
         result = main.fiber_map_manager_change(payload, self.request, self.db)
@@ -165,7 +165,7 @@ class FiberMapManagerTests(unittest.TestCase):
         field_rows = main.rollout_code_reference_rows(self.db, "FTTH")
         selected = [row for row in field_rows if row["area"] == "Test Map Manager" and row["xbox"] == "X1" and main.rollout_code_key(row["code"]) == "H1L1S4"]
         self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
-        self.assertTrue(all(row["cable_length_m"] == 80 for row in selected))
+        self.assertTrue(all(row["cable_length_m"] == 37.5 for row in selected))
 
 
 if __name__ == "__main__":
