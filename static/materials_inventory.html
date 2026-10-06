@@ -3343,16 +3343,26 @@ function wfmBoxType(row){
   return '';
 }
 function wfmRowsForPart(part,rows){return (rows||[]).filter(row=>wfmRecordScope(row,part))}
-function wfmRowsForCode(part,rows,code,kind){
-  return wfmRowsForPart(part,rows).filter(row=>wfmRecordMatchesCode(row,code,part)).filter(row=>kind==='box'?Boolean(wfmBoxType(row)):kind==='distribution'?wfmDistribution(row):kind==='fourcore'?wfmFourCore(row):true)
+function wfmBuildPartStateIndex(part,rows){
+  const scopedRows=wfmRowsForPart(part,rows),byCode=new Map();
+  scopedRows.forEach(row=>{
+    const codes=new Set(['ID','id','cable code','Cable code','box code','Box code','code','Code'].map(name=>wfmCodeKey(wfmValue(row,[name]))).filter(Boolean));
+    codes.forEach(code=>{if(!byCode.has(code))byCode.set(code,[]);byCode.get(code).push(row)});
+  });
+  return{part,rows:scopedRows,byCode};
 }
-function wfmNodeState(part,rows,code,expectedType){
-  const matches=wfmRowsForCode(part,rows,code,'box');
+function wfmRowsForCode(part,rows,code,kind,index){
+  const stateIndex=index?.part===part?index:wfmBuildPartStateIndex(part,rows),matches=new Set();
+  wfmRouteCodeAliases(part,code).forEach(key=>(stateIndex.byCode.get(key)||[]).forEach(row=>matches.add(row)));
+  return[...matches].filter(row=>kind==='box'?Boolean(wfmBoxType(row)):kind==='distribution'?wfmDistribution(row):kind==='fourcore'?wfmFourCore(row):true)
+}
+function wfmNodeState(part,rows,code,expectedType,index){
+  const matches=wfmRowsForCode(part,rows,code,'box',index);
   if(matches.some(row=>expectedType&&wfmBoxType(row)&&wfmBoxType(row)!==expectedType))return{status:'mismatch',rows:matches};
   return{status:matches.length?'installed':'missing',rows:matches};
 }
-function wfmCableState(part,rows,code,expectedLength,kind){
-  const matches=wfmRowsForCode(part,rows,code,kind);
+function wfmCableState(part,rows,code,expectedLength,kind,index){
+  const matches=wfmRowsForCode(part,rows,code,kind,index);
   if(matches.some(row=>wfmLength(row)===Number(expectedLength||0)))return{status:'installed',rows:matches,routeLabel:wfmRouteLabel(matches)};
   return{status:matches.length?'mismatch':'missing',rows:matches,routeLabel:wfmRouteLabel(matches)};
 }
@@ -3363,7 +3373,7 @@ function rolloutMapCableProgressMetric(area,rows){
   if(!parts.length)return null;
   const metric={targetMeters:0,installedMeters:0,missingMeters:0,mismatchMeters:0,codes:0};
   const seen=new Set();
-  const add=(part,ref,codeField,kind)=>{
+  const add=(part,index,ref,codeField,kind)=>{
     const code=String(wfmValue(ref,[codeField])||'').trim();
     const length=Number(wfmValue(ref,['Cable length m'])||0);
     const key=`${wfmXboxKey(part.xbox)}|${kind}|${wfmCodeKey(code)}`;
@@ -3371,7 +3381,7 @@ function rolloutMapCableProgressMetric(area,rows){
     seen.add(key);
     metric.targetMeters+=length;
     metric.codes+=1;
-    const state=wfmCableState(part,rows,code,length,kind).status;
+    const state=wfmCableState(part,rows,code,length,kind,index).status;
     // A blue segment is physically entered against the map code. Keep it in
     // rollout progress, while the map continues to flag the length mismatch.
     if(state==='missing')metric.missingMeters+=length;
@@ -3381,8 +3391,9 @@ function rolloutMapCableProgressMetric(area,rows){
     }
   };
   parts.forEach(part=>{
-    (part.boxRows||[]).forEach(ref=>add(part,ref,'Box code','distribution'));
-    (part.routeRows||[]).forEach(ref=>add(part,ref,'Route code','fourcore'));
+    const index=wfmBuildPartStateIndex(part,rows);
+    (part.boxRows||[]).forEach(ref=>add(part,index,ref,'Box code','distribution'));
+    (part.routeRows||[]).forEach(ref=>add(part,index,ref,'Route code','fourcore'));
   });
   return metric;
 }
@@ -3465,12 +3476,27 @@ function wfmDynamicRows(part){
   const pairs=new Map();(part.routeRows||[]).forEach(row=>{const from=String(wfmValue(row,['Route from'])).match(/^H(\d+)$/i),to=String(wfmValue(row,['Route to'])).match(/^H(\d+)$/i);if(from&&to)pairs.set(Number(from[1]),Number(to[1]))});const used=new Set(),rows=[];
   [...part.hubs].sort((a,b)=>a-b).forEach(hub=>{if(used.has(hub))return;const pair=pairs.get(hub);if(pair&&part.hubs.includes(pair)&&!used.has(pair)){rows.push([hub,pair]);used.add(hub);used.add(pair)}else{rows.push([hub]);used.add(hub)}});return rows;
 }
-function wfmHubPosition(part,hub){const rows=wfmDynamicRows(part),rowIndex=Math.max(0,rows.findIndex(row=>row.includes(hub))),col=Math.max(0,(rows[rowIndex]||[hub]).indexOf(hub));return{x:col===0?440:1400,y:560+rowIndex*800}}
+function wfmBuildPartRenderIndex(part,rows){
+  const index=wfmBuildPartStateIndex(part,rows),dynamicRows=wfmDynamicRows(part),positions=new Map(),terminalsByHubLine=new Map();
+  dynamicRows.forEach((row,rowIndex)=>row.forEach((hub,col)=>positions.set(hub,{x:col===0?440:1400,y:560+rowIndex*800})));
+  (part.boxRows||[]).forEach(row=>{
+    const key=`${wfmOrdinal(wfmValue(row,['Hub']))}|${wfmOrdinal(wfmValue(row,['Line']))}`;
+    if(!terminalsByHubLine.has(key))terminalsByHubLine.set(key,[]);
+    terminalsByHubLine.get(key).push(row);
+  });
+  terminalsByHubLine.forEach(rows=>rows.sort((a,b)=>wfmBoxSequence(a)-wfmBoxSequence(b)));
+  return{...index,dynamicRows,positions,terminalsByHubLine};
+}
+function wfmHubPosition(part,hub,renderIndex){
+  if(renderIndex?.part===part&&renderIndex.positions.has(hub))return renderIndex.positions.get(hub);
+  const rows=wfmDynamicRows(part),rowIndex=Math.max(0,rows.findIndex(row=>row.includes(hub))),col=Math.max(0,(rows[rowIndex]||[hub]).indexOf(hub));
+  return{x:col===0?440:1400,y:560+rowIndex*800};
+}
 function wfmRouteForHub(part,hub){return(part.routeRows||[]).find(row=>wfmOrdinal(wfmValue(row,['Route to']))===hub)||null}
-function wfmRouteSourceHub(part,hub){
+function wfmRouteSourceHub(part,hub,renderIndex){
   if(part.sharedXboxMap){const row=part.sharedXboxRows.find(item=>item.includes(hub));const index=row?row.indexOf(hub):-1;return index>0?row[index-1]:null}
   if(wfmIsHayAndalusZone3X9(part)){
-    const row=wfmDynamicRows(part).find(item=>item.includes(hub));
+    const row=(renderIndex?.part===part?renderIndex.dynamicRows:wfmDynamicRows(part)).find(item=>item.includes(hub));
     const index=row?row.indexOf(hub):-1;
     return index>0?row[index-1]:null;
   }
@@ -3481,7 +3507,7 @@ function wfmRouteSourceHub(part,hub){
   return match?Number(match[1]):null;
 }
 function wfmBoxSequence(row){const code=String(wfmValue(row,['Box code'])||'').match(/-S\s*0*(\d+)/i);return code?Number(code[1]):wfmOrdinal(wfmValue(row,['Sequence','Splitter']))}
-function wfmTerminals(part,hub,line){return(part.boxRows||[]).filter(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line).sort((a,b)=>wfmBoxSequence(a)-wfmBoxSequence(b))}
+function wfmTerminals(part,hub,line,renderIndex){return renderIndex?.part===part?(renderIndex.terminalsByHubLine.get(`${hub}|${line}`)||[]):(part.boxRows||[]).filter(row=>wfmOrdinal(wfmValue(row,['Hub']))===hub&&wfmOrdinal(wfmValue(row,['Line']))===line).sort((a,b)=>wfmBoxSequence(a)-wfmBoxSequence(b))}
 function wfmDb(row){const raw=wfmValue(row,['dB','db']);if(raw===''||raw===null||raw===undefined)return '';const value=Number(raw);return Number.isFinite(value)?`${value.toFixed(1)} dB`:String(raw)}
 let mapFieldEntryState={entry:null,saving:false,submissionKey:''};
 function mapEntryValue(id){return document.getElementById(id)?.value||''}
@@ -3515,17 +3541,20 @@ async function saveMapFieldEntry(confirmWarnings=false){
   try{const res=await fetch(withProgramQuery('/api/warehouse/rollout-field-entry'),{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(mapEntryPayload(confirmWarnings))});const data=await res.json().catch(()=>({}));if(data.needs_confirmation){const message=(data.warnings||[]).map(row=>row.message).join('\n')||'There are warnings. Continue?';document.getElementById('mapEntryWarning').textContent=message;document.getElementById('mapEntryWarning').classList.remove('hidden');if(confirm(message+'\n\nSave anyway?')){mapEntrySetSaving(false);return saveMapFieldEntry(true)}return}if(!res.ok||data.success===false)throw new Error(data.detail||data.message||'Could not save');applyRolloutMutation([data.record]);closeMapFieldEntry();renderRolloutMapPanel();renderRolloutDailyProgress();renderRolloutUsage();toast(`Saved ${data.record.ID}`)}catch(error){toast(error.message)}finally{mapEntrySetSaving(false)}}
 function bindMapEntryTargets(root){if(!isAdmin()||!root)return;const targets=[...root.querySelectorAll('[data-map-entry-kind]')].filter(target=>target.dataset.mapEntryCode);targets.forEach(target=>{target.classList.add('map-entry-target');target.onclick=event=>{event.preventDefault();event.stopPropagation();openMapFieldEntryFromTarget(target)}});root.querySelectorAll('.conn-route-label').forEach(label=>{const target=targets.find(item=>item.dataset.mapEntryKind==='route'&&normalizeMapCode(item.dataset.mapEntryCode)===normalizeMapCode(label.textContent));if(target){label.classList.add('map-entry-target');label.onclick=event=>{event.preventDefault();event.stopPropagation();openMapFieldEntryFromTarget(target)}}})}
 function wfmRenderXbox(part,rows){const x=90,y=250,ports=Array.from({length:16},(_,i)=>{const yy=y+24+i*8;return`<line x1="${x+20}" y1="${yy}" x2="${x+56}" y2="${yy}" stroke="${['#16a34a','#22c55e','#1778ff','#ff0000','#111827','#d97706','#ff00c8','#1bc4ee'][i%8]}" stroke-width="2"/><circle cx="${x+58}" cy="${yy}" r="4" fill="#ff0000"/>`}).join('');if(part.sharedXboxMap){const height=70+part.sharedXboxOutputs.length*28;return`<text x="${x+28}" y="${y-18}" class="conn-small-label">X-BOX${wfmXboxKey(part.xbox).slice(1)}</text><rect x="${x}" y="${y}" width="160" height="${height}" class="conn-xbox-panel"/>${ports}${part.sharedXboxOutputs.map((hub,index)=>`<circle cx="${x+190}" cy="${y+35+index*28}" r="8" fill="#004cff"/>`).join('')}`}return`<text x="${x+28}" y="${y-18}" class="conn-small-label">X-BOX</text><rect x="${x}" y="${y}" width="160" height="150" class="conn-xbox-panel"/>${ports}${[0,1,2,3].map(i=>`<circle cx="${x+190}" cy="${y+46+i*30}" r="8" fill="#004cff"/>`).join('')}`}
-function wfmRenderHub(part,hub,rows){
-  const pos=wfmHubPosition(part,hub),x=pos.x,y=pos.y,width=205,height=104,centerX=x+width/2,centerY=y+height/2,route=wfmRouteForHub(part,hub),routeState=wfmCableState(part,rows,wfmValue(route,['Route code']),wfmValue(route,['Cable length m']),'fourcore'),sourceHub=wfmRouteSourceHub(part,hub),coreLabel=sourceHub?'3-4C':'1-2C';
+function wfmRenderHub(part,hub,rows,renderIndex){
+  const pos=wfmHubPosition(part,hub,renderIndex),x=pos.x,y=pos.y,width=205,height=104,centerX=x+width/2,centerY=y+height/2,route=wfmRouteForHub(part,hub),routeState=wfmCableState(part,rows,wfmValue(route,['Route code']),wfmValue(route,['Cable length m']),'fourcore',renderIndex),sourceHub=wfmRouteSourceHub(part,hub,renderIndex),coreLabel=sourceHub?'3-4C':'1-2C';
   const targetX=x-18;
   const xboxSourceIndex=part.sharedXboxOutputs?.indexOf(hub)??-1;
   let routePath=part.sharedXboxMap?`M 280 ${285+xboxSourceIndex*28} H ${300+xboxSourceIndex*14} V ${centerY} H ${targetX}`:`M 285 ${292+((hub-1)%4)*30} H ${x-120} V ${centerY} H ${targetX}`,labelX=x-70,labelY=centerY-110;
-  if(sourceHub){const source=wfmHubPosition(part,sourceHub),startX=source.x+width+34,startY=source.y+height/2,elbow=x<source.x?source.x+width+130:Math.round((startX+targetX)/2);routePath=`M ${startX} ${startY} H ${elbow} V ${centerY} H ${targetX}`;labelX=elbow;labelY=Math.round((startY+centerY)/2)-110}
+  if(sourceHub){const source=wfmHubPosition(part,sourceHub,renderIndex),startX=source.x+width+34,startY=source.y+height/2,elbow=x<source.x?source.x+width+130:Math.round((startX+targetX)/2);routePath=`M ${startX} ${startY} H ${elbow} V ${centerY} H ${targetX}`;labelX=elbow;labelY=Math.round((startY+centerY)/2)-110}
   const terminals=[];const terminalStartX=x+340,terminalGapX=150,terminalTopOffset=430,terminalGapY=120;
-  for(let line=1;line<=4;line++){const portX=x+24+(line-1)*34,rowY=y-terminalTopOffset+(line-1)*terminalGapY;terminals.push(`<path d="M ${portX} ${y-22} V ${rowY} H ${terminalStartX-92}" class="conn-fiber-line"/><rect x="${portX-6}" y="${y-39}" width="12" height="22" rx="2" class="conn-port"/><text x="${portX}" y="${y-3}" class="conn-port-number" text-anchor="middle">${line}</text>`);wfmTerminals(part,hub,line).forEach((ref,index)=>{const splitter=wfmBoxSequence(ref)||index+1,slot=Math.max(0,splitter-1),cx=terminalStartX+slot*terminalGapX,code=wfmValue(ref,['Box code']),type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',node=wfmNodeState(part,rows,code,type),usedRaw=wfmValue(ref,['Cable length m']),used=Number(usedRaw||0),actualRaw=wfmValue(ref,['Real length m']),actual=actualRaw===''?'':Number(actualRaw),segment=wfmCableState(part,rows,code,used,'distribution'),start=slot===0?terminalStartX-112:terminalStartX+(slot-1)*terminalGapX+26,end=cx-19,mid=Math.round((start+end)/2);terminals.push(`<g data-splitter="${splitter}"><line x1="${start}" y1="${rowY}" x2="${end}" y2="${rowY}" class="conn-drop-segment ${segment.status}" data-map-entry-kind="distribution" data-map-entry-code="${esc(code)}"/><text x="${mid}" y="${rowY-16}" class="conn-segment-label ${segment.status}" text-anchor="middle">${actual===''?'-':`${actual}m`}</text><text x="${mid}" y="${rowY+18}" class="conn-segment-label ${segment.status}" text-anchor="middle">${usedRaw===''?'':`${used}m`}</text><text x="${mid}" y="${rowY+36}" class="conn-segment-label ${segment.status}" text-anchor="middle">${esc(segment.routeLabel||'')}</text><g class="conn-node ${node.status}" data-map-entry-kind="box" data-map-entry-code="${esc(code)}"><text x="${cx}" y="${rowY-30}" class="conn-node-code" text-anchor="middle">${esc(code)}</text><circle cx="${cx}" cy="${rowY}" r="18"/><text x="${cx}" y="${rowY+5}" class="conn-node-type" text-anchor="middle">${type}</text><text x="${cx}" y="${rowY+39}" class="conn-node-db" text-anchor="middle">${esc(wfmDb(ref))}</text><text x="${cx}" y="${rowY+57}" class="conn-node-meta" text-anchor="middle">${node.status==='installed'?'OK':node.status}</text></g></g>`)})}
-  const routeActual=Number(wfmValue(route,['Real length m'])||0),routeUsedRaw=wfmValue(route,['Cable length m']),routeUsed=routeUsedRaw===''||routeUsedRaw===undefined||routeUsedRaw===null?'':Number(routeUsedRaw),hubState=wfmNodeState(part,rows,`H${hub}`,'HUB');return`<path d="${routePath}" class="conn-route-line ${routeState.status}" data-map-entry-kind="route" data-map-entry-code="${esc(wfmValue(route,['Route code'])||'')}"/><circle cx="${x-18}" cy="${centerY}" r="8" class="conn-route-dot ${routeState.status}"/><text x="${labelX}" y="${labelY}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(wfmValue(route,['Route code'])||'')}</text><text x="${labelX}" y="${labelY+18}" class="conn-route-label ${routeState.status}" text-anchor="middle">${route?routeActual:''}m</text><text x="${labelX}" y="${labelY+36}" class="conn-route-label ${routeState.status}" text-anchor="middle">${routeUsed===''?'':`${routeUsed}m`}</text><text x="${labelX}" y="${labelY+54}" class="conn-route-label ${routeState.status}" text-anchor="middle">${routeUsed===''?'':route?'4-coreCable':''}</text><text x="${labelX}" y="${labelY+72}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(routeState.routeLabel||'')}</text><rect x="${x}" y="${y}" width="${width}" height="${height}" class="conn-hub ${hubState.status==='installed'?'installed':'missing'}" data-map-entry-kind="hub" data-map-entry-code="H${hub}"/><text x="${centerX}" y="${y+44}" class="conn-hub-text" text-anchor="middle">H${hub}</text><text x="${centerX}" y="${y+78}" class="conn-hub-text" text-anchor="middle">${esc(wfmXboxKey(part.xbox))}</text><text x="${centerX}" y="${y+128}" class="conn-route-label" text-anchor="middle">${coreLabel}</text><circle cx="${x+width+34}" cy="${centerY}" r="8" fill="#004cff"/>${terminals.join('')}`;
+  for(let line=1;line<=4;line++){const portX=x+24+(line-1)*34,rowY=y-terminalTopOffset+(line-1)*terminalGapY;terminals.push(`<path d="M ${portX} ${y-22} V ${rowY} H ${terminalStartX-92}" class="conn-fiber-line"/><rect x="${portX-6}" y="${y-39}" width="12" height="22" rx="2" class="conn-port"/><text x="${portX}" y="${y-3}" class="conn-port-number" text-anchor="middle">${line}</text>`);wfmTerminals(part,hub,line,renderIndex).forEach((ref,index)=>{const splitter=wfmBoxSequence(ref)||index+1,slot=Math.max(0,splitter-1),cx=terminalStartX+slot*terminalGapX,code=wfmValue(ref,['Box code']),type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',node=wfmNodeState(part,rows,code,type,renderIndex),usedRaw=wfmValue(ref,['Cable length m']),used=Number(usedRaw||0),actualRaw=wfmValue(ref,['Real length m']),actual=actualRaw===''?'':Number(actualRaw),segment=wfmCableState(part,rows,code,used,'distribution',renderIndex),start=slot===0?terminalStartX-112:terminalStartX+(slot-1)*terminalGapX+26,end=cx-19,mid=Math.round((start+end)/2);terminals.push(`<g data-splitter="${splitter}"><line x1="${start}" y1="${rowY}" x2="${end}" y2="${rowY}" class="conn-drop-segment ${segment.status}" data-map-entry-kind="distribution" data-map-entry-code="${esc(code)}"/><text x="${mid}" y="${rowY-16}" class="conn-segment-label ${segment.status}" text-anchor="middle">${actual===''?'-':`${actual}m`}</text><text x="${mid}" y="${rowY+18}" class="conn-segment-label ${segment.status}" text-anchor="middle">${usedRaw===''?'':`${used}m`}</text><text x="${mid}" y="${rowY+36}" class="conn-segment-label ${segment.status}" text-anchor="middle">${esc(segment.routeLabel||'')}</text><g class="conn-node ${node.status}" data-map-entry-kind="box" data-map-entry-code="${esc(code)}"><text x="${cx}" y="${rowY-30}" class="conn-node-code" text-anchor="middle">${esc(code)}</text><circle cx="${cx}" cy="${rowY}" r="18"/><text x="${cx}" y="${rowY+5}" class="conn-node-type" text-anchor="middle">${type}</text><text x="${cx}" y="${rowY+39}" class="conn-node-db" text-anchor="middle">${esc(wfmDb(ref))}</text><text x="${cx}" y="${rowY+57}" class="conn-node-meta" text-anchor="middle">${node.status==='installed'?'OK':node.status}</text></g></g>`)})}
+  const routeActual=Number(wfmValue(route,['Real length m'])||0),routeUsedRaw=wfmValue(route,['Cable length m']),routeUsed=routeUsedRaw===''||routeUsedRaw===undefined||routeUsedRaw===null?'':Number(routeUsedRaw),hubState=wfmNodeState(part,rows,`H${hub}`,'HUB',renderIndex);return`<path d="${routePath}" class="conn-route-line ${routeState.status}" data-map-entry-kind="route" data-map-entry-code="${esc(wfmValue(route,['Route code'])||'')}"/><circle cx="${x-18}" cy="${centerY}" r="8" class="conn-route-dot ${routeState.status}"/><text x="${labelX}" y="${labelY}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(wfmValue(route,['Route code'])||'')}</text><text x="${labelX}" y="${labelY+18}" class="conn-route-label ${routeState.status}" text-anchor="middle">${route?routeActual:''}m</text><text x="${labelX}" y="${labelY+36}" class="conn-route-label ${routeState.status}" text-anchor="middle">${routeUsed===''?'':`${routeUsed}m`}</text><text x="${labelX}" y="${labelY+54}" class="conn-route-label ${routeState.status}" text-anchor="middle">${routeUsed===''?'':route?'4-coreCable':''}</text><text x="${labelX}" y="${labelY+72}" class="conn-route-label ${routeState.status}" text-anchor="middle">${esc(routeState.routeLabel||'')}</text><rect x="${x}" y="${y}" width="${width}" height="${height}" class="conn-hub ${hubState.status==='installed'?'installed':'missing'}" data-map-entry-kind="hub" data-map-entry-code="H${hub}"/><text x="${centerX}" y="${y+44}" class="conn-hub-text" text-anchor="middle">H${hub}</text><text x="${centerX}" y="${y+78}" class="conn-hub-text" text-anchor="middle">${esc(wfmXboxKey(part.xbox))}</text><text x="${centerX}" y="${y+128}" class="conn-route-label" text-anchor="middle">${coreLabel}</text><circle cx="${x+width+34}" cy="${centerY}" r="8" fill="#004cff"/>${terminals.join('')}`;
 }
-function wfmRenderPart(part,rows){const height=Math.max(1300,Math.max(...part.hubs.map(h=>wfmHubPosition(part,h).y),560)+850);return`<div class="map-card" data-map-area="${esc(part.area)}" data-map-xbox="${esc(wfmXboxKey(part.xbox))}" data-map-part="${esc(part.part)}"><svg class="fiber-map-svg" viewBox="0 0 2400 ${height}" role="img" aria-label="${esc(part.title)}"><rect x="1" y="1" width="2398" height="${height-2}" fill="#fff" stroke="#ff00d4" stroke-width="1.5"/><text x="88" y="78" class="conn-title">${esc(part.title)}</text><text x="96" y="124" class="conn-small-label">${esc(part.subtitle)}</text>${wfmRenderXbox(part,rows)}${part.hubs.map(h=>wfmRenderHub(part,h,rows)).join('')}</svg></div>`}
+function wfmRenderPart(part,rows,renderIndex){
+  const index=renderIndex?.part===part?renderIndex:wfmBuildPartRenderIndex(part,rows),height=Math.max(1300,Math.max(...part.hubs.map(h=>wfmHubPosition(part,h,index).y),560)+850);
+  return`<div class="map-card" data-map-area="${esc(part.area)}" data-map-xbox="${esc(wfmXboxKey(part.xbox))}" data-map-part="${esc(part.part)}"><svg class="fiber-map-svg" viewBox="0 0 2400 ${height}" role="img" aria-label="${esc(part.title)}"><rect x="1" y="1" width="2398" height="${height-2}" fill="#fff" stroke="#ff00d4" stroke-width="1.5"/><text x="88" y="78" class="conn-title">${esc(part.title)}</text><text x="96" y="124" class="conn-small-label">${esc(part.subtitle)}</text>${wfmRenderXbox(part,rows)}${part.hubs.map(h=>wfmRenderHub(part,h,rows,index)).join('')}</svg></div>`
+}
 function wfmHayAndalusZ1DisplayParts(area,xbox){
   const xboxKey=wfmXboxKey(xbox),topology={X1:{maxHub:9,rows:[[1],[2,3],[4,5],[6,7],[8,9]],outputs:[1,2,4,6,8]},X2:{maxHub:15,rows:[[1],[2,3],[4,5],[6,7],[8,9],[10,11],[12,13],[14,15]],outputs:[1,2,4,6,8,10,12,14]},X3:{maxHub:11,rows:[[1,2],[3,4],[5,6],[7],[8,9],[10,11]],outputs:[1,3,5,7,8,10]},X4:{maxHub:14,rows:[[1,2],[3,4],[5,6],[7,8],[9,10],[11],[12,13],[14]],outputs:[1,3,5,7,9,11,12,14]}},config=topology[xboxKey];
   if(!config)return[];
@@ -3553,7 +3582,7 @@ function wfmBeraWTaleemX2DisplayParts(area,xbox){
   const sourceParts=wfmParts(area,xbox),sharedXboxRows=[[1,2],[3,4],[5,6],[7,8],[9,10]],hubs=Array.from({length:10},(_,i)=>i+1),sharedXboxOutputs=[1,3,5,7,9],boxRows=sourceParts.flatMap(part=>part.boxRows||[]),routeRows=sourceParts.flatMap(part=>part.routeRows||[]),subtitle=sharedXboxRows.map(row=>row.map(hub=>`H${hub}`).join('-')).join(' · ');
   return boxRows.length||routeRows.length?[{area,xbox,part:'Part01',title:'Bera W Taleem / X2',subtitle,hubs,boxRows,routeRows,sharedXboxMap:true,sharedXboxRows,sharedXboxOutputs}]:[];
 }
-function wfmMapCounts(parts,rows){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const partRows=wfmRowsForPart(part,rows);part.boxRows.forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution');if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});part.routeRows.forEach(ref=>{const length=wfmValue(ref,['Cable length m']);if(length===''||length===undefined||length===null)return;const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),length,'fourcore');if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
+function wfmMapCounts(parts,rows,partIndexes){const counts={boxInstalled:0,boxMismatch:0,boxMissing:0,cableInstalled:0,cableMismatch:0,cableMissing:0};parts.forEach(part=>{const index=partIndexes?.get(part)||wfmBuildPartRenderIndex(part,rows);(part.boxRows||[]).forEach(ref=>{const type=String(wfmValue(ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB',state=wfmNodeState(part,rows,wfmValue(ref,['Box code']),type,index),cable=wfmCableState(part,rows,wfmValue(ref,['Box code']),wfmValue(ref,['Cable length m']),'distribution',index);if(state.status==='installed')counts.boxInstalled++;else if(state.status==='mismatch')counts.boxMismatch++;else counts.boxMissing++;if(cable.status==='installed')counts.cableInstalled++;else if(cable.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++});(part.routeRows||[]).forEach(ref=>{const length=wfmValue(ref,['Cable length m']);if(length===''||length===undefined||length===null)return;const state=wfmCableState(part,rows,wfmValue(ref,['Route code']),length,'fourcore',index);if(state.status==='installed')counts.cableInstalled++;else if(state.status==='mismatch')counts.cableMismatch++;else counts.cableMissing++})});return counts}
 var warehouseFiberSelectedScope='';
 var warehouseFiberSelectedArea='';
 var warehouseFiberScrollState={windowY:0,mainY:0};
@@ -3650,19 +3679,19 @@ function wfmIsNewLineFour(scope,code){
 function renderHayAndalusZ1PdfMap(scope){
   const box=document.getElementById('rolloutDailyMap'),xbox=wfmXboxKey(scope.xbox),sheet=hayAndalusZ1MapLayout?.xboxes?.[xbox];if(!box||!sheet)return false;
   const mapGeometry=wfmHayAndalusZ1MapGeometry(scope,sheet),mapPoints=mapGeometry.points,mapSegments=mapGeometry.segments;
-  const parts=wfmParts(scope.area,scope.xbox),rows=wh.rolloutDailyProgress||[],partsByCode=new Map();
+  const parts=wfmParts(scope.area,scope.xbox),rows=wh.rolloutDailyProgress||[],partsByCode=new Map(),partIndexes=new Map(parts.map(part=>[part,wfmBuildPartRenderIndex(part,rows)]));
   parts.forEach(part=>(part.boxRows||[]).forEach(ref=>partsByCode.set(wfmCodeKey(wfmValue(ref,['Box code'])),{part,ref})));
-  const counts=wfmMapCounts(parts,rows),green='#168a4a',blue='#1778d4';
+  const counts=wfmMapCounts(parts,rows,partIndexes),green='#168a4a',blue='#1778d4';
   const nodes=Object.entries(mapPoints).map(([code,point])=>{
     const match=partsByCode.get(wfmCodeKey(code));if(!match)return'';
     const type=String(wfmValue(match.ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB';
-    const state=wfmNodeState(match.part,rows,code,type).status,color=state==='installed'?green:state==='mismatch'?blue:wfmIsNewLineFour(scope,code)?'#dc2626':'';
+    const state=wfmNodeState(match.part,rows,code,type,partIndexes.get(match.part)).status,color=state==='installed'?green:state==='mismatch'?blue:wfmIsNewLineFour(scope,code)?'#dc2626':'';
     if(!color)return'';
     return`<circle cx="${point.x}" cy="${point.y}" r="${point.r}" fill="${color}" fill-opacity=".2" stroke="${color}" stroke-width="1.1" data-map-entry-kind="box" data-map-entry-code="${esc(code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
   }).join('');
   const cables=mapSegments.map(segment=>{
     const match=partsByCode.get(wfmCodeKey(segment.code));if(!match)return'';
-    const expected=wfmValue(match.ref,['Cable length m']),state=wfmCableState(match.part,rows,segment.code,expected,'distribution').status,color=state==='installed'?green:state==='mismatch'?blue:wfmIsNewLineFour(scope,segment.code)?'#dc2626':'';
+    const expected=wfmValue(match.ref,['Cable length m']),state=wfmCableState(match.part,rows,segment.code,expected,'distribution',partIndexes.get(match.part)).status,color=state==='installed'?green:state==='mismatch'?blue:wfmIsNewLineFour(scope,segment.code)?'#dc2626':'';
     if(!color)return'';
     return`<line x1="${segment.x1}" y1="${segment.y}" x2="${segment.x2}" y2="${segment.y}" stroke="${color}" stroke-width="1.35" stroke-linecap="round" data-map-entry-kind="distribution" data-map-entry-code="${esc(segment.code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
   }).join('');
@@ -3715,6 +3744,7 @@ async function downloadAreaFiberMapPdf(){
     toast('Could not create the map PDF: '+(error.message||'Please try again'));
   }finally{holder.remove()}
 }
+let warehouseFiberDisplayPartsOverride=null;
 function renderRolloutMapPanel(){
   const box=document.getElementById('rolloutDailyMap');if(!box)return;if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){ensureRolloutDashboardDesignReference().then(data=>{if(data)renderRolloutMapPanel();else box.innerHTML='<div class="map-note">Map reference could not be loaded.</div>'})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}const allScopes=WFM_MAP_SCOPES||[];const areaOptions=[...new Map(allScopes.map(scope=>[wfmMapAreaKey(scope.area),scope.area])).entries()];const selectedArea=warehouseFiberSelectedArea||'';const scopes=selectedArea?wfmScopesForArea(selectedArea):[];syncWarehouseFiberScope(selectedArea);
   if(wh.rolloutDashboardSummaryOnly){box.innerHTML='<div class="map-note">Loading Rollout details for the map...</div>';if(!rolloutRefreshBusy)ensureRolloutDailyDetails(false).then(()=>renderRolloutMapPanel());return}
@@ -3723,7 +3753,7 @@ function renderRolloutMapPanel(){
   const selectedScope=scopes.find(scope=>scope.id===warehouseFiberSelectedScope);const page=selectedScope||{title:`${selectedArea} - Select XBOX`,area:selectedArea,xbox:'',all:false};
   if(!selectedScope){box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>Select one XBOX to load the map smoothly.</p></div>${controls}</div><div class="map-list">${scopes.map(scope=>`<button class="map-list-row" type="button" onclick="wfmSelectMapXbox('${esc(scope.id)}')"><b>${esc(scope.xbox)}</b><span>${esc(scope.title||scope.area)}</span><span class="map-status ok">Open</span></button>`).join('')||'<div class="map-note">No XBOX maps found for this area.</div>'}</div></div>`;return}
   if(!warehouseFiberReference){if(!warehouseFiberReferenceLoading){ensureRolloutDashboardDesignReference().then(data=>{if(data)renderRolloutMapPanel();else box.innerHTML='<div class="map-note">Map reference could not be loaded.</div>'})}box.innerHTML='<div class="map-note">Loading fiber map reference...</div>';return}
-  const parts=page.all?scopes.flatMap(scope=>wfmParts(scope.area,scope.xbox)):wfmParts(page.area,page.xbox),rows=wh.rolloutDailyProgress||[],counts=wfmMapCounts(parts,rows);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox==='ALL'?'All XBOXes':page.xbox)} · live status from Rollout Daily Progress</p></div>${controls}</div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows)).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
+  const parts=warehouseFiberDisplayPartsOverride||(page.all?scopes.flatMap(scope=>wfmParts(scope.area,scope.xbox)):wfmParts(page.area,page.xbox)),rows=wh.rolloutDailyProgress||[],partIndexes=new Map(parts.map(part=>[part,wfmBuildPartRenderIndex(part,rows)])),counts=wfmMapCounts(parts,rows,partIndexes);box.innerHTML=`<div class="rollout-map-board"><div class="rollout-map-head"><div><h3>${esc(page.title)}</h3><p>${esc(page.area)} · ${esc(page.xbox==='ALL'?'All XBOXes':page.xbox)} · live status from Rollout Daily Progress</p></div>${controls}</div><div class="map-legend"><span><i class="dot green"></i>Green: installed / correct</span><span><i class="dot blue"></i>Blue: different length or box type</span><span><i class="dot red"></i>Red: missing</span></div><div class="map-summary"><article class="status-tile good"><span>Boxes</span><strong>${fmt(counts.boxInstalled)}</strong><small>Installed</small></article><article class="status-tile"><span>Boxes</span><strong>${fmt(counts.boxMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Boxes</span><strong>${fmt(counts.boxMissing)}</strong><small>Missing</small></article><article class="status-tile good"><span>Cables</span><strong>${fmt(counts.cableInstalled)}</strong><small>Correct length</small></article><article class="status-tile"><span>Cables</span><strong>${fmt(counts.cableMismatch)}</strong><small>Mismatch</small></article><article class="status-tile bad"><span>Cables</span><strong>${fmt(counts.cableMissing)}</strong><small>Missing</small></article></div><div class="map-stage">${parts.length?parts.map(part=>wfmRenderPart(part,rows,partIndexes.get(part))).join(''):'<div class="map-note">No fiber map design found for this scope.</div>'}</div><div class="map-note">The schematic is rendered from the structured fiber reference. Element colors are calculated from area, XBOX, normalized code, installed length, and box type in the Rollout Daily Progress records.</div></div>`;
 }
 const baseRenderRolloutDailyProgress=renderRolloutDailyProgress;
 renderRolloutDailyProgress=function(){if(isSingleRan()){clearSingleRanRolloutState(false);return}return baseRenderRolloutDailyProgress()};
@@ -3734,6 +3764,7 @@ function restoreWarehouseFiberScroll(){const state=warehouseFiberScrollState||{}
 const baseRenderRolloutMapPanel=renderRolloutMapPanel;
 renderRolloutMapPanel=function(){if(isSingleRan()){const box=document.getElementById('rolloutDailyMap');if(box)box.innerHTML='';return}if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();const result=baseRenderRolloutMapPanel();bindMapEntryTargets(document.getElementById('rolloutDailyMap'));restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result};
 const renderRolloutMapPanelWithInteraction=renderRolloutMapPanel;
+function renderRolloutMapPanelWithParts(parts){const previous=warehouseFiberDisplayPartsOverride;warehouseFiberDisplayPartsOverride=parts;try{return renderRolloutMapPanelWithInteraction()}finally{warehouseFiberDisplayPartsOverride=previous}}
 renderRolloutMapPanel=function(){
   if(isSingleRan())return renderRolloutMapPanelWithInteraction();
   if(!warehouseFiberRestoringTab)saveWarehouseFiberScroll();
@@ -3743,10 +3774,9 @@ renderRolloutMapPanel=function(){
     const activeXboxScope=xboxScopes.find(row=>row.id===warehouseFiberSelectedScope&&['X1','X2','X3','X4'].includes(wfmXboxKey(row.xbox)));
     const targetScope=activeXboxScope||xboxScopes.find(row=>wfmXboxKey(row.xbox)==='X1')||xboxScopes.find(row=>wfmXboxKey(row.xbox)==='X2');
     warehouseFiberSelectedScope=targetScope?.id||'';
-    const result=renderRolloutMapPanelWithInteraction();
+    const displayParts=targetScope?wfmHayAndalusZ1DisplayParts(targetScope.area,targetScope.xbox):[];
+    const result=renderRolloutMapPanelWithParts(displayParts);
     const box=document.getElementById('rolloutDailyMap');
-    const stage=box?.querySelector('.map-stage');
-    if(stage&&targetScope){const displayParts=wfmHayAndalusZ1DisplayParts(targetScope.area,targetScope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
     box?.querySelector('.map-list')?.remove();
     const xboxPicker=box?.querySelectorAll('.map-scope-picker select')[1];
     if(xboxPicker&&targetScope){
@@ -3759,27 +3789,19 @@ renderRolloutMapPanel=function(){
     return result;
   }
   if(canonicalRolloutArea(scope?.area)==='awladbaeoo'&&wfmXboxKey(scope?.xbox)==='X1'){
-    const result=renderRolloutMapPanelWithInteraction();
-    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
-    if(stage){const displayParts=wfmAwladBaeooX1DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    const result=renderRolloutMapPanelWithParts(wfmAwladBaeooX1DisplayParts(scope.area,scope.xbox));
     restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(canonicalRolloutArea(scope?.area)==='awladbaeoo'&&wfmXboxKey(scope?.xbox)==='X2'){
-    const result=renderRolloutMapPanelWithInteraction();
-    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
-    if(stage){const displayParts=wfmAwladBaeooX2DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    const result=renderRolloutMapPanelWithParts(wfmAwladBaeooX2DisplayParts(scope.area,scope.xbox));
     restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(wfmMapAreaKey(scope?.area)==='bera w taleem'&&wfmXboxKey(scope?.xbox)==='X1'){
-    const result=renderRolloutMapPanelWithInteraction();
-    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
-    if(stage){const displayParts=wfmBeraWTaleemX1DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    const result=renderRolloutMapPanelWithParts(wfmBeraWTaleemX1DisplayParts(scope.area,scope.xbox));
     restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(wfmMapAreaKey(scope?.area)==='bera w taleem'&&wfmXboxKey(scope?.xbox)==='X2'){
-    const result=renderRolloutMapPanelWithInteraction();
-    const box=document.getElementById('rolloutDailyMap'),stage=box?.querySelector('.map-stage');
-    if(stage){const displayParts=wfmBeraWTaleemX2DisplayParts(scope.area,scope.xbox);stage.innerHTML=displayParts.length?displayParts.map(part=>wfmRenderPart(part,wh.rolloutDailyProgress||[])).join(''):'<div class="map-note">No fiber map design found for this scope.</div>';bindMapEntryTargets(box)}
+    const result=renderRolloutMapPanelWithParts(wfmBeraWTaleemX2DisplayParts(scope.area,scope.xbox));
     restoreWarehouseFiberScroll();warehouseFiberRestoringTab=false;return result;
   }
   if(scope&&!wfmParts(scope.area,scope.xbox).length){
