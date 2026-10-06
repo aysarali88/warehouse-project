@@ -618,6 +618,7 @@ body.sr-program .login-logo img{
 .map-manager-notice{margin:12px 0;padding:10px 12px;border-left:3px solid #087da8;background:#eff8fb;color:#36566a;font-size:12px;font-weight:800}.map-manager-options{max-height:420px;overflow:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.map-manager-option{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 5px;border-bottom:1px solid #e8eef2}.map-manager-option:last-child{border-bottom:0}.map-manager-option label{font-weight:800;overflow-wrap:anywhere;cursor:pointer}.map-manager-option small{color:var(--muted);font-weight:700;white-space:nowrap}.map-manager-review{min-height:110px}.map-manager-review ul{margin:10px 0;padding-left:20px}.map-manager-review li{padding:4px 0;font-weight:800}.map-manager-line-candidates{padding:12px;border-bottom:1px solid var(--line);background:#f8fbfc}.map-manager-line-candidates h4{margin:0 0 4px;color:#0b4d75;font-size:14px}.map-manager-line-candidates>p{margin:0 0 8px;color:var(--muted);font-size:12px}.map-manager-line-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5edf1}.map-manager-line-row strong{display:block}.map-manager-line-row small{display:block;color:var(--muted);font-size:11px}
 .map-manager-builder{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.map-manager-builder .field{min-width:0}.map-manager-generated{display:grid;align-content:center;gap:4px;border-left:3px solid #14a3a2;padding:5px 10px;background:#eff8fb}.map-manager-generated span{color:var(--muted);font-size:11px;font-weight:800}.map-manager-generated strong{color:#0b4d75;overflow-wrap:anywhere}.map-manager-builder button{align-self:center}.map-manager-staged{padding:10px 12px;border-bottom:1px solid var(--line)}.map-manager-staged>strong{display:block;margin-bottom:6px;color:#0b4d75}.map-manager-option .map-manager-remove{min-height:28px;padding:2px 9px;font-size:17px;line-height:1}@media(max-width:700px){.map-manager-builder{grid-template-columns:1fr}}
 .map-manager-staged .map-manager-option{grid-template-columns:minmax(0,1fr) auto auto}
+.map-manager-lines-card{margin-top:14px}.map-manager-lines-card h3{margin:0 0 4px;color:#0b4d75}.map-manager-lines-card>p{margin:0 0 8px;color:var(--muted);font-size:12px}.map-manager-line-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5edf1}.map-manager-line-row strong{display:block}.map-manager-line-row small{display:block;color:var(--muted);font-size:11px}
 </style>
 <style>
 .static-map-card{border:0}
@@ -1135,6 +1136,7 @@ body.sr-program .login-logo img{
           <div id="mapManagerReview" class="map-manager-review"><div class="empty">No pending changes.</div></div>
         </div>
       </div>
+      <div id="mapManagerLineCandidates" class="card map-manager-lines-card hidden"></div>
     </div>
   </section>
 
@@ -2319,8 +2321,12 @@ function mapManagerRenderAddBuilder(area){
   const splitter=splitters.includes(Number(builder.splitter))?Number(builder.splitter):(splitters[0]||'');
   mapManagerState.builder={xbox,hub,line,splitter,box_type:builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m??''};
   const typeOptions=['SUB BOX','END BOX'];
-  const candidatesHtml=lineCandidates.length?`<div class="map-manager-line-candidates"><h4>Missing lines</h4><p>Enable only the line you need. This does not add a box or cable.</p>${lineCandidates.map(row=>`<div class="map-manager-line-row"><div><strong>${esc(row.xbox)} · ${esc(row.hub)} · ${esc(row.line)}</strong><small>${row.enabled?`Enabled${row.enabled_by?` · ${esc(row.enabled_by)}`:''}${row.enabled_at?` · ${esc(row.enabled_at.slice(0,16).replace('T',' '))}`:''}`:'Not enabled'}</small></div><button class="btn ${row.enabled?'soft':'primary'}" type="button" onclick="toggleMapManagerLine('${esc(row.xbox)}','${esc(row.hub)}','${esc(row.line)}',${!row.enabled})">${row.enabled?'Disable line':'Enable line'}</button></div>`).join('')}</div>`:'';
-  const html=`${candidatesHtml}<div class="form map-manager-builder">
+  const candidatesTarget=document.getElementById('mapManagerLineCandidates');
+  if(candidatesTarget){
+    candidatesTarget.innerHTML=lineCandidates.length?`<h3>Missing lines</h3><p>Enable only the line you need. This does not add a box or cable.</p>${lineCandidates.map(row=>`<div class="map-manager-line-row"><div><strong>${esc(row.xbox)} · ${esc(row.hub)} · ${esc(row.line)}</strong><small>${row.enabled?`Enabled${row.enabled_by?` · ${esc(row.enabled_by)}`:''}${row.enabled_at?` · ${esc(row.enabled_at.slice(0,16).replace('T',' '))}`:''}`:'Not enabled'}</small></div><button class="btn ${row.enabled?'soft':'primary'}" type="button" onclick="toggleMapManagerLine('${esc(row.xbox)}','${esc(row.hub)}','${esc(row.line)}',${!row.enabled})">${row.enabled?'Disable line':'Enable line'}</button></div>`).join('')}`:'';
+    candidatesTarget.classList.toggle('hidden',!lineCandidates.length);
+  }
+  const html=`<div class="form map-manager-builder">
     ${mapManagerSelect('mapManagerXbox','XBOX',topology.map(row=>row.xbox),xbox)}
     ${mapManagerSelect('mapManagerHub','HUB',hubs.map(row=>row.hub),hub)}
     ${mapManagerSelect('mapManagerLine','LINE',lines,line)}
@@ -2361,14 +2367,15 @@ function stageMapManagerAdd(){
 function removeStagedMapManagerAdd(index){mapManagerState.staged.splice(index,1);mapManagerReviewed=[];document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=!mapManagerState.staged.length;renderMapManagerOptions(false)}
 function renderMapManagerOptions(resetBatch=false){
   const area=document.getElementById('mapManagerArea')?.value||'',action=document.getElementById('mapManagerAction')?.value||'add';
-  const selected=mapManagerState.areas.find(row=>row.name===area);const target=document.getElementById('mapManagerOptions');
+  const selected=mapManagerState.areas.find(row=>row.name===area);const target=document.getElementById('mapManagerOptions');const candidatesTarget=document.getElementById('mapManagerLineCandidates');
   if(resetBatch){mapManagerState.staged=[];mapManagerState.builder={}}
   mapManagerState.options=selected?(action==='add'?[]:selected.active):[];mapManagerState.revision=selected?.revision||'';mapManagerReviewed=[];
   document.getElementById('mapManagerReview').innerHTML='<div class="empty">No pending changes.</div>';
   document.getElementById('mapManagerApplyButton').disabled=true;document.getElementById('mapManagerReviewButton').disabled=action==='add'?!mapManagerState.staged.length:!mapManagerState.options.length;
   if(!target)return;
-  if(!area){target.innerHTML='<div class="empty">Select an area first.</div>';return}
+  if(!area){target.innerHTML='<div class="empty">Select an area first.</div>';if(candidatesTarget){candidatesTarget.innerHTML='';candidatesTarget.classList.add('hidden')}return}
   if(action==='add'){mapManagerRenderAddBuilder(selected);return}
+  if(candidatesTarget){candidatesTarget.innerHTML='';candidatesTarget.classList.add('hidden')}
   if(!mapManagerState.options.length){target.innerHTML='<div class="empty">No installed SUB / END boxes for this area.</div>';return}
   target.innerHTML=mapManagerState.options.map((row,index)=>`<div class="map-manager-option"><input type="checkbox" id="mapManagerChoice${index}" data-map-manager-index="${index}" onchange="mapManagerSelectionChanged()"><label for="mapManagerChoice${index}">${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)}</label><small>${fmt(row.cable_length_m)} m</small></div>`).join('');
 }
