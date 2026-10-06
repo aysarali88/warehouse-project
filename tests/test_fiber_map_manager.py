@@ -194,26 +194,27 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
         self.assertTrue(all(row["cable_length_m"] == 37.5 for row in selected))
 
-    def test_hay_andalus_z1_can_add_h3_line_four_before_it_exists(self):
+    def test_hay_andalus_z1_can_add_approved_line_four_before_it_exists(self):
         boxes = []
-        for line in range(1, 4):
-            boxes.append({
-                "Area": "Hay Al Andalus Z1",
-                "Zone": "Hay Al Andalus Z1",
-                "City": "Tripoli",
-                "Related to XBOX": "X4",
-                "XBOX": "X-BOX4",
-                "Part": "X4-Part01",
-                "Hub": "H3",
-                "Line": line,
-                "Splitter": 1,
-                "Box code": f"H3-L{line}-S1",
-                "Box type": "SUB BOX",
-                "Real length m": "",
-                "Cable length m": 50,
-                "Material type": "Single-Core Distribution Cable_50m",
-                "dB": "",
-            })
+        for xbox, hub in (("X4", "H3"), ("X1", "H1")):
+            for line in range(1, 4):
+                boxes.append({
+                    "Area": "Hay Al Andalus Z1",
+                    "Zone": "Hay Al Andalus Z1",
+                    "City": "Tripoli",
+                    "Related to XBOX": xbox,
+                    "XBOX": f"X-BOX{xbox[1:]}",
+                    "Part": f"{xbox}-Part01",
+                    "Hub": hub,
+                    "Line": line,
+                    "Splitter": 1,
+                    "Box code": f"{hub}-L{line}-S1",
+                    "Box type": "SUB BOX",
+                    "Real length m": "",
+                    "Cable length m": 50,
+                    "Material type": "Single-Core Distribution Cable_50m",
+                    "dB": "",
+                })
         self.db.add(main.FiberMapArea(
             program="FTTH",
             area="Hay Al Andalus Z1",
@@ -227,21 +228,28 @@ class FiberMapManagerTests(unittest.TestCase):
         self.db.commit()
 
         area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Hay Al Andalus Z1")
-        h3 = next(row for row in next(row for row in area["topology"] if row["xbox"] == "X4")["hubs"] if row["hub"] == "H3")
-        self.assertIn("L4", h3["lines"])
+        for xbox, hub in (("X4", "H3"), ("X1", "H1")):
+            hub_options = next(row for row in next(row for row in area["topology"] if row["xbox"] == xbox)["hubs"] if row["hub"] == hub)
+            self.assertIn("L4", hub_options["lines"])
 
         result = main.fiber_map_manager_change(main.FiberMapChangeIn(
             area=area["name"],
             action="add",
-            selections=[{"xbox": "X4", "code": "H3-L4-S1", "box_type": "SUB BOX", "cable_length_m": 80}],
+            selections=[
+                {"xbox": "X4", "code": "H3-L4-S1", "box_type": "SUB BOX", "cable_length_m": 80},
+                {"xbox": "X1", "code": "H1-L4-S1", "box_type": "SUB BOX", "cable_length_m": 80},
+            ],
             expected_revision=area["revision"],
         ), self.request, self.db)
-        self.assertEqual(result["changed"], 1)
+        self.assertEqual(result["changed"], 2)
         updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
-        self.assertIn(("X4", "H3L4S1"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]})
+        active = {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]}
+        self.assertIn(("X4", "H3L4S1"), active)
+        self.assertIn(("X1", "H1L4S1"), active)
         field_rows = main.rollout_code_reference_rows(self.db, "FTTH")
-        selected = [row for row in field_rows if row["area"] == area["name"] and row["xbox"] == "X4" and main.rollout_code_key(row["code"]) == "H3L4S1"]
-        self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
+        for xbox, code in (("X4", "H3L4S1"), ("X1", "H1L4S1")):
+            selected = [row for row in field_rows if row["area"] == area["name"] and row["xbox"] == xbox and main.rollout_code_key(row["code"]) == code]
+            self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
 
 
 if __name__ == "__main__":

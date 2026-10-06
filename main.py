@@ -3043,7 +3043,10 @@ def fiber_map_manager_line_key(value) -> str:
 
 
 FIBER_MAP_MANAGER_ADDITIONAL_LINES = {
-    "hayalandaluszone1": {"X4": {"H3": {"L4"}}},
+    "hayalandaluszone1": {
+        "X1": {"H1": {"L4"}},
+        "X4": {"H3": {"L4"}},
+    },
 }
 
 
