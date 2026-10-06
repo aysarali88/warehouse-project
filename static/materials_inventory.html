@@ -2315,11 +2315,6 @@ function mapManagerRenderAddBuilder(area){
   let hub=hubs.some(row=>row.hub===builder.hub)?builder.hub:(hubs[0]?.hub||'');
   let hubRow=hubs.find(row=>row.hub===hub),lines=hubRow?.lines||[];
   let line=lines.includes(builder.line)?builder.line:(lines[0]||''),splitters=freeFor(xbox,hub,line);
-  if(!splitters.length){
-    const available=topology.filter(row=>row.xbox===xbox).flatMap(row=>row.hubs.flatMap(item=>item.lines.map(value=>({hub:item.hub,line:value,splitters:freeFor(xbox,item.hub,value)})))).find(item=>item.splitters.length)
-      ||topology.flatMap(row=>row.hubs.flatMap(item=>item.lines.map(value=>({xbox:row.xbox,hub:item.hub,line:value,splitters:freeFor(row.xbox,item.hub,value)})))).find(item=>item.splitters.length);
-    if(available){xbox=available.xbox||xbox;hub=available.hub;line=available.line;splitters=available.splitters;xboxRow=topology.find(row=>row.xbox===xbox);hubs=xboxRow?.hubs||[];hubRow=hubs.find(row=>row.hub===hub);lines=hubRow?.lines||[]}
-  }
   const splitter=splitters.includes(Number(builder.splitter))?Number(builder.splitter):(splitters[0]||'');
   mapManagerState.builder={xbox,hub,line,splitter,box_type:builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m??''};
   const typeOptions=['SUB BOX','END BOX'];
