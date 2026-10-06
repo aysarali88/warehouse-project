@@ -3042,6 +3042,20 @@ def fiber_map_manager_line_key(value) -> str:
     return f"L{int(match.group(1))}" if match else ""
 
 
+FIBER_MAP_MANAGER_ADDITIONAL_LINES = {
+    "hayalandaluszone1": {"X4": {"H3": {"L4"}}},
+}
+
+
+def fiber_map_manager_can_add_empty_line(area: str, xbox: str, hub: str, line: str) -> bool:
+    return line in (
+        FIBER_MAP_MANAGER_ADDITIONAL_LINES
+        .get(fiber_map_manager_area_key(area), {})
+        .get(rollout_xbox_key(xbox), {})
+        .get(rollout_code_key(hub), set())
+    )
+
+
 def fiber_map_manager_snapshot(reference: dict, area: str) -> dict:
     area_key = fiber_map_manager_area_key(area)
     boxes = [
@@ -3134,6 +3148,13 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
         cable_length = safe_float(first_value(row, "Cable length m", "Real length m", "Used length m", default=0))
         if cable_length > 0 and float(cable_length).is_integer():
             cable_lengths.add(int(cable_length))
+
+    for area_key, xboxes in FIBER_MAP_MANAGER_ADDITIONAL_LINES.items():
+        for xbox, hubs in xboxes.items():
+            existing_hubs = topology_by_area.get(area_key, {}).get(xbox, {})
+            for hub, lines in hubs.items():
+                if hub in existing_hubs:
+                    existing_hubs[hub].update(lines)
 
     areas = []
     for key, info in sorted(area_names.items(), key=lambda item: item[1]["name"].casefold()):
@@ -3256,6 +3277,13 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
                  and fiber_map_manager_line_key(first_value(row, "Line", "line", default="")) == line),
                 None,
             )
+            if source is None and fiber_map_manager_can_add_empty_line(area_name, key[0], hub, line):
+                source = next(
+                    (row for row in area_rows + seed_rows
+                     if rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")) == key[0]
+                     and rollout_code_key(first_value(row, "Hub", "hub", default="")) == hub),
+                    None,
+                )
             if source is None:
                 raise HTTPException(status_code=409, detail="Map topology changed; reload the options and try again")
             added = json.loads(json.dumps(source))

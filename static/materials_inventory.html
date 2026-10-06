@@ -3615,21 +3615,34 @@ function ensureHayAndalusZ1MapLayout(){
   if(!hayAndalusZ1MapLayoutLoading)hayAndalusZ1MapLayoutLoading=fetch('/static/assets/hay-andalus-z1-map-layout.json').then(response=>{if(!response.ok)throw new Error('Map reference could not be loaded');return response.json()}).then(data=>(hayAndalusZ1MapLayout=data)).finally(()=>{hayAndalusZ1MapLayoutLoading=null});
   return hayAndalusZ1MapLayoutLoading;
 }
+function wfmHayAndalusZ1MapGeometry(scope,sheet){
+  const points={...sheet.points},segments=[...(sheet.segments||[])];
+  if(wfmMapAreaKey(scope?.area)!=='hayalandalusz1'||wfmXboxKey(scope?.xbox)!=='X4')return{points,segments};
+  const previous=points['H3-L2-S1'],last=points['H3-L3-S1'];if(!previous||!last)return{points,segments};
+  const lineOffset=last.y-previous.y;
+  for(let splitter=1;splitter<=4;splitter++){
+    const code=`H3-L4-S${splitter}`,point=points[`H3-L3-S${splitter}`],segment=segments.find(row=>wfmCodeKey(row.code)===wfmCodeKey(`H3-L3-S${splitter}`));
+    if(point&&!points[code])points[code]={...point,y:point.y+lineOffset};
+    if(segment&&!segments.some(row=>wfmCodeKey(row.code)===wfmCodeKey(code)))segments.push({...segment,code,y:segment.y+lineOffset});
+  }
+  return{points,segments};
+}
 function renderHayAndalusZ1PdfMap(scope){
   const box=document.getElementById('rolloutDailyMap'),xbox=wfmXboxKey(scope.xbox),sheet=hayAndalusZ1MapLayout?.xboxes?.[xbox];if(!box||!sheet)return false;
+  const mapGeometry=wfmHayAndalusZ1MapGeometry(scope,sheet),mapPoints=mapGeometry.points,mapSegments=mapGeometry.segments;
   const parts=wfmParts(scope.area,scope.xbox),rows=wh.rolloutDailyProgress||[],partsByCode=new Map();
   parts.forEach(part=>(part.boxRows||[]).forEach(ref=>partsByCode.set(wfmCodeKey(wfmValue(ref,['Box code'])),{part,ref})));
   const counts=wfmMapCounts(parts,rows),green='#168a4a',blue='#1778d4';
-  const nodes=Object.entries(sheet.points).map(([code,point])=>{
+  const nodes=Object.entries(mapPoints).map(([code,point])=>{
     const match=partsByCode.get(wfmCodeKey(code));if(!match)return'';
     const type=String(wfmValue(match.ref,['Box type'])).toUpperCase().includes('END')?'END':'SUB';
-    const state=wfmNodeState(match.part,rows,code,type).status,color=state==='installed'?green:state==='mismatch'?blue:'';
+    const state=wfmNodeState(match.part,rows,code,type).status,isNewH3L4=code.startsWith('H3-L4-'),color=state==='installed'?green:state==='mismatch'?blue:isNewH3L4?'#dc2626':'';
     if(!color)return'';
     return`<circle cx="${point.x}" cy="${point.y}" r="${point.r}" fill="${color}" fill-opacity=".2" stroke="${color}" stroke-width="1.1" data-map-entry-kind="box" data-map-entry-code="${esc(code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
   }).join('');
-  const cables=sheet.segments.map(segment=>{
+  const cables=mapSegments.map(segment=>{
     const match=partsByCode.get(wfmCodeKey(segment.code));if(!match)return'';
-    const expected=wfmValue(match.ref,['Cable length m']),state=wfmCableState(match.part,rows,segment.code,expected,'distribution').status,color=state==='installed'?green:state==='mismatch'?blue:'';
+    const expected=wfmValue(match.ref,['Cable length m']),state=wfmCableState(match.part,rows,segment.code,expected,'distribution').status,isNewH3L4=segment.code.startsWith('H3-L4-'),color=state==='installed'?green:state==='mismatch'?blue:isNewH3L4?'#dc2626':'';
     if(!color)return'';
     return`<line x1="${segment.x1}" y1="${segment.y}" x2="${segment.x2}" y2="${segment.y}" stroke="${color}" stroke-width="1.35" stroke-linecap="round" data-map-entry-kind="distribution" data-map-entry-code="${esc(segment.code)}" data-map-entry-part="${esc(match.part.part)}"/>`;
   }).join('');
