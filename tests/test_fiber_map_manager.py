@@ -194,7 +194,7 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
         self.assertTrue(all(row["cable_length_m"] == 37.5 for row in selected))
 
-    def test_hay_andalus_z1_can_add_approved_line_four_before_it_exists(self):
+    def test_hay_andalus_z1_missing_lines_require_activation_before_add(self):
         boxes = []
         for xbox, hub in (("X4", "H3"), ("X1", "H1")):
             for line in range(1, 4):
@@ -230,6 +230,28 @@ class FiberMapManagerTests(unittest.TestCase):
         area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Hay Al Andalus Z1")
         for xbox, hub in (("X4", "H3"), ("X1", "H1")):
             hub_options = next(row for row in next(row for row in area["topology"] if row["xbox"] == xbox)["hubs"] if row["hub"] == hub)
+            self.assertNotIn("L4", hub_options["lines"])
+            candidate = next(row for row in area["line_candidates"] if row["xbox"] == xbox and row["hub"] == hub and row["line"] == "L4")
+            self.assertFalse(candidate["enabled"])
+
+        with self.assertRaises(HTTPException) as not_enabled:
+            main.fiber_map_manager_change(main.FiberMapChangeIn(
+                area=area["name"],
+                action="add",
+                selections=[{"xbox": "X1", "code": "H1-L4-S1", "box_type": "SUB BOX", "cable_length_m": 80}],
+                expected_revision=area["revision"],
+            ), self.request, self.db)
+        self.assertEqual(not_enabled.exception.status_code, 400)
+
+        for xbox, hub in (("X4", "H3"), ("X1", "H1")):
+            enabled = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+                area=area["name"], xbox=xbox, hub=hub, line="L4", expected_revision=area["revision"],
+            ), self.request, self.db)
+            self.assertTrue(enabled["changed"])
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Hay Al Andalus Z1")
+        for xbox, hub in (("X4", "H3"), ("X1", "H1")):
+            hub_options = next(row for row in next(row for row in area["topology"] if row["xbox"] == xbox)["hubs"] if row["hub"] == hub)
             self.assertIn("L4", hub_options["lines"])
 
         result = main.fiber_map_manager_change(main.FiberMapChangeIn(
@@ -250,6 +272,70 @@ class FiberMapManagerTests(unittest.TestCase):
         for xbox, code in (("X4", "H3L4S1"), ("X1", "H1L4S1")):
             selected = [row for row in field_rows if row["area"] == area["name"] and row["xbox"] == xbox and main.rollout_code_key(row["code"]) == code]
             self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
+        with self.assertRaises(HTTPException) as occupied:
+            main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+                area=area["name"], xbox="X1", hub="H1", line="L4", enabled=False, expected_revision=area["revision"],
+            ), self.request, self.db)
+        self.assertEqual(occupied.exception.status_code, 409)
+
+    def test_confirmed_line_candidates_are_exact_and_activation_creates_no_box_rows(self):
+        expected = {
+            ("hayalandaluszone1", "X1", "H1", "L4"),
+            ("hayalandaluszone1", "X3", "H4", "L3"),
+            ("hayalandaluszone1", "X3", "H4", "L4"),
+            ("hayalandaluszone1", "X4", "H3", "L4"),
+            ("hayalandaluszone1", "X4", "H8", "L4"),
+            ("awladbaeoo", "X1", "H3", "L4"),
+            ("awladbaeoo", "X1", "H7", "L4"),
+            ("awladbaeoo", "X1", "H9", "L4"),
+            ("awladbaeoo", "X1", "H11", "L3"),
+            ("awladbaeoo", "X1", "H11", "L4"),
+            ("awladbaeoo", "X2", "H9", "L4"),
+            ("berawtaleem", "X1", "H1", "L4"),
+            ("berawtaleem", "X1", "H3", "L4"),
+            ("berawtaleem", "X1", "H5", "L4"),
+            ("berawtaleem", "X1", "H7", "L4"),
+            ("berawtaleem", "X2", "H7", "L4"),
+            ("berawtaleem", "X2", "H8", "L4"),
+            ("berawtaleem", "X2", "H9", "L4"),
+        }
+        actual = {
+            (area, xbox, hub, line)
+            for area, xboxes in main.FIBER_MAP_MANAGER_LINE_CANDIDATES.items()
+            for xbox, hubs in xboxes.items()
+            for hub, lines in hubs.items()
+            for line in lines
+        }
+        self.assertEqual(actual, expected)
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Hay Al Andalus Z1")
+        candidates = {
+            (row["xbox"], row["hub"], row["line"]): row
+            for row in area["line_candidates"]
+        }
+        self.assertEqual(len(candidates), 5)
+        self.assertTrue(all(not row["enabled"] for row in candidates.values()))
+        saved_area_count = self.db.query(main.FiberMapArea).count()
+
+        result = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+            area=area["name"], xbox="X1", hub="H1", line="L4", expected_revision=area["revision"],
+        ), self.request, self.db)
+        self.assertTrue(result["changed"])
+        self.assertEqual(self.db.query(main.FiberMapArea).count(), saved_area_count)
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
+        self.assertTrue(next(row for row in updated["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H1" and row["line"] == "L4")["enabled"])
+        self.assertFalse(any(row["xbox"] == "X1" and main.rollout_code_key(row["code"]).startswith("H1L4") for row in updated["active"]))
+        self.assertFalse(any(
+            row["area"] == area["name"] and row["xbox"] == "X1" and main.rollout_code_key(row["code"]).startswith("H1L4")
+            for row in main.rollout_code_reference_rows(self.db, "FTTH")
+        ))
+
+        disabled = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+            area=area["name"], xbox="X1", hub="H1", line="L4", enabled=False, expected_revision=result["revision"],
+        ), self.request, self.db)
+        self.assertTrue(disabled["changed"])
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
+        self.assertFalse(next(row for row in updated["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H1" and row["line"] == "L4")["enabled"])
 
 
 if __name__ == "__main__":

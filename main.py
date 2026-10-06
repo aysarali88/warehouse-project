@@ -1267,6 +1267,15 @@ class FiberMapChangeIn(BaseModel):
     target_users: int = Field(default=0, ge=0, le=10_000_000)
 
 
+class FiberMapLineToggleIn(BaseModel):
+    area: str
+    xbox: str
+    hub: str
+    line: str
+    enabled: bool = True
+    expected_revision: str
+
+
 class TechnicianIn(BaseModel):
     name: str
     phone: str = ""
@@ -3003,7 +3012,13 @@ def fiber_map_reference(request: Request, db: Session = Depends(db_session)):
 def fiber_map_global_version(db: Session) -> str:
     version = db.query(func.max(AuditLog.id)).filter(
         AuditLog.action.in_(
-            ("publish_fiber_map_area", "fiber_map_add_sub_end_cable", "fiber_map_delete_sub_end_cable")
+            (
+                "publish_fiber_map_area",
+                "fiber_map_add_sub_end_cable",
+                "fiber_map_delete_sub_end_cable",
+                "fiber_map_line_enabled",
+                "fiber_map_line_disabled",
+            )
         )
     ).scalar()
     return str(version or 0)
@@ -3042,21 +3057,59 @@ def fiber_map_manager_line_key(value) -> str:
     return f"L{int(match.group(1))}" if match else ""
 
 
-FIBER_MAP_MANAGER_ADDITIONAL_LINES = {
+FIBER_MAP_MANAGER_LINE_CANDIDATES = {
     "hayalandaluszone1": {
         "X1": {"H1": {"L4"}},
-        "X4": {"H3": {"L4"}},
+        "X3": {"H4": {"L3", "L4"}},
+        "X4": {"H3": {"L4"}, "H8": {"L4"}},
+    },
+    "awladbaeoo": {
+        "X1": {"H3": {"L4"}, "H7": {"L4"}, "H9": {"L4"}, "H11": {"L3", "L4"}},
+        "X2": {"H9": {"L4"}},
+    },
+    "berawtaleem": {
+        "X1": {"H1": {"L4"}, "H3": {"L4"}, "H5": {"L4"}, "H7": {"L4"}},
+        "X2": {"H7": {"L4"}, "H8": {"L4"}, "H9": {"L4"}},
     },
 }
 
 
 def fiber_map_manager_can_add_empty_line(area: str, xbox: str, hub: str, line: str) -> bool:
     return line in (
-        FIBER_MAP_MANAGER_ADDITIONAL_LINES
+        FIBER_MAP_MANAGER_LINE_CANDIDATES
         .get(fiber_map_manager_area_key(area), {})
         .get(rollout_xbox_key(xbox), {})
         .get(rollout_code_key(hub), set())
     )
+
+
+def fiber_map_manager_line_states(db: Session, program: str) -> dict[tuple[str, str, str, str], dict]:
+    states = {}
+    actions = ("fiber_map_line_enabled", "fiber_map_line_disabled")
+    audits = (
+        db.query(AuditLog)
+        .filter(AuditLog.entity_type == "fiber_map_line", AuditLog.action.in_(actions))
+        .order_by(AuditLog.id.asc())
+        .all()
+    )
+    for audit in audits:
+        try:
+            details = json.loads(audit.details or "{}")
+        except (TypeError, ValueError):
+            continue
+        if normalize_program(details.get("program", DEFAULT_PROGRAM)) != normalize_program(program):
+            continue
+        area = fiber_map_manager_area_key(details.get("area", ""))
+        xbox = rollout_xbox_key(details.get("xbox", ""))
+        hub = rollout_code_key(details.get("hub", ""))
+        line = fiber_map_manager_line_key(details.get("line", ""))
+        if area and fiber_map_manager_can_add_empty_line(area, xbox, hub, line):
+            states[(area, xbox, hub, line)] = {
+                "enabled": audit.action == "fiber_map_line_enabled",
+                "enabled_by": audit.actor or "",
+                "enabled_at": audit.created_at.isoformat() if audit.created_at else "",
+            }
+    return states
 
 
 def fiber_map_manager_snapshot(reference: dict, area: str) -> dict:
@@ -3103,6 +3156,7 @@ def fiber_map_manager_catalog(db: Session, program: str, reference: dict) -> lis
 def fiber_map_manager_options(db: Session, program: str) -> dict:
     reference = load_fiber_map_reference(db, program)
     catalog = fiber_map_manager_catalog(db, program, reference)
+    saved_line_states = fiber_map_manager_line_states(db, program)
     area_names: dict[str, dict] = {}
     catalog_by_area: dict[str, dict[tuple[str, str, str], dict]] = {}
     active_by_area: dict[str, dict[tuple[str, str, str], dict]] = {}
@@ -3152,12 +3206,27 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
         if cable_length > 0 and float(cable_length).is_integer():
             cable_lengths.add(int(cable_length))
 
-    for area_key, xboxes in FIBER_MAP_MANAGER_ADDITIONAL_LINES.items():
+    line_candidates_by_area: dict[str, list[dict]] = {}
+    candidate_config = FIBER_MAP_MANAGER_LINE_CANDIDATES if normalize_program(program) == DEFAULT_PROGRAM else {}
+    for area_key, xboxes in candidate_config.items():
         for xbox, hubs in xboxes.items():
-            existing_hubs = topology_by_area.get(area_key, {}).get(xbox, {})
             for hub, lines in hubs.items():
-                if hub in existing_hubs:
-                    existing_hubs[hub].update(lines)
+                existing_lines = topology_by_area.get(area_key, {}).get(xbox, {}).get(hub, set())
+                for line in sorted(lines, key=lambda value: int(value[1:])):
+                    if line in existing_lines:
+                        continue
+                    enabled_row = saved_line_states.get((area_key, xbox, hub, line))
+                    if enabled_row:
+                        if enabled_row["enabled"]:
+                            topology_by_area.setdefault(area_key, {}).setdefault(xbox, {}).setdefault(hub, set()).add(line)
+                    line_candidates_by_area.setdefault(area_key, []).append({
+                        "xbox": xbox,
+                        "hub": hub,
+                        "line": line,
+                        "enabled": bool(enabled_row and enabled_row["enabled"]),
+                        "enabled_by": str((enabled_row or {}).get("enabled_by") or ""),
+                        "enabled_at": str((enabled_row or {}).get("enabled_at") or ""),
+                    })
 
     areas = []
     for key, info in sorted(area_names.items(), key=lambda item: item[1]["name"].casefold()):
@@ -3178,6 +3247,10 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
             "revision": snapshot["revision"],
             "active": [public_option(k, v) for k, v in sorted(active.items())],
             "available": [public_option(k, v) for k, v in sorted(candidates.items()) if k not in active],
+            "line_candidates": sorted(
+                line_candidates_by_area.get(key, []),
+                key=lambda row: (row["xbox"], int(row["hub"][1:]), int(row["line"][1:])),
+            ),
             "topology": [
                 {
                     "xbox": xbox,
@@ -3204,6 +3277,78 @@ def fiber_map_manager_get_options(request: Request, db: Session = Depends(db_ses
         {"success": True, **fiber_map_manager_options(db, program_key)},
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.post("/api/warehouse/fiber-map-manager/line")
+def fiber_map_manager_toggle_line(data: FiberMapLineToggleIn, request: Request, db: Session = Depends(db_session)):
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    if program_key != DEFAULT_PROGRAM:
+        raise HTTPException(status_code=403, detail="Missing-line activation is available only for FTTH")
+    user = require_roles(request, "Admin", "Requester")
+    actor = user.name or user.username
+    current = load_fiber_map_reference(db, program_key)
+    area_option = next(
+        (row for row in fiber_map_manager_options(db, program_key)["areas"]
+         if fiber_map_manager_area_key(row["name"]) == fiber_map_manager_area_key(data.area)),
+        None,
+    )
+    if area_option is None:
+        raise HTTPException(status_code=404, detail="Area is not available in the approved map catalog")
+
+    area_name = area_option["name"]
+    snapshot = fiber_map_manager_snapshot(current, area_name)
+    if not hmac.compare_digest(snapshot["revision"], data.expected_revision):
+        raise HTTPException(status_code=409, detail="The map changed. Refresh the options and try again.")
+
+    xbox = rollout_xbox_key(data.xbox)
+    hub_match = re.fullmatch(r"H(\d+)", rollout_code_key(data.hub))
+    line = fiber_map_manager_line_key(data.line)
+    hub = f"H{int(hub_match.group(1))}" if hub_match else ""
+    if not hub or not fiber_map_manager_can_add_empty_line(area_name, xbox, hub, line):
+        raise HTTPException(status_code=400, detail="This line is not an approved activation candidate")
+
+    already_has_boxes = any(
+        fiber_map_manager_box_key(row)[0] == xbox
+        and rollout_code_key(first_value(row, "Hub", "hub", default="")) == hub
+        and fiber_map_manager_line_key(first_value(row, "Line", "line", default="")) == line
+        for row in snapshot["boxes"]
+    )
+    if already_has_boxes:
+        raise HTTPException(status_code=409, detail="This line already has map boxes; no activation is needed")
+
+    states = fiber_map_manager_line_states(db, program_key)
+    key = (fiber_map_manager_area_key(area_name), xbox, hub, line)
+    current_state = states.get(key, {}).get("enabled", False)
+    changed = current_state != data.enabled
+    if changed:
+        action = "fiber_map_line_enabled" if data.enabled else "fiber_map_line_disabled"
+        try:
+            log_audit(
+                db,
+                action,
+                "fiber_map_line",
+                f"{area_name}:{xbox}:{hub}:{line}",
+                actor,
+                {"program": program_key, "area": area_name, "xbox": xbox, "hub": hub, "line": line, "enabled": data.enabled},
+            )
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Map changed concurrently. Refresh and try again.") from exc
+        except Exception:
+            db.rollback()
+            raise
+
+    return {
+        "success": True,
+        "changed": changed,
+        "area": area_name,
+        "xbox": xbox,
+        "hub": hub,
+        "line": line,
+        "enabled": data.enabled,
+        "revision": snapshot["revision"],
+    }
 
 
 @app.get("/api/warehouse/fiber-map-reference/version")
