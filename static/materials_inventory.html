@@ -619,6 +619,8 @@ body.sr-program .login-logo img{
 .map-manager-builder{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}.map-manager-builder .field{min-width:0}.map-manager-generated{display:grid;align-content:center;gap:4px;border-left:3px solid #14a3a2;padding:5px 10px;background:#eff8fb}.map-manager-generated span{color:var(--muted);font-size:11px;font-weight:800}.map-manager-generated strong{color:#0b4d75;overflow-wrap:anywhere}.map-manager-builder button{align-self:center}.map-manager-staged{padding:10px 12px;border-bottom:1px solid var(--line)}.map-manager-staged>strong{display:block;margin-bottom:6px;color:#0b4d75}.map-manager-option .map-manager-remove{min-height:28px;padding:2px 9px;font-size:17px;line-height:1}@media(max-width:700px){.map-manager-builder{grid-template-columns:1fr}}
 .map-manager-staged .map-manager-option{grid-template-columns:minmax(0,1fr) auto auto}
 .map-manager-lines-card{margin-top:14px}.map-manager-lines-card h3{margin:0 0 4px;color:#0b4d75}.map-manager-lines-card>p{margin:0 0 8px;color:var(--muted);font-size:12px}.map-manager-line-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #e5edf1}.map-manager-line-row strong{display:block}.map-manager-line-row small{display:block;color:var(--muted);font-size:11px}
+.warehouse-matrix-tools{display:grid;grid-template-columns:minmax(220px,1fr) minmax(200px,280px) auto;gap:10px;align-items:end;margin-bottom:14px}.warehouse-matrix-meta{align-self:center;color:var(--muted);font-size:12px;font-weight:800}.warehouse-matrix-wrap{max-height:calc(100vh - 300px);overflow:auto;border:1px solid var(--line);border-radius:7px}.warehouse-matrix{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0}.warehouse-matrix th,.warehouse-matrix td{min-width:112px;text-align:center}.warehouse-matrix th:first-child,.warehouse-matrix td:first-child{position:sticky;right:0;z-index:2;min-width:280px;text-align:right;background:#fff}.warehouse-matrix th:first-child{z-index:4;background:#eaf2f7}.warehouse-matrix thead th{position:sticky;top:0;z-index:3}.warehouse-matrix thead th:first-child{z-index:5}.warehouse-matrix-material{display:grid;gap:3px;white-space:normal}.warehouse-matrix-material strong{font-size:12px}.warehouse-matrix-material small{color:var(--muted);font-size:10px;direction:ltr;text-align:right}.warehouse-matrix td.matrix-zero{color:#99a7b3}.warehouse-matrix td.matrix-positive{color:#087647;font-weight:900}
+@media(max-width:850px){.warehouse-matrix-tools{grid-template-columns:1fr 1fr}.warehouse-matrix-meta{grid-column:1/-1}.warehouse-matrix-wrap{max-height:calc(100vh - 270px)}}@media(max-width:560px){.warehouse-matrix-tools{grid-template-columns:1fr}}
 </style>
 <style>
 .static-map-card{border:0}
@@ -1394,6 +1396,7 @@ body.sr-program .login-logo img{
     <div class="tabs">
       <button class="tab active" data-balance="stockBalances">مخزون المستودعات</button>
       <button class="tab" data-balance="materialLedger">حركة المادة</button>
+      <button class="tab" data-balance="warehouseMatrix">رصيد كل المواد</button>
     </div>
     <div class="card" id="stockBalances">
       <div class="top" style="margin-bottom:12px">
@@ -1431,6 +1434,18 @@ body.sr-program .login-logo img{
         <div id="ledgerMatches" class="ledger-match-list"></div>
         <div id="ledgerResult" class="ledger-empty">ابحث عن مادة لعرض كل حركاتها.</div>
       </div>
+    </div>
+    <div class="card" id="warehouseMatrix" style="display:none">
+      <div class="top" style="margin-bottom:12px">
+        <div><h3>رصيد المواد حسب المستودع</h3><p>الرصيد الحالي لكل مادة في كل مستودع. هذا العرض للقراءة فقط.</p></div>
+        <button class="btn soft" type="button" onclick="refreshWarehouse()">تحديث</button>
+      </div>
+      <div class="warehouse-matrix-tools">
+        <div class="field"><label for="matrixMaterialFilter">بحث المادة</label><input id="matrixMaterialFilter" type="search" placeholder="اسم المادة أو SKU أو Part #" oninput="renderWarehouseMatrix()"></div>
+        <div class="field"><label for="matrixWarehouseFilter">المستودع</label><select id="matrixWarehouseFilter" onchange="renderWarehouseMatrix()"><option value="">كل المستودعات</option></select></div>
+        <div class="warehouse-matrix-meta" id="warehouseMatrixMeta" aria-live="polite"></div>
+      </div>
+      <div id="warehouseMatrixTable"></div>
     </div>
   </section>
 
@@ -2113,6 +2128,7 @@ document.getElementById('techniciansTable').innerHTML=rowsTable([['الاسم','
 document.getElementById('productsTable').innerHTML=rowsTable([['Part #','part_number'],['SKU','sku'],['الاسم','name'],['Vendor','vendor'],['الوحدة','unit'],['التتبع','tracking_type',(v)=>`<span class="pill ${esc(v)}">${esc(v)}</span>`],['إجراء','id',(v,r)=>productActions(r)]],wh.products);
 renderReceiveHistory();
 document.getElementById('stockBalancesTable').innerHTML=rowsTable([['WH','warehouse'],['Part #','part_number'],['SKU','sku'],['Item','product'],['Vendor','vendor',(_,r)=>inventoryVendorCell(r)],['Unit','unit'],['Total Stock','total_received',(v)=>fmt(v)],['Issued WH','total_consumed',(v)=>fmt(v)],['Rollout Used','rollout_consumed_qty',(v)=>fmt(v)],['WH Remaining','wh_remaining',(v)=>fmt(v)],['Reserved Pending','reserved_pending',(v)=>fmt(v)],['Available','available_stock',(v)=>fmt(v)],['Usage %','usage_percent',(v)=>usageBar(v)],['History','product_id',(v,r)=>`<button class="btn soft" onclick="openMaterialLedger(${Number(v||0)},'${esc(r.sku||'')}')">History</button>`]],stockUsageRows);
+renderWarehouseMatrix();
 renderMaterialLedger();
 renderRolloutUsage();
 renderRolloutDailyProgress();
@@ -2283,7 +2299,24 @@ await loadWarehouse();
 }
 async function issueStock(){try{const product=productById(issueProduct.value);const qty=Number(issueQty.value||0);const body={warehouse_id:Number(issueWarehouse.value),technician_id:Number(issueTechnician.value),created_by:activeUser||'manager',items:[{product_id:Number(issueProduct.value),quantity:qty,serial_numbers:product&&product.tracking_type==='serialized'?serialLines('issueSerials'):[]}]};const r=await api('/api/warehouse/issue',{method:'POST',body:JSON.stringify(body)});issueSerials.value='';toast('تم الصرف: '+r.order_number);await loadWarehouse()}catch(e){toast(e.message)}}
 function setSetupWorkspace(workspace='inventory'){if(workspace==='areaBuilder'&&!isAdmin())workspace='inventory';if(workspace==='mapManager'&&!canManageFiberMap())workspace='inventory';document.querySelectorAll('[data-setup-workspace]').forEach(button=>button.classList.toggle('active',button.dataset.setupWorkspace===workspace));document.getElementById('setupInventory')?.classList.toggle('active',workspace==='inventory');document.getElementById('setupAreaBuilder')?.classList.toggle('active',workspace==='areaBuilder');document.getElementById('setupMapManager')?.classList.toggle('active',workspace==='mapManager');if(workspace==='mapManager')loadMapManagerOptions()}
-function setBalanceTab(tab='stockBalances',persist=true){if(tab==='rolloutUsage')tab='stockBalances';document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));if(document.getElementById('stockBalances'))stockBalances.style.display=tab==='stockBalances'?'block':'none';if(document.getElementById('materialLedger'))materialLedger.style.display=tab==='materialLedger'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(persist)saveUiState({balanceTab:tab})}
+function renderWarehouseMatrix(){
+const box=document.getElementById('warehouseMatrixTable');const warehouseFilter=document.getElementById('matrixWarehouseFilter');const materialFilter=document.getElementById('matrixMaterialFilter');if(!box||!warehouseFilter)return;
+const selected=warehouseFilter.value;let warehouses=[...(wh.warehouses||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+if(roleKey()==='warehousemanager')warehouses=warehouses.filter(row=>warehouseScopeMatches(currentWarehouseKey(),row.name));
+const canSeeDamage=isAdmin()||isManagement()||canManageWarehouse();const damageItems=canSeeDamage?(wh.damagedStock?.items||[]):[];
+const options=warehouses.map(row=>`<option value="${esc(row.id)}">${esc(row.name)}</option>`);if(canSeeDamage)options.push('<option value="damage">Damage</option>');
+warehouseFilter.innerHTML='<option value="">كل المستودعات</option>'+options.join('');if([...warehouses.map(row=>String(row.id)),...(canSeeDamage?['damage']:[])].includes(selected))warehouseFilter.value=selected;
+const visibleWarehouses=warehouseFilter.value==='damage'?[]:warehouseFilter.value?warehouses.filter(row=>String(row.id)===warehouseFilter.value):warehouses;
+const showDamage=canSeeDamage&&(!warehouseFilter.value||warehouseFilter.value==='damage');
+const query=normalizeText(materialFilter?.value||'');const products=[...(wh.products||[])].filter(product=>!query||[product.name,product.item_detail,product.sku,product.part_number,product.qr_code].some(value=>normalizeText(value).includes(query))).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+const balances=new Map();(wh.stockBalances||[]).forEach(row=>{const key=`${row.warehouse_id}:${row.product_id}`;balances.set(key,(balances.get(key)||0)+Number(row.quantity||0))});
+const damageBySku=new Map(damageItems.map(row=>[normalizeText(row.sku),Number(row.quantity||0)]));
+const columns=[...visibleWarehouses.map(row=>({key:String(row.id),name:row.name})),...(showDamage?[{key:'damage',name:'Damage'}]:[])];
+const meta=document.getElementById('warehouseMatrixMeta');if(meta)meta.textContent=`${fmt(products.length)} مادة · ${fmt(columns.length)} مستودع`;
+if(!products.length){box.innerHTML='<div class="empty">لا توجد مواد مطابقة للبحث.</div>';return}if(!columns.length){box.innerHTML='<div class="empty">لا توجد مستودعات متاحة لهذا الحساب.</div>';return}
+box.innerHTML=`<div class="warehouse-matrix-wrap"><table class="warehouse-matrix"><thead><tr><th>المادة / SKU / Part #</th>${columns.map(column=>`<th>${esc(column.name)}</th>`).join('')}</tr></thead><tbody>${products.map(product=>{const skuKey=normalizeText(product.sku);const cells=columns.map(column=>{const quantity=column.key==='damage'?(damageBySku.get(skuKey)||0):(balances.get(`${column.key}:${product.id}`)||0);return `<td class="${quantity>0?'matrix-positive':'matrix-zero'}">${fmt(quantity)}</td>`}).join('');return `<tr><td><div class="warehouse-matrix-material"><strong>${esc(product.name||product.item_detail||'-')}</strong><small>${esc(product.sku||'-')} · ${esc(product.part_number||'-')}</small></div></td>${cells}</tr>`}).join('')}</tbody></table></div>`;
+}
+function setBalanceTab(tab='stockBalances',persist=true){if(tab==='rolloutUsage')tab='stockBalances';document.querySelectorAll('[data-balance]').forEach(x=>x.classList.toggle('active',x.dataset.balance===tab));const balancesView=document.getElementById('stockBalances');const ledgerView=document.getElementById('materialLedger');const matrixView=document.getElementById('warehouseMatrix');if(balancesView)balancesView.style.display=tab==='stockBalances'?'block':'none';if(ledgerView)ledgerView.style.display=tab==='materialLedger'?'block':'none';if(matrixView)matrixView.style.display=tab==='warehouseMatrix'?'block':'none';if(tab==='materialLedger')renderMaterialLedger();if(tab==='warehouseMatrix')renderWarehouseMatrix();if(persist)saveUiState({balanceTab:tab})}
 function setMrMode(mode='mrForm',persist=true){document.querySelectorAll('[data-mr-mode]').forEach(x=>x.classList.toggle('active',x.dataset.mrMode===mode));document.querySelectorAll('.mr-mode').forEach(el=>el.style.display=el.id===mode?'block':'none');if(mode==='transferForm'){renderTransferLines();renderTransferPreview();renderTransferTable()}if(mode==='returnForm'){renderReturnLines();renderReturnsTable()}if(persist)saveUiState({mrMode:mode})}
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.program)switchProgram(b.dataset.program);else switchView(b.dataset.view)}));
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
