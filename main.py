@@ -6463,6 +6463,105 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     )
 
 
+@app.get("/api/warehouse/stock-matrix-export.xlsx")
+def export_stock_matrix_excel(
+    request: Request,
+    warehouse_id: str = "",
+    search: str = "",
+    program: str = DEFAULT_PROGRAM,
+    db: Session = Depends(db_session),
+):
+    user = current_user(request)
+    program_key = normalize_program(program)
+    role = user.role.strip().lower()
+    can_see_damage = role in {"admin", "management", "warehouse manager"}
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    warehouses_query = db.query(Warehouse).filter(
+        Warehouse.program == program_key,
+        or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+    ).order_by(Warehouse.name)
+    if allowed is not None:
+        warehouses_query = warehouses_query.filter(Warehouse.id.in_(allowed))
+    warehouses = warehouses_query.all()
+
+    selected_warehouse = warehouse_id.strip()
+    damage_only = selected_warehouse == "damage"
+    if damage_only and not can_see_damage:
+        raise HTTPException(status_code=403, detail="You do not have permission to export Damage stock")
+    if selected_warehouse and not damage_only:
+        try:
+            selected_id = int(selected_warehouse)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid warehouse") from exc
+        if allowed is not None and selected_id not in allowed:
+            raise HTTPException(status_code=403, detail="You do not have access to this warehouse")
+        warehouses = [row for row in warehouses if row.id == selected_id]
+        if not warehouses:
+            raise HTTPException(status_code=404, detail="Warehouse not found")
+
+    products = db.query(Product).filter(Product.program == program_key).order_by(Product.name, Product.sku).all()
+    search_key = normalize_usage_key(search.strip())
+    if search_key:
+        products = [
+            product for product in products
+            if any(search_key in normalize_usage_key(value or "") for value in (
+                product.name, product.item_detail, product.sku, product.part_number, product.qr_code
+            ))
+        ]
+
+    balances = list_stock_balances(request, program_key, db)["balances"]
+    warehouse_ids = {row.id for row in warehouses}
+    quantities = {
+        (row["warehouse_id"], row["product_id"]): row["quantity"]
+        for row in balances
+        if row["warehouse_id"] in warehouse_ids
+    }
+    damage_by_sku: dict[str, float] = {}
+    if can_see_damage and (damage_only or not selected_warehouse):
+        damage = virtual_damage_report(request, db, program_key)
+        damage_by_sku = {
+            normalize_usage_key(row.get("sku", "")): float(row.get("quantity", 0) or 0)
+            for row in damage.get("items", [])
+        }
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Warehouse Balance"
+    columns = [] if damage_only else warehouses
+    include_damage = can_see_damage and (damage_only or not selected_warehouse)
+    sheet.append(["Material", "SKU", "Part #", *[row.name for row in columns], *( ["Damage"] if include_damage else [] )])
+    for product in products:
+        row = [
+            material_display_name(product.name, product.sku) or product.item_detail or "-",
+            product.sku or "",
+            product_part_number(product.sku or "", product.part_number or ""),
+        ]
+        row.extend(float(quantities.get((warehouse.id, product.id), 0) or 0) for warehouse in columns)
+        if include_damage:
+            row.append(damage_by_sku.get(normalize_usage_key(product.sku or ""), 0))
+        sheet.append(row)
+
+    for cell in sheet[1]:
+        cell.font = cell.font.copy(bold=True)
+    sheet.freeze_panes = "D2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.column_dimensions["A"].width = 46
+    sheet.column_dimensions["B"].width = 22
+    sheet.column_dimensions["C"].width = 22
+    for index in range(4, sheet.max_column + 1):
+        sheet.column_dimensions[sheet.cell(row=1, column=index).column_letter].width = 20
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    suffix = "damage" if damage_only else re.sub(r"[^A-Za-z0-9_-]+", "-", warehouses[0].name).strip("-") if selected_warehouse and warehouses else "all-warehouses"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="warehouse-balance-{suffix}.xlsx"'},
+    )
+
+
 @app.get("/api/warehouse/technician-balances")
 def list_technician_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
