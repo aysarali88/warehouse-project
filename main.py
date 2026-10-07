@@ -6189,8 +6189,11 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     rollout_rows, _ = (rollout_daily_progress_records(db) if not is_single_ran(program_key) else ([], "disabled"))
     rollout_rows = rollout_records_for_session(request, rollout_rows)
     rollout_material_keys: set[str] = set()
+    rollout_material_cities: set[tuple[str, str]] = set()
     rollout_usage: dict[tuple[str, str], float] = {}
+    rollout_city_usage: dict[tuple[str, str], float] = {}
     rollout_date_unknown: set[tuple[str, str]] = set()
+    rollout_city_date_unknown: set[tuple[str, str]] = set()
     for record in rollout_rows:
         material = str(record.get("material type") or record.get("item") or "").strip()
         material_key = canonical_material_key(material)
@@ -6205,6 +6208,8 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
             continue
         warehouse_key = rollout_warehouse_key(record)
         city = "tripoli" if "tripoli" in warehouse_key else "misurata" if "misurata" in warehouse_key else ""
+        if city:
+            rollout_material_cities.add((city, material_key))
         date_value = str(record.get("Date") or record.get("date") or "").strip()
         if not date_value:
             date_value = str(record.get("entry time") or "").strip()
@@ -6213,15 +6218,20 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         except (TypeError, ValueError):
             if warehouse_key:
                 rollout_date_unknown.add((warehouse_key, material_key))
+            if city:
+                rollout_city_date_unknown.add((city, material_key))
             continue
         if not city:
             continue
         if record_date >= cutoff_date:
             key = (warehouse_key, material_key)
             rollout_usage[key] = rollout_usage.get(key, 0) + actual
+            city_key = (city, material_key)
+            rollout_city_usage[city_key] = rollout_city_usage.get(city_key, 0) + actual
     no_recent_consumption = {"tripoli": 0, "misurata": 0}
     manual_review = {"tripoli": [], "misurata": []}
     items = []
+    coverage_groups: dict[tuple[str, int], dict] = {}
     monthly_replenishment = []
     for balance in balances:
         warehouse = balance.warehouse
@@ -6266,6 +6276,34 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
         else:
             consumed = max(issued - returned, 0)
             source = "warehouse_net"
+        coverage_key = (city, balance.product_id)
+        coverage_group = coverage_groups.setdefault(coverage_key, {
+            "city": city,
+            "product_id": balance.product_id,
+            "product": product_display_name(product),
+            "sku": product.sku or "",
+            "unit": product.unit or "",
+            "available": 0.0,
+            "issued": 0.0,
+            "returned": 0.0,
+            "consumed": 0.0,
+            "consumption_source": "warehouse_net",
+            "warehouse_ids": set(),
+        })
+        coverage_group["available"] += available
+        coverage_group["issued"] += issued
+        coverage_group["returned"] += returned
+        coverage_group["warehouse_ids"].add(balance.warehouse_id)
+        city_rollout_key = (city, material_key)
+        if city_rollout_key in rollout_material_cities:
+            if city_rollout_key in rollout_city_date_unknown or city_rollout_key not in rollout_city_usage:
+                coverage_group["consumption_source"] = "manual_review"
+                coverage_group["consumed"] = 0.0
+            else:
+                coverage_group["consumption_source"] = "rollout"
+                coverage_group["consumed"] = rollout_city_usage[city_rollout_key]
+        elif coverage_group["consumption_source"] != "manual_review":
+            coverage_group["consumption_source"] = "warehouse_net"
         suggested = float(need["quantity"]) if need else max(consumed - available, 0)
         if not need and normalize_usage_key(product.unit or "") in {"pcs", "pc", "piece", "pieces", "unit", "units", "box", "boxes"}:
             suggested = float(math.ceil(suggested - 1e-9))
@@ -6288,6 +6326,14 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
                 "available": available,
                 "suggested_quantity": suggested,
             })
+    city_names = {"tripoli": "طرابلس · إجمالي المستودعات", "misurata": "مصراتة · Lnet + Free Zone"}
+    for group in coverage_groups.values():
+        city = group["city"]
+        if group["consumption_source"] == "warehouse_net":
+            consumed = max(group["issued"] - group["returned"], 0)
+        else:
+            consumed = float(group["consumed"] or 0)
+        available = float(group["available"] or 0)
         if consumed <= 0:
             no_recent_consumption[city] += 1
             if available <= 0:
@@ -6301,17 +6347,19 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
             status = "critical" if coverage_days < 7 else "warning" if coverage_days <= 14 else "normal"
             if status == "normal":
                 continue
+        warehouse_ids = sorted(group["warehouse_ids"])
         items.append({
-            "warehouse_id": balance.warehouse_id,
-            "warehouse": warehouse.name,
+            "warehouse_id": warehouse_ids[0] if len(warehouse_ids) == 1 else None,
+            "warehouse_ids": warehouse_ids,
+            "warehouse": city_names[city],
             "city": city,
-            "product_id": balance.product_id,
-            "product": product_display_name(product),
-            "sku": product.sku or "",
-            "unit": product.unit or "",
+            "product_id": group["product_id"],
+            "product": group["product"],
+            "sku": group["sku"],
+            "unit": group["unit"],
             "available": available,
             "consumed_30d": consumed,
-            "consumption_source": source,
+            "consumption_source": group["consumption_source"],
             "daily_average": consumed / window_days,
             "coverage_days": coverage_days,
             "status": status,
