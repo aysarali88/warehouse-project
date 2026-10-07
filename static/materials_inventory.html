@@ -3268,6 +3268,8 @@ restoreServerSession();
 loadInitialStockReference();
 window.addEventListener('hashchange',applyPageLink);
 setInterval(()=>pollNotifications(true),45000);
+setInterval(()=>{if(session&&document.visibilityState==='visible'&&!stockCoverageData.loading)refreshStockCoverage()},60000);
+document.addEventListener('visibilitychange',()=>{if(session&&document.visibilityState==='visible'&&!stockCoverageData.loading)refreshStockCoverage()});
 setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceRevision='';
