@@ -335,6 +335,96 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(report["events"][0]["reference"], return_row["return_number"])
         db.close()
 
+    def test_single_ran_damage_return_requires_and_tracks_one_serial_per_unit(self):
+        from models import ProductSerial
+
+        db = SessionLocal()
+        warehouse = Warehouse(program="SINGLE_RAN", name="SR Serial Return WH")
+        product = Product(program="SINGLE_RAN", sku="SR-DAMAGE-SERIAL-TEST", name="SR damaged serialized material")
+        db.add_all([warehouse, product])
+        db.commit()
+
+        requester_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(
+                role="Requester", name="SR Requester", username="sr-requester", warehouse_name="", program="SINGLE_RAN",
+            ))
+        )
+        with self.assertRaises(HTTPException) as missing_error:
+            main.create_material_return(
+                main.MaterialReturnIn(
+                    program="SINGLE_RAN",
+                    warehouse_id=warehouse.id,
+                    returned_by="SR Requester",
+                    items=[main.MaterialReturnItemIn(product_id=product.id, quantity=1, condition="Damaged")],
+                ),
+                requester_request,
+                db,
+            )
+        self.assertIn("Serial Number is required", missing_error.exception.detail)
+        db.rollback()
+
+        pending = main.create_material_return(
+            main.MaterialReturnIn(
+                program="SINGLE_RAN",
+                warehouse_id=warehouse.id,
+                returned_by="SR Requester",
+                items=[main.MaterialReturnItemIn(
+                    product_id=product.id,
+                    quantity=2,
+                    condition="Damaged",
+                    serial_numbers=["SR-SERIAL-001", "SR-SERIAL-002"],
+                )],
+            ),
+            requester_request,
+            db,
+        )["return"]
+        self.assertEqual(pending["status"], "pending_warehouse")
+        self.assertEqual([item["serial_number"] for item in pending["items"]], ["SR-SERIAL-001", "SR-SERIAL-002"])
+        self.assertTrue(all(item["quantity"] == 1 for item in pending["items"]))
+        self.assertEqual(
+            {row.status for row in db.query(ProductSerial).filter(ProductSerial.program == "SINGLE_RAN").all()},
+            {main.SR_DAMAGE_PENDING_NEW},
+        )
+
+        manager_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(
+                role="Warehouse Manager", name="SR Manager", username="sr-manager",
+                warehouse_name=warehouse.name, program="SINGLE_RAN",
+            ))
+        )
+        result = main.approve_material_return(
+            pending["id"],
+            main.MaterialRequisitionActionIn(program="SINGLE_RAN", actor="SR Manager"),
+            manager_request,
+            db,
+        )
+        self.assertEqual(result["damaged_quantity_quarantined"], 2)
+        serial_rows = db.query(ProductSerial).filter(ProductSerial.program == "SINGLE_RAN").order_by(ProductSerial.serial_number).all()
+        self.assertEqual([row.status for row in serial_rows], ["damaged", "damaged"])
+        self.assertTrue(all(row.warehouse_id is not None for row in serial_rows))
+        movements = db.query(StockMovement).filter_by(program="SINGLE_RAN", movement_type="damage_in", reference=pending["return_number"]).all()
+        self.assertEqual({row.serial_number for row in movements}, {"SR-SERIAL-001", "SR-SERIAL-002"})
+
+        with self.assertRaises(HTTPException) as duplicate_error:
+            main.create_material_return(
+                main.MaterialReturnIn(
+                    program="SINGLE_RAN",
+                    warehouse_id=warehouse.id,
+                    returned_by="SR Requester",
+                    items=[main.MaterialReturnItemIn(
+                        product_id=product.id,
+                        quantity=1,
+                        condition="Damaged",
+                        serial_numbers=["SR-SERIAL-001"],
+                    )],
+                ),
+                requester_request,
+                db,
+            )
+        self.assertIn("not available for a Damage return", duplicate_error.exception.detail)
+        db.rollback()
+        db.close()
+
     def test_historical_damaged_returns_import_once_into_central_damage_warehouse(self):
         from models import MaterialReturn, MaterialReturnItem
 

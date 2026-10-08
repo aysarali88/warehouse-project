@@ -1473,6 +1473,7 @@ class MaterialReturnItemIn(BaseModel):
     quantity: float = Field(gt=0)
     condition: str = "Good"
     remark: str = ""
+    serial_numbers: list[str] = Field(default_factory=list)
 
 
 class MaterialReturnIn(BaseModel):
@@ -1693,6 +1694,7 @@ def virtual_damage_report(request: Request, db: Session, program: str) -> dict:
             "source_warehouse": source_name,
             "product": product_display_name(row.product),
             "sku": row.product.sku if row.product else "",
+            "serial_number": row.serial_number or "",
             "quantity": float(row.quantity or 0),
             "note": row.note or "",
         })
@@ -3883,8 +3885,10 @@ def transfer_to_dict(row: MaterialTransfer, include_items: bool = True) -> dict:
 def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> dict:
     items = []
     if include_items:
-        items = [
-            {
+        items = []
+        for item in row.items:
+            serial_number, display_remark = decode_sr_damage_remark(item.remark)
+            items.append({
                 "id": item.id,
                 "line_no": item.line_no,
                 "product_id": item.product_id,
@@ -3893,10 +3897,9 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
                 "uom": item.uom,
                 "quantity": item.quantity,
                 "condition": item.condition,
-                "remark": item.remark,
-            }
-            for item in row.items
-        ]
+                "serial_number": serial_number,
+                "remark": display_remark,
+            })
     return {
         "id": row.id,
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
@@ -8084,10 +8087,76 @@ def return_condition_is_damaged(condition: str) -> bool:
     return normalize_usage_key(condition) in {"damage", "damaged"}
 
 
+SR_DAMAGE_SERIAL_MARKER = "__SR_DAMAGE_SERIAL__:"
+SR_DAMAGE_PENDING_NEW = "pending_damage_new"
+SR_DAMAGE_PENDING_ISSUED = "pending_damage_issued"
+
+
+def normalize_damage_serials(values: list[str]) -> list[str]:
+    return [str(value or "").strip() for value in values if str(value or "").strip()]
+
+
+def encode_sr_damage_remark(serial_number: str, remark: str = "") -> str:
+    payload = {"serial_number": serial_number.strip(), "remark": str(remark or "").strip()}
+    return SR_DAMAGE_SERIAL_MARKER + json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+
+
+def decode_sr_damage_remark(value: str = "") -> tuple[str, str]:
+    text_value = str(value or "")
+    if not text_value.startswith(SR_DAMAGE_SERIAL_MARKER):
+        return "", text_value
+    try:
+        payload = json.loads(text_value[len(SR_DAMAGE_SERIAL_MARKER):])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return "", text_value
+    return str(payload.get("serial_number") or "").strip(), str(payload.get("remark") or "").strip()
+
+
+def lock_product_serial(db: Session, program: str, serial_number: str) -> ProductSerial | None:
+    return (
+        db.query(ProductSerial)
+        .filter(
+            ProductSerial.program == normalize_program(program),
+            func.lower(func.trim(ProductSerial.serial_number)) == serial_number.strip().lower(),
+        )
+        .with_for_update()
+        .first()
+    )
+
+
+def reserve_sr_damage_serial(
+    db: Session,
+    product: Product,
+    serial_number: str,
+    requester_submission: bool,
+) -> ProductSerial:
+    serial = serial_number.strip()
+    row = lock_product_serial(db, SINGLE_RAN_PROGRAM, serial)
+    if row is not None:
+        if row.product_id != product.id:
+            raise HTTPException(status_code=400, detail=f"Serial {serial} belongs to another material")
+        if row.status != "with_technician":
+            raise HTTPException(status_code=400, detail=f"Serial {serial} is not available for a Damage return ({row.status})")
+        if requester_submission:
+            row.status = SR_DAMAGE_PENDING_ISSUED
+        return row
+
+    row = ProductSerial(
+        program=SINGLE_RAN_PROGRAM,
+        product_id=product.id,
+        serial_number=serial,
+        status=SR_DAMAGE_PENDING_NEW if requester_submission else "damaged",
+    )
+    db.add(row)
+    return row
+
+
 @app.post("/api/warehouse/damage-inventory/reconcile")
 def reconcile_damaged_returns(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     actor = require_roles(request, "Admin")
     program_key = normalize_program(program)
+    if is_single_ran(program_key):
+        raise HTTPException(status_code=400, detail="Single RAN Damage returns must be submitted with Serial Numbers")
     damage_warehouse = get_or_create_virtual_damage_warehouse(db, program_key)
     lines = (
         db.query(MaterialReturnItem, MaterialReturn, Product, Warehouse)
@@ -8203,19 +8272,42 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     damaged_quantity_quarantined = 0
     damaged_quantity_pending = 0
     virtual_warehouse = None
-    for index, item in enumerate(data.items, start=1):
+    prepared_items: list[tuple[MaterialReturnItemIn, Product, bool, float, str, ProductSerial | None]] = []
+    seen_damage_serials: set[str] = set()
+    for item in data.items:
         product = require_product(db, item.product_id, program_key)
         damaged = return_condition_is_damaged(item.condition)
+        if is_single_ran(program_key) and damaged:
+            serial_numbers = normalize_damage_serials(item.serial_numbers)
+            if not serial_numbers:
+                raise HTTPException(status_code=400, detail=f"Serial Number is required for damaged material {product_part_number(product.sku, product.part_number)}")
+            if item.quantity != len(serial_numbers):
+                raise HTTPException(status_code=400, detail=f"Damaged quantity for {product_part_number(product.sku, product.part_number)} must equal its serial count")
+            for serial_number in serial_numbers:
+                serial_key = serial_number.casefold()
+                if serial_key in seen_damage_serials:
+                    raise HTTPException(status_code=400, detail=f"Duplicate Damage serial in this return: {serial_number}")
+                seen_damage_serials.add(serial_key)
+                serial_row = reserve_sr_damage_serial(db, product, serial_number, requester_submission)
+                prepared_items.append((item, product, damaged, 1, serial_number, serial_row))
+            continue
+        prepared_items.append((item, product, damaged, item.quantity, "", None))
+
+    for index, (item, product, damaged, item_quantity, serial_number, serial_row) in enumerate(prepared_items, start=1):
         if requester_submission:
             if damaged:
-                damaged_quantity_pending += item.quantity
+                damaged_quantity_pending += item_quantity
         elif damaged:
             virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
-            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item.quantity
-            damaged_quantity_quarantined += item.quantity
+            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item_quantity
+            damaged_quantity_quarantined += item_quantity
+            if serial_row is not None:
+                serial_row.status = "damaged"
+                serial_row.warehouse_id = virtual_warehouse.id
+                serial_row.technician_id = None
         else:
-            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item.quantity
-            stock_added_quantity += item.quantity
+            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item_quantity
+            stock_added_quantity += item_quantity
         return_item = MaterialReturnItem(
             return_id=row.id,
             line_no=index,
@@ -8223,9 +8315,9 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
             part_nbr=product_part_number(product.sku, product.part_number),
             description=product_display_name(product),
             uom=product.unit,
-            quantity=item.quantity,
+            quantity=item_quantity,
             condition=item.condition.strip() or "Good",
-            remark=item.remark.strip(),
+            remark=encode_sr_damage_remark(serial_number, item.remark) if serial_number else item.remark.strip(),
         )
         db.add(return_item)
         db.flush()
@@ -8236,7 +8328,8 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
                     movement_type="damage_in" if damaged else "return_in",
                     product_id=item.product_id,
                     warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
-                    quantity=item.quantity,
+                    quantity=item_quantity,
+                    serial_number=serial_number,
                     reference=row.return_number,
                     source_item_id=return_item.id,
                     note=(
@@ -8293,9 +8386,21 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     for item in row.items:
         require_product(db, item.product_id, program_key)
         if return_condition_is_damaged(item.condition):
+            serial_number, _display_remark = decode_sr_damage_remark(item.remark)
+            serial_row = None
+            if is_single_ran(program_key):
+                if not serial_number or item.quantity != 1:
+                    raise HTTPException(status_code=400, detail="Every Single RAN damaged return unit requires one Serial Number")
+                serial_row = lock_product_serial(db, program_key, serial_number)
+                if serial_row is None or serial_row.product_id != item.product_id or serial_row.status not in {SR_DAMAGE_PENDING_NEW, SR_DAMAGE_PENDING_ISSUED}:
+                    raise HTTPException(status_code=400, detail=f"Damage serial is no longer pending or belongs to another material: {serial_number}")
             virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
             locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item.quantity
             damaged_quantity_quarantined += item.quantity
+            if serial_row is not None:
+                serial_row.status = "damaged"
+                serial_row.warehouse_id = virtual_warehouse.id
+                serial_row.technician_id = None
             db.add(
                 StockMovement(
                     program=program_key,
@@ -8303,6 +8408,7 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                     product_id=item.product_id,
                     warehouse_id=virtual_warehouse.id,
                     quantity=item.quantity,
+                    serial_number=serial_number,
                     reference=row.return_number,
                     source_item_id=item.id,
                     note=f"Approved damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}",
@@ -8343,7 +8449,7 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
 def reject_material_return(return_id: int, data: MaterialRequisitionActionIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
     program_key = normalize_program(data.program)
-    row = db.query(MaterialReturn).options(joinedload(MaterialReturn.warehouse)).filter(
+    row = db.query(MaterialReturn).options(joinedload(MaterialReturn.warehouse), selectinload(MaterialReturn.items)).filter(
         MaterialReturn.id == return_id,
         MaterialReturn.program == program_key,
     ).first()
@@ -8352,6 +8458,20 @@ def reject_material_return(return_id: int, data: MaterialRequisitionActionIn, re
     if row.status != "pending_warehouse":
         raise HTTPException(status_code=400, detail=f"Return cannot be rejected from status {row.status}")
     require_warehouse_access(request, db, row.warehouse_id, program_key)
+    if is_single_ran(program_key):
+        for item in row.items:
+            if not return_condition_is_damaged(item.condition):
+                continue
+            serial_number, _display_remark = decode_sr_damage_remark(item.remark)
+            if not serial_number:
+                continue
+            serial_row = lock_product_serial(db, program_key, serial_number)
+            if serial_row is None:
+                continue
+            if serial_row.status == SR_DAMAGE_PENDING_NEW:
+                db.delete(serial_row)
+            elif serial_row.status == SR_DAMAGE_PENDING_ISSUED:
+                serial_row.status = "with_technician"
     row.status = "rejected"
     row.received_by = request_actor(request)
     log_audit(db, "reject_material_return", "material_return", row.return_number, request_actor(request), data.model_dump())
