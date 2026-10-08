@@ -351,6 +351,18 @@ class MaterialRequisition(Base):
     items = relationship("MaterialRequisitionItem", back_populates="requisition", cascade="all, delete-orphan")
 
 
+class SrMaterialRequisitionSignedCopy(Base):
+    __tablename__ = "sr_material_requisition_signed_copies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requisition_id = Column(Integer, ForeignKey("material_requisitions.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    file_name = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    file_data = Column(LargeBinary, nullable=False)
+    uploaded_by = Column(String, default="")
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class MaterialRequisitionItem(Base):
     __tablename__ = "material_requisition_items"
 

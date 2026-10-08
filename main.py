@@ -58,6 +58,7 @@ from models import (
     RolloutEntryCounter,
     RolloutRecord,
     Site,
+    SrMaterialRequisitionSignedCopy,
     StockBalance,
     StockMovement,
     Technician,
@@ -105,13 +106,20 @@ SESSION_TTL_HOURS = int(os.getenv("SESSION_TTL_HOURS", "8"))
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1").strip().lower() not in {"0", "false", "no", "off"}
 SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
 ACTIVE_USER_WINDOW_SECONDS = 120
+DEFAULT_PROGRAM = "FTTH"
+SINGLE_RAN_PROGRAM = "SINGLE_RAN"
 
 if len(SESSION_SECRET) < 32:
     raise RuntimeError("SESSION_SECRET must be set to a value of at least 32 characters")
 
 for program_key, db_engine in all_engines():
     try:
-        Base.metadata.create_all(bind=db_engine)
+        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or table.name != SrMaterialRequisitionSignedCopy.__tablename__]
+        Base.metadata.create_all(bind=db_engine, tables=tables)
+        if program_key == SINGLE_RAN_PROGRAM and db_engine.dialect.name == "postgresql":
+            with db_engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {SrMaterialRequisitionSignedCopy.__tablename__} ENABLE ROW LEVEL SECURITY"))
+                conn.execute(text(f"REVOKE ALL ON TABLE {SrMaterialRequisitionSignedCopy.__tablename__} FROM PUBLIC, anon, authenticated"))
     except Exception:
         logger.exception("%s database initialization failed", program_key)
 
@@ -252,8 +260,6 @@ for program_key, db_engine in all_engines():
 app = FastAPI(title="FTTH Rollout")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-DEFAULT_PROGRAM = "FTTH"
-SINGLE_RAN_PROGRAM = "SINGLE_RAN"
 PROGRAM_LABELS = {
     DEFAULT_PROGRAM: "FTTH",
     SINGLE_RAN_PROGRAM: "Single RAN",
@@ -4129,6 +4135,10 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
 
 def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    if program_key == SINGLE_RAN_PROGRAM:
+        db.query(SrMaterialRequisitionSignedCopy).filter(
+            SrMaterialRequisitionSignedCopy.requisition_id == row.id
+        ).delete(synchronize_session=False)
     restored = 0.0
     movements = (
         db.query(StockMovement)
@@ -7348,7 +7358,90 @@ def get_material_requisition(requisition_id: int, request: Request, viewer: str 
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if not user_can_view_requisition(row, viewer, role):
         raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
-    return {"success": True, "requisition": requisition_to_dict(row)}
+    result = requisition_to_dict(row)
+    if program_key == SINGLE_RAN_PROGRAM:
+        signed_copy = db.query(SrMaterialRequisitionSignedCopy).filter(
+            SrMaterialRequisitionSignedCopy.requisition_id == row.id
+        ).first()
+        result["signed_copy"] = {
+            "file_name": signed_copy.file_name,
+            "uploaded_by": signed_copy.uploaded_by,
+            "uploaded_at": signed_copy.uploaded_at.isoformat() if signed_copy.uploaded_at else "",
+        } if signed_copy else None
+    return {"success": True, "requisition": result}
+
+
+@app.post("/api/warehouse/material-requisitions/{requisition_id}/signed-copy")
+async def upload_sr_signed_mr_copy(requisition_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(db_session)):
+    if normalize_program(getattr(request.state, "program", "")) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Not found")
+    row = db.query(MaterialRequisition).filter(
+        MaterialRequisition.id == requisition_id,
+        MaterialRequisition.program == SINGLE_RAN_PROGRAM,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
+    user = current_user(request)
+    if not user_can_view_requisition(row, request_scope_viewer(request), user.role):
+        raise HTTPException(status_code=403, detail="Not allowed to upload a copy for this material requisition")
+    if row.status != "issued":
+        raise HTTPException(status_code=409, detail="Upload is available after the MR is issued")
+
+    filename = os.path.basename(str(file.filename or "").replace("\\", "/")).strip()
+    extension = os.path.splitext(filename)[1].lower()
+    content = await file.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File size must be 10 MB or less")
+    signatures = {
+        ".pdf": ("application/pdf", content.startswith(b"%PDF-")),
+        ".jpg": ("image/jpeg", content.startswith(b"\xff\xd8\xff")),
+        ".jpeg": ("image/jpeg", content.startswith(b"\xff\xd8\xff")),
+        ".png": ("image/png", content.startswith(b"\x89PNG\r\n\x1a\n")),
+    }
+    detected = signatures.get(extension)
+    if not filename or detected is None or not detected[1]:
+        raise HTTPException(status_code=415, detail="Upload a valid PDF, JPG, or PNG file")
+
+    signed_copy = db.query(SrMaterialRequisitionSignedCopy).filter(
+        SrMaterialRequisitionSignedCopy.requisition_id == row.id
+    ).first()
+    if signed_copy is None:
+        signed_copy = SrMaterialRequisitionSignedCopy(requisition_id=row.id)
+        db.add(signed_copy)
+    signed_copy.file_name = filename[:255]
+    signed_copy.content_type = detected[0]
+    signed_copy.file_data = content
+    signed_copy.uploaded_by = request_actor(request)
+    log_audit(db, "upload_signed_mr_copy", "material_requisition", row.order_number, request_actor(request), {"file_name": filename, "size": len(content)})
+    db.commit()
+    db.refresh(signed_copy)
+    return {"success": True, "signed_copy": {"file_name": signed_copy.file_name, "uploaded_by": signed_copy.uploaded_by, "uploaded_at": signed_copy.uploaded_at.isoformat() if signed_copy.uploaded_at else ""}}
+
+
+@app.get("/api/warehouse/material-requisitions/{requisition_id}/signed-copy")
+def get_sr_signed_mr_copy(requisition_id: int, request: Request, db: Session = Depends(db_session)):
+    if normalize_program(getattr(request.state, "program", "")) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Not found")
+    row = db.query(MaterialRequisition).filter(
+        MaterialRequisition.id == requisition_id,
+        MaterialRequisition.program == SINGLE_RAN_PROGRAM,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
+    user = current_user(request)
+    if not user_can_view_requisition(row, request_scope_viewer(request), user.role):
+        raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
+    signed_copy = db.query(SrMaterialRequisitionSignedCopy).filter(
+        SrMaterialRequisitionSignedCopy.requisition_id == row.id
+    ).first()
+    if signed_copy is None:
+        raise HTTPException(status_code=404, detail="No signed copy uploaded")
+    filename = urllib.parse.quote(signed_copy.file_name, safe="")
+    return Response(
+        content=signed_copy.file_data,
+        media_type=signed_copy.content_type,
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 @app.get("/api/warehouse/material-requisition-history")
