@@ -865,6 +865,32 @@ body.sr-program .login-logo img{
 .city-ops-metric small{font-size:9px}
 .city-ops-empty{padding:14px;text-align:center;color:#64788c;font-size:12px;border:1px dashed #dce8ef;border-radius:7px}
 @media(max-width:600px){.city-ops-grid{grid-template-columns:1fr}.city-ops-metric{padding:7px 4px}}
+.command-kpis{grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:18px}
+.command-kpi{min-width:0;padding:12px;border-radius:7px;background:rgba(13,39,65,.34)}
+.command-kpi strong{font-size:26px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.command-kpi.alert{border-color:rgba(255,113,113,.5);background:rgba(117,31,43,.3)}
+.command-kpi.good strong{color:#78e2ad}
+.dashboard-workflows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.dashboard-flow-card{min-width:0;border:1px solid #dce6ee;border-radius:8px;background:#fff;padding:15px;box-shadow:0 8px 22px rgba(23,34,52,.05)}
+.dashboard-flow-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:16px}
+.dashboard-flow-head h3{margin:0;color:#172b43;font-size:15px}
+.dashboard-flow-head small{display:block;margin-top:3px;color:#8798aa;font-size:11px}
+.dashboard-flow-badge{flex:none;border-radius:999px;padding:4px 9px;background:#eef4ff;color:#315df4;font-size:10px;font-weight:900;white-space:nowrap}
+.dashboard-flow-rows{display:grid;gap:10px}
+.dashboard-flow-row{display:grid;grid-template-columns:90px minmax(0,1fr) 28px;gap:8px;align-items:center;color:#5d6f85;font-size:11px}
+.dashboard-flow-track{height:8px;border-radius:99px;background:#edf1f5;overflow:hidden}
+.dashboard-flow-track i{display:block;height:100%;border-radius:inherit;background:#315df4}
+.dashboard-flow-row strong{text-align:end;color:#26374d;font-size:11px;font-variant-numeric:tabular-nums}
+.dashboard-flow-note{margin-top:14px;padding-top:10px;border-top:1px dashed #e1e8ef;color:#8292a7;font-size:10px;line-height:1.5}
+.watchlist-table{width:100%;border-collapse:collapse;font-size:11px}
+.watchlist-table th,.watchlist-table td{padding:9px 7px;border-bottom:1px solid #e8edf2;text-align:start}
+.watchlist-table th{color:#8b9bb0;font-size:9px;letter-spacing:.08em;text-transform:uppercase;background:#f7f9fb}
+.watchlist-item{font-weight:800;color:#26374d}
+.watchlist-state{display:inline-flex;border-radius:999px;padding:4px 8px;background:#fff0ef;color:#d84848;font-size:10px;font-weight:900;white-space:nowrap}
+.watchlist-state.warning{background:#fff4e2;color:#a86a00}
+.watchlist-empty{padding:24px 12px;text-align:center;color:#8191a4;font-size:12px}
+@media(max-width:1050px){.command-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-workflows{grid-template-columns:1fr}}
+@media(max-width:600px){.command-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.command-kpi strong{font-size:23px}.dashboard-flow-row{grid-template-columns:78px minmax(0,1fr) 24px}.watchlist-table th:nth-child(2),.watchlist-table td:nth-child(2){display:none}}
 @media(max-width:600px){#mrLines .mr-line{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
@@ -939,26 +965,28 @@ body.sr-program .login-logo img{
   <section class="view active" id="dashboard">
     <div class="command-dashboard">
       <div class="command-hero">
-        <div class="command-head">
+      <div class="command-head">
           <div class="command-title">
-            <small><span class="pulse-dot"></span>Live Materials Command Center</small>
-            <h3>Inventory Dashboard</h3>
+          <small><span class="pulse-dot"></span>WH Command Center</small>
+          <h3>Inventory Command Center</h3>
+          <p>Live materials · Requests · Transfers · Returns</p>
           </div>
           <div class="command-health" id="dashboardHealth">System healthy</div>
         </div>
         <div class="command-kpis" id="summaryKpis"></div>
       </div>
-      <div class="workflow-lane" id="opsSnapshot"></div>
-      <div class="viz-panel"><h3>Warehouse inventory</h3><div id="warehouseOverview"></div></div>
+      <div class="dashboard-workflows" id="dashboardWorkflows"></div>
+      <div class="viz-panel"><h3>Warehouse Stock Position</h3><div id="warehouseOverview"></div></div>
       <div class="viz-panel damage-inventory-panel"><h3>Damage Warehouse</h3><div id="damagedStockOverview"></div></div>
       <div class="viz-grid">
-        <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
+        <div class="viz-panel"><h3>Highest Material Usage</h3><div id="topStockOut"></div></div>
         <div class="viz-panel"><h3>MR / TR / RT حسب المدينة</h3><p class="city-ops-subtitle">إجمالي السجلات من كل الحالات · التحويل يُحسب في كل مدينة طرف فيه</p><div id="cityOperationSummary"></div></div>
       </div>
       <div class="viz-grid">
-        <div class="viz-panel" style="grid-column:1/-1"><h3>تنبيهات تغطية المخزون حسب الاستهلاك</h3><div class="hint" style="margin:-7px 0 10px">الرصيد مجمّع على مستوى المدينة، وتشمل مصراتة مستودعي Lnet وFree Zone.</div><div id="inventoryRisks"></div></div>
+        <div class="viz-panel" style="grid-column:1/-1"><h3>Stock Coverage Alerts</h3><div class="hint" style="margin:-7px 0 10px">الرصيد مجمّع على مستوى المدينة، وتشمل مصراتة مستودعي Lnet وFree Zone.</div><div id="inventoryRisks"></div></div>
         <div class="viz-panel" style="grid-column:1/-1"><div class="replenishment-heading"><h3>كميات الطلب والاحتياج التقديري</h3><button class="btn soft" type="button" onclick="exportMonthlyReplenishment()">تصدير CSV</button></div><div id="monthlyReplenishment"></div></div>
         <div class="viz-panel"><h3>Latest Movements</h3><div id="recentMovements"></div></div>
+        <div class="viz-panel"><h3>Items Watchlist</h3><div id="dashboardWatchlist"></div></div>
       </div>
       <div id="dashboardStatus" style="display:none"></div>
       <div id="rolloutOverview" style="display:none"></div>
@@ -2039,8 +2067,11 @@ function exportMrHistory(){const query=mrHistoryQuery();window.open('/api/wareho
 async function importMrExcelFiles(files){const input=document.getElementById('mrImportFiles');if(!files||!files.length)return;const fallbackWarehouse=warehouseByName(document.getElementById('mrHistoryWarehouse')?.value||'')||(wh.warehouses||[])[0];const form=new FormData();[...files].forEach(file=>form.append('files',file));form.append('default_warehouse_id',fallbackWarehouse?.id||0);form.append('actor',activeUser||'Import');try{toast(`Importing ${files.length} Excel file(s)...`);const data=await api('/api/warehouse/material-requisitions/import-excel',{method:'POST',body:form});(data.requisitions||[]).forEach(upsertLocalMr);syncWarehouseLater();loadMrHistory(false);const failed=data.failed||0;const msg=`Imported ${fmt(data.imported||0)} MR${failed?`, failed ${fmt(failed)}`:''}`;toast(msg);if(failed)alert((data.results||[]).filter(r=>!r.success).map(r=>`${r.file} / ${r.sheet}: ${r.message}`).join('\n'))}catch(e){toast(e.message)}finally{if(input)input.value=''}}
 function pct(v,total){return total?Math.max(0,Math.min(100,(Number(v||0)/Number(total||0))*100)):0}
 function meter(width,hot=false){return `<div class="meter"><i class="${hot?'hot':''}" style="width:${Math.max(2,Math.min(100,Number(width||0)))}%"></i></div>`}
-async function refreshOperationsCitySummary(){if(!session)return;const program=normalizeProgram(currentProgram);const requestId=++operationsCityRequestId;operationsCityData={...operationsCityData,program,loading:true,error:''};renderCityOperationsSummary();try{const data=await api('/api/warehouse/operations-by-city');if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...data,program,loading:false,error:''};renderCityOperationsSummary()}catch(error){if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...operationsCityData,program,loading:false,error:'تعذر تحميل أعداد المعاملات'};renderCityOperationsSummary()}}
+async function refreshOperationsCitySummary(){if(!session)return;const program=normalizeProgram(currentProgram);const requestId=++operationsCityRequestId;operationsCityData={...operationsCityData,program,loading:true,error:''};renderCityOperationsSummary();renderExecutiveDashboard();try{const data=await api('/api/warehouse/operations-by-city');if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...data,program,loading:false,error:''};renderExecutiveDashboard()}catch(error){if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...operationsCityData,program,loading:false,error:'تعذر تحميل أعداد المعاملات'};renderExecutiveDashboard()}}
 function renderCityOperationsSummary(){const box=document.getElementById('cityOperationSummary');if(!box)return;if(operationsCityData.loading||operationsCityData.program!==normalizeProgram(currentProgram)){box.innerHTML='<div class="city-ops-empty">جاري تحميل الأعداد...</div>';return}if(operationsCityData.error){box.innerHTML=`<div class="city-ops-empty">${esc(operationsCityData.error)}</div>`;return}const cities=operationsCityData.cities||{};box.innerHTML=`<div class="city-ops-grid">${[['tripoli','طرابلس'],['misurata','مصراتة']].map(([key,label])=>{const city=cities[key]||{};if(!city.accessible)return `<section class="city-ops-card"><h4>${label}</h4><div class="city-ops-empty">لا توجد صلاحية لعرض هذه المدينة</div></section>`;return `<section class="city-ops-card"><h4>${label}</h4><div class="city-ops-metrics">${[['MR','طلبات المواد'],['TR','التحويلات'],['RT','الإرجاعات']].map(([type,title])=>`<div class="city-ops-metric"><span>${title}</span><strong>${fmt(city[type]?.total||0)}</strong><small>قيد الإجراء ${fmt(city[type]?.pending||0)}</small></div>`).join('')}</div></section>`}).join('')}</div>`}
+function dashboardOperationTotals(type){const cities=operationsCityData.cities||{};return ['tripoli','misurata'].reduce((totals,key)=>{const city=cities[key];if(city?.accessible){totals.total+=Number(city[type]?.total||0);totals.pending+=Number(city[type]?.pending||0)}return totals},{total:0,pending:0})}
+function renderDashboardWorkflows(){const box=document.getElementById('dashboardWorkflows');if(!box)return;if(operationsCityData.loading||operationsCityData.program!==normalizeProgram(currentProgram)){box.innerHTML=['Material Requests','Warehouse Transfers','Field Returns'].map(title=>`<section class="dashboard-flow-card"><div class="dashboard-flow-head"><h3>${title}</h3></div><div class="watchlist-empty">Loading live totals...</div></section>`).join('');return}if(operationsCityData.error){box.innerHTML=`<div class="city-ops-empty" style="grid-column:1/-1">${esc(operationsCityData.error)}</div>`;return}const cards=[['MR','Material Requests','Warehouse → Field','Requests','Awaiting approval'],['TR','Warehouse Transfers','Warehouse ↔ Warehouse','Transfers','Awaiting action'],['RT','Field Returns','Field → Warehouse','Returns','Awaiting inspection']];box.innerHTML=cards.map(([type,title,subtitle,itemLabel,pendingLabel])=>{const counts=dashboardOperationTotals(type);const total=counts.total;const pending=counts.pending;const done=Math.max(0,total-pending);const pendingWidth=total?Math.min(100,pending/total*100):0;return `<section class="dashboard-flow-card"><div class="dashboard-flow-head"><div><h3>${title}</h3><small>${subtitle}</small></div><span class="dashboard-flow-badge">${fmt(total)} total</span></div><div class="dashboard-flow-rows"><div class="dashboard-flow-row"><span>${pendingLabel}</span><div class="dashboard-flow-track"><i style="width:${pendingWidth}%"></i></div><strong>${fmt(pending)}</strong></div><div class="dashboard-flow-row"><span>Other statuses</span><div class="dashboard-flow-track"><i style="width:${total?100-pendingWidth:0}%;background:#18b87a"></i></div><strong>${fmt(done)}</strong></div></div><div class="dashboard-flow-note">Live count from all ${itemLabel} records in Tripoli and Misurata.</div></section>`}).join('')}
+function renderDashboardWatchlist(rows,loading,error){const box=document.getElementById('dashboardWatchlist');if(!box)return;if(loading){box.innerHTML='<div class="watchlist-empty">Loading current stock coverage...</div>';return}if(error){box.innerHTML=`<div class="watchlist-empty">${esc(error)}</div>`;return}const items=[...(rows||[])].sort((a,b)=>Number(a.coverage_days||0)-Number(b.coverage_days||0)).slice(0,6);box.innerHTML=items.length?`<div class="table-wrap"><table class="watchlist-table"><thead><tr><th>Material</th><th>Warehouse</th><th>Available</th><th>Issued / 30d</th><th>Coverage</th></tr></thead><tbody>${items.map(row=>{const out=row.status==='out_of_stock';return `<tr><td class="watchlist-item">${esc(row.product||row.sku||'Unknown material')}<br><small>${esc(row.sku||'')}</small></td><td>${esc(row.warehouse||'-')}</td><td>${fmt(row.available)} ${esc(row.unit||'')}</td><td>${fmt(row.consumed_30d)} ${esc(row.unit||'')}</td><td><span class="watchlist-state ${out?'':'warning'}">${out?'Out of stock':`${Number(row.coverage_days||0).toFixed(1)} days`}</span></td></tr>`}).join('')}</tbody></table></div>`:'<div class="watchlist-empty">No materials currently require attention.</div>'}
 function compactTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap executive-table"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 function renderWarehouseQueuesBadge(){let count=0,label='notifications';const pendingTransfers=(wh.transfers||[]).filter(r=>r.status==='pending_approval'&&canApproveTransfer(r)).length;const approvedTransfers=(wh.transfers||[]).filter(r=>r.status==='approved'&&userOwnsTransfer(r)).length;const pendingReturns=(wh.returns||[]).filter(r=>r.status==='pending_warehouse'&&canApproveMaterialReturn(r)).length;if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length+pendingTransfers+approvedTransfers+pendingReturns;label='workflow'}else if(canApprove()){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length+pendingTransfers;label='workflow'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved'&&userOwnsMr(r)).length+approvedTransfers+pendingReturns;label='workflow'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
 function setApprovalBadge(count,label='notifications'){const badge=document.getElementById('approvalBadge');if(!badge)return;badge.textContent=`${fmt(count)} ${label}`;badge.className='notify-badge'+(Number(count)?' hot':'')}
@@ -2086,16 +2117,23 @@ const pendingMrs=wh.mrs.filter(r=>r.status==='pending_approval'||r.status==='dra
 const waitingApproval=wh.mrs.filter(r=>r.status==='pending_approval').length;
 const readyIssue=wh.mrs.filter(r=>r.status==='approved').length;
 const rolloutUsed=wh.rolloutUsage.reduce((s,r)=>s+Number(r.rollout_used_qty||0),0);
-document.getElementById('dashboardHealth').textContent=stockCoverageData.error&&coverageMatchesProgram?'تعذر تحديث تنبيهات المخزون':stockCoverageData.loading||!coverageMatchesProgram?'جاري حساب التغطية...':coverageRows.length?`${coverageRows.length} Stock Alert`:'System healthy';
+const opsReady=operationsCityData.program===normalizeProgram(currentProgram)&&!operationsCityData.loading&&!operationsCityData.error;
+const mrTotals=opsReady?dashboardOperationTotals('MR'):null;
+const trTotals=opsReady?dashboardOperationTotals('TR'):null;
+const rtTotals=opsReady?dashboardOperationTotals('RT'):null;
+document.getElementById('dashboardHealth').textContent=stockCoverageData.error&&coverageMatchesProgram?'تعذر تحديث تنبيهات المخزون':stockCoverageData.loading||!coverageMatchesProgram?'جاري تحديث بيانات المخزون':coverageRows.length?`${coverageRows.length} stock alerts`:'Live data updated';
 document.getElementById('summaryKpis').innerHTML=[
-['Total Received',fmt(totalReceived)],['Stock Out',fmt(totalOut)],['Remaining',fmt(totalRemaining)],['Usage',usage.toFixed(1)+'%']
-].map(x=>`<div class="command-kpi"><span>${esc(x[0])}</span><strong>${esc(x[1])}</strong></div>`).join('');
+['Stock Alerts',stockCoverageData.loading||!coverageMatchesProgram?'—':fmt(coverageRows.length),'alert'],
+['Pending Requests',opsReady?fmt(mrTotals.pending):'—',''],
+['Transfers Pending',opsReady?fmt(trTotals.pending):'—',''],
+['Pending Returns',opsReady?fmt(rtTotals.pending):'—',''],
+['Usage',usage.toFixed(1)+'%',''],
+['Total Remaining',fmt(totalRemaining),'good']
+].map(([label,value,tone])=>`<div class="command-kpi ${tone}"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
 document.getElementById('dashboardStatus').innerHTML=[
 ['المستودعات',wh.summary.warehouses,'good'],['تنبيهات التغطية',coverageRows.length,coverageRows.length?'bad':'good'],['Rollout Used',rolloutUsed,rolloutUsed?'warn':'good']
 ].map(x=>`<div class="status-tile ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
-document.getElementById('opsSnapshot').innerHTML=[
-['Pending Approval',waitingApproval,'warn'],['Ready Issue',readyIssue,'warn']
-].map(x=>`<div class="workflow-pill ${x[2]}"><span>${esc(x[0])}</span><strong>${fmt(x[1])}</strong></div>`).join('');
+renderDashboardWorkflows();
 const topOut=[...wh.stockUsage].filter(r=>Number(r.total_consumed)>0).sort((a,b)=>Number(b.total_consumed)-Number(a.total_consumed)).slice(0,6);
 const maxOut=Math.max(...topOut.map(r=>Number(r.total_consumed||0)),1);
 document.getElementById('topStockOut').innerHTML=topOut.length?`<div>${topOut.map(r=>`<div class="chart-row"><b title="${esc(r.product)} · ${esc(r.warehouse)}">${esc(r.product)}<small>${esc(r.warehouse||'Unknown warehouse')}</small></b><div class="chart-track"><div class="chart-fill ${Number(r.usage_percent)>=60?'hot':''}" style="width:${pct(r.total_consumed,maxOut)}%"></div></div><strong>${fmt(r.total_consumed)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا يوجد Stock Out بعد</div>';
@@ -2110,6 +2148,7 @@ document.getElementById('recentReceipts').innerHTML=receiptRows.length?`<div cla
 const coverageGroups={tripoli:[],misurata:[]};coverageRows.forEach(row=>{if(coverageGroups[row.city])coverageGroups[row.city].push(row)});
 const renderCoverageCity=(key,label)=>{const rows=coverageGroups[key];const noRecent=Number(stockCoverageData.no_recent_consumption?.[key]||0);const body=stockCoverageData.error&&coverageMatchesProgram?`<div class="coverage-empty">${esc(stockCoverageData.error)}</div>`:stockCoverageData.loading||!coverageMatchesProgram?'<div class="coverage-empty">جاري حساب التغطية...</div>':rows.length?`<div class="coverage-list">${rows.map(row=>{const out=row.status==='out_of_stock';const warning=row.status==='warning';const status=out?'نفد المخزون':warning?'تنبيه':'حرج';const coverage=Number(row.coverage_days||0).toFixed(1);const source=row.consumption_source==='rollout'?'تركيب Rollout':row.consumption_source==='manual_review'?'مراجعة يدوية':'صافي صرف المستودع';return `<div class="coverage-item ${out?'out':warning?'warning':''}"><div><b>${esc(row.product||row.sku||'مادة غير معروفة')}</b><small>${esc(row.sku||'')} · ${esc(row.warehouse)}<br>المتاح ${fmt(row.available)} ${esc(row.unit||'')} · ${source}: ${fmt(row.consumed_30d)} / 30 يوم · متوسط ${Number(row.daily_average||0).toFixed(2)} يوميًا</small></div><strong>${out?status:`${status} · ${coverage} يوم`}</strong></div>`}).join('')}</div>`:'<div class="coverage-empty">لا توجد مواد متوقع نفادها خلال 14 يومًا</div>';const note=!stockCoverageData.loading&&!stockCoverageData.error&&noRecent?`<div class="coverage-note">${fmt(noRecent)} مادة بلا استهلاك صافٍ خلال آخر 30 يومًا؛ لا تُحسب لها تغطية.</div>`:'';return `<section class="coverage-city"><h4>${label}<span>${fmt(rows.length)} تنبيه</span></h4>${body}${note}</section>`};
 document.getElementById('inventoryRisks').innerHTML=`<div class="coverage-columns">${renderCoverageCity('tripoli','طرابلس')}${renderCoverageCity('misurata','مصراتة')}</div>`;
+renderDashboardWatchlist(coverageRows,stockCoverageData.loading||!coverageMatchesProgram,stockCoverageData.error&&coverageMatchesProgram?stockCoverageData.error:'');
 const replenishmentRows=coverageMatchesProgram&&!stockCoverageData.loading&&!stockCoverageData.error?(stockCoverageData.monthly_replenishment||[]):[];const replenishmentGroups={tripoli:[],misurata:[]};replenishmentRows.forEach(row=>{if(replenishmentGroups[row.city])replenishmentGroups[row.city].push(row)});
 const renderReplenishmentCity=(key,label)=>{const rows=replenishmentGroups[key];const reviews=stockCoverageData.manual_review?.[key]||[];const noRecent=Number(stockCoverageData.no_recent_consumption?.[key]||0);const body=stockCoverageData.error&&coverageMatchesProgram?`<div class="coverage-empty">${esc(stockCoverageData.error)}</div>`:stockCoverageData.loading||!coverageMatchesProgram?'<div class="coverage-empty">جاري حساب الاحتياج...</div>':rows.length?`<div class="replenishment-table-wrap"><table class="replenishment-table"><thead><tr><th>المادة</th><th>Part # / SKU</th><th>المستودع</th><th>مصروف المستودع</th><th>مرتجع المستودع</th><th>الاستهلاك المحسوب</th><th>مصدر الاستهلاك</th><th>مصدر كمية الطلب</th><th>متاح</th><th>الكمية المطلوبة</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.product)}</td><td>${esc(row.part_number||'-')}<br>${esc(row.sku||'')}</td><td>${esc(row.warehouse)}</td><td>${fmt(row.issued_30d)} ${esc(row.unit)}</td><td>${fmt(row.returned_30d)} ${esc(row.unit)}</td><td>${fmt(row.net_consumed_30d)} ${esc(row.unit)}</td><td>${row.consumption_source==='rollout'?'تركيب Rollout':row.consumption_source==='manual_review'?'مراجعة يدوية':'صافي صرف المستودع'}</td><td>${row.order_quantity_source==='provided_need'?'قائمة الكميات المطلوبة':'تقدير الاستهلاك'}</td><td>${fmt(row.available)} ${esc(row.unit)}</td><td>${fmt(row.suggested_quantity)} ${esc(row.unit)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="coverage-empty">لا توجد كمية مقترحة للطلب لهذه المدينة</div>';const review=reviews.length?`<div class="replenishment-note"><b>مراجعة يدوية · ${fmt(reviews.length)} مادة</b><div>${reviews.map(row=>`${esc(row.product||row.sku)} (${esc(row.warehouse)})${row.needed_quantity!=null?` · المطلوب ${fmt(row.needed_quantity)} ${esc(row.unit||'PCS')}`:''}`).join('، ')}</div><small>لم يتم العثور على مطابقة مؤكدة للمادة في أرصدة المستودع؛ الكمية المطلوبة ظاهرة للمراجعة ولم تدخل ضمن مجموع الاقتراحات.</small></div>`:'';const note=!stockCoverageData.loading&&!stockCoverageData.error&&noRecent&&!reviews.length?`<div class="replenishment-note">${fmt(noRecent)} مادة بلا استهلاك صافٍ خلال آخر 30 يومًا؛ راجعها يدويًا عند إعداد الطلب.</div>`:'';return `<section class="replenishment-city"><h4>${label}<span>${fmt(rows.length)} مادة للطلب</span></h4>${body}${review}${note}</section>`};
 document.getElementById('monthlyReplenishment').innerHTML=`<div class="replenishment-columns">${renderReplenishmentCity('tripoli','طرابلس')}${renderReplenishmentCity('misurata','مصراتة')}</div>`;
