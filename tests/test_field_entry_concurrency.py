@@ -75,6 +75,59 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         db.rollback()
         db.close()
 
+    def test_canonical_material_key_groups_cable_lengths_with_or_without_meter_suffix(self):
+        equivalent_pairs = [
+            ("Single-Core Distribution Cable_50m", "Single-Core Distribution Cable_50"),
+            ("Single-Core Drop Cable_100m", "Single-Core Drop Cable_100"),
+            ("4-coreCable_300m", "4-coreCable_300"),
+        ]
+        for with_unit, without_unit in equivalent_pairs:
+            with self.subTest(material=with_unit):
+                self.assertEqual(
+                    main.canonical_material_key(with_unit),
+                    main.canonical_material_key(without_unit),
+                )
+
+        self.assertNotEqual(
+            main.canonical_material_key("Single-Core Distribution Cable_50"),
+            main.canonical_material_key("Single-Core Distribution Cable_80m"),
+        )
+
+    def test_rollout_usage_merges_cable_materials_differing_only_by_meter_suffix(self):
+        db = SessionLocal()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-CABLE-SUFFIX-WITH-M",
+                area="Hay Al Andalus Z1",
+                material_type="Single-Core Distribution Cable_424242m",
+                actual=3,
+                status="Done",
+            ),
+            RolloutRecord(
+                record_id="RDP-CABLE-SUFFIX-WITHOUT-M",
+                area="Hay Al Andalus Z1",
+                material_type="Single-Core Distribution Cable_424242",
+                actual=2,
+                status="Done",
+            ),
+        ])
+        db.commit()
+        main.clear_rollout_db_cache()
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"))
+        )
+        usage = main.list_rollout_material_usage(admin_request, db, program="FTTH")["usage"]
+        material_key = main.canonical_material_key("Single-Core Distribution Cable_424242m")
+        rows = [
+            row for row in usage
+            if row["area"] == "Hay Al Andalus Z1"
+            and main.canonical_material_key(row["material"]) == material_key
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["rollout_used_qty"], 5)
+        db.close()
+
     def test_andalus_zone_two_reference_matches_legacy_area(self):
         refs = [
             row for row in main.rollout_code_reference_rows()

@@ -6821,7 +6821,7 @@ def canonical_material_key(value: str) -> str:
     if not key:
         return ""
 
-    length_match = re.search(r"(\d+)m", key)
+    length_match = re.search(r"(\d+)m", key) or re.search(r"(\d+)$", key)
     length = length_match.group(1) if length_match else ""
     if "dropcable" in key and length:
         return f"dropcable{length}m"
