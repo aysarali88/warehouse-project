@@ -854,6 +854,17 @@ body.sr-program .login-logo img{
 .sr-excel-tools{align-items:center;margin-bottom:10px;padding:10px;border:1px solid #c9e1ea;border-radius:7px;background:#f7fbfd}
 .sr-excel-status{font-size:12px;color:var(--muted);font-weight:800;line-height:1.5}
 .sr-excel-status.error{color:var(--red)}
+.city-ops-subtitle{margin:-6px 0 12px;color:var(--muted);font-size:11px;font-weight:700}
+.city-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.city-ops-card{min-width:0;border:1px solid #dce8ef;border-radius:8px;background:#fff;padding:11px}
+.city-ops-card h4{margin:0 0 9px;color:#17344d;font-size:14px}
+.city-ops-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.city-ops-metric{min-width:0;border:1px solid #e5edf2;border-radius:7px;background:#f8fbfd;padding:8px;text-align:center}
+.city-ops-metric span,.city-ops-metric small{display:block;color:#64788c;font-size:10px;font-weight:800;line-height:1.35}
+.city-ops-metric strong{display:block;margin:4px 0;color:#087b9b;font-size:22px;font-variant-numeric:tabular-nums}
+.city-ops-metric small{font-size:9px}
+.city-ops-empty{padding:14px;text-align:center;color:#64788c;font-size:12px;border:1px dashed #dce8ef;border-radius:7px}
+@media(max-width:600px){.city-ops-grid{grid-template-columns:1fr}.city-ops-metric{padding:7px 4px}}
 @media(max-width:600px){#mrLines .mr-line{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
@@ -942,7 +953,7 @@ body.sr-program .login-logo img{
       <div class="viz-panel damage-inventory-panel"><h3>Damage Warehouse</h3><div id="damagedStockOverview"></div></div>
       <div class="viz-grid">
         <div class="viz-panel"><h3>أعلى مواد Stock Out</h3><div id="topStockOut"></div></div>
-        <div class="viz-panel"><h3>Workflow يحتاج متابعة</h3><div id="workflowFocus"></div></div>
+        <div class="viz-panel"><h3>MR / TR / RT حسب المدينة</h3><p class="city-ops-subtitle">إجمالي السجلات من كل الحالات · التحويل يُحسب في كل مدينة طرف فيه</p><div id="cityOperationSummary"></div></div>
       </div>
       <div class="viz-grid">
         <div class="viz-panel" style="grid-column:1/-1"><h3>تنبيهات تغطية المخزون حسب الاستهلاك</h3><div class="hint" style="margin:-7px 0 10px">الرصيد مجمّع على مستوى المدينة، وتشمل مصراتة مستودعي Lnet وFree Zone.</div><div id="inventoryRisks"></div></div>
@@ -1634,6 +1645,8 @@ body.sr-program .login-logo img{
 let wh={summary:{},warehouses:[],technicians:[],products:[],stockBalances:[],stockUsage:[],technicianBalances:[],rolloutUsage:[],rolloutRecords:0,rolloutSource:'',rolloutDailyProgress:[],rolloutDashboardSummaryOnly:false,rolloutPoleSummary:null,rolloutPoleSummaryPromise:null,movements:[],audit:[],mrs:[],receipts:[],transfers:[],returns:[],scanLogs:[],damagedStock:{total_quantity:0,items:[],events:[]}};
 let stockCoverageData={program:'',loading:false,error:'',items:[],monthly_replenishment:[],manual_review:{tripoli:[],misurata:[]},no_recent_consumption:{tripoli:0,misurata:0},window_days:30,critical_days:7,warning_days:14};
 let stockCoverageRequestId=0;
+let operationsCityData={program:'',loading:false,error:'',cities:{}};
+let operationsCityRequestId=0;
 let materialLedgerState={query:'',productId:0,data:null,loading:false};
 let initialStockReference={summary:{rows:0,total_quantity:0},rows:[]};
 let mrLineId=0;
@@ -2004,9 +2017,9 @@ function applyWarehouseData(data,merge=false){
   fieldEntryUpdateStockRemaining()
 }
 function warehouseBootstrapUrl(light=false){const q=authQueryParams();if(light)q.set('light','1');const text=q.toString();return '/api/warehouse/bootstrap'+(text?'?'+text:'')}
-async function loadWarehouse(){try{const cacheKey=warehouseBootstrapCacheKey();const cached=localStorage.getItem(cacheKey);if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);refreshStockCoverage();loadWarehouseFull(false)}catch(e){toast(e.message)}}
+async function loadWarehouse(){try{const cacheKey=warehouseBootstrapCacheKey();const cached=localStorage.getItem(cacheKey);if(cached){applyWarehouseData(JSON.parse(cached))}const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);refreshStockCoverage();refreshOperationsCitySummary();loadWarehouseFull(false)}catch(e){toast(e.message)}}
 async function loadWarehouseFull(showToast=true){try{const data=await api(warehouseBootstrapUrl(false));localStorage.setItem(warehouseBootstrapCacheKey(),JSON.stringify(data));applyWarehouseData(data,true);if(showToast)toast('تم تحديث كل البيانات')}catch(e){if(showToast)toast(e.message)}}
-async function refreshWarehouse(){try{toast('جاري تحديث المخزون...');const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);refreshStockCoverage();if(document.querySelector('.view.active')?.id==='rolloutDaily')await refreshRolloutDailyProgress(false,true);loadWarehouseFull(false);toast(document.querySelector('.view.active')?.id==='rolloutDaily'?'تم تحديث المخزون وملخص Rollout':'تم تحديث المخزون')}catch(e){toast(e.message)}}
+async function refreshWarehouse(){try{toast('جاري تحديث المخزون...');const data=await api(warehouseBootstrapUrl(true));applyWarehouseData(data,true);refreshStockCoverage();refreshOperationsCitySummary();if(document.querySelector('.view.active')?.id==='rolloutDaily')await refreshRolloutDailyProgress(false,true);loadWarehouseFull(false);toast(document.querySelector('.view.active')?.id==='rolloutDaily'?'تم تحديث المخزون وملخص Rollout':'تم تحديث المخزون')}catch(e){toast(e.message)}}
 function syncWarehouseLater(){localStorage.removeItem(warehouseBootstrapCacheKey());setTimeout(()=>loadWarehouse(),80)}
 async function refreshStockUsage(){const data=await api('/api/warehouse/stock-usage');wh.stockUsage=data.usage||[];renderWarehouse()}
 async function refreshStockCoverage(){const program=normalizeProgram(currentProgram);const requestId=++stockCoverageRequestId;stockCoverageData={...stockCoverageData,program,loading:true,error:''};renderExecutiveDashboard();try{const data=await api('/api/warehouse/stock-coverage');if(requestId!==stockCoverageRequestId||program!==normalizeProgram(currentProgram))return;stockCoverageData={...data,program,loading:false,error:''};renderExecutiveDashboard()}catch(error){if(requestId!==stockCoverageRequestId||program!==normalizeProgram(currentProgram))return;stockCoverageData={...stockCoverageData,program,loading:false,error:'تعذر تحميل التنبيهات؛ حدّث الداشبورد'};renderExecutiveDashboard()}}
@@ -2026,6 +2039,8 @@ function exportMrHistory(){const query=mrHistoryQuery();window.open('/api/wareho
 async function importMrExcelFiles(files){const input=document.getElementById('mrImportFiles');if(!files||!files.length)return;const fallbackWarehouse=warehouseByName(document.getElementById('mrHistoryWarehouse')?.value||'')||(wh.warehouses||[])[0];const form=new FormData();[...files].forEach(file=>form.append('files',file));form.append('default_warehouse_id',fallbackWarehouse?.id||0);form.append('actor',activeUser||'Import');try{toast(`Importing ${files.length} Excel file(s)...`);const data=await api('/api/warehouse/material-requisitions/import-excel',{method:'POST',body:form});(data.requisitions||[]).forEach(upsertLocalMr);syncWarehouseLater();loadMrHistory(false);const failed=data.failed||0;const msg=`Imported ${fmt(data.imported||0)} MR${failed?`, failed ${fmt(failed)}`:''}`;toast(msg);if(failed)alert((data.results||[]).filter(r=>!r.success).map(r=>`${r.file} / ${r.sheet}: ${r.message}`).join('\n'))}catch(e){toast(e.message)}finally{if(input)input.value=''}}
 function pct(v,total){return total?Math.max(0,Math.min(100,(Number(v||0)/Number(total||0))*100)):0}
 function meter(width,hot=false){return `<div class="meter"><i class="${hot?'hot':''}" style="width:${Math.max(2,Math.min(100,Number(width||0)))}%"></i></div>`}
+async function refreshOperationsCitySummary(){if(!session)return;const program=normalizeProgram(currentProgram);const requestId=++operationsCityRequestId;operationsCityData={...operationsCityData,program,loading:true,error:''};renderCityOperationsSummary();try{const data=await api('/api/warehouse/operations-by-city');if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...data,program,loading:false,error:''};renderCityOperationsSummary()}catch(error){if(requestId!==operationsCityRequestId||program!==normalizeProgram(currentProgram))return;operationsCityData={...operationsCityData,program,loading:false,error:'تعذر تحميل أعداد المعاملات'};renderCityOperationsSummary()}}
+function renderCityOperationsSummary(){const box=document.getElementById('cityOperationSummary');if(!box)return;if(operationsCityData.loading||operationsCityData.program!==normalizeProgram(currentProgram)){box.innerHTML='<div class="city-ops-empty">جاري تحميل الأعداد...</div>';return}if(operationsCityData.error){box.innerHTML=`<div class="city-ops-empty">${esc(operationsCityData.error)}</div>`;return}const cities=operationsCityData.cities||{};box.innerHTML=`<div class="city-ops-grid">${[['tripoli','طرابلس'],['misurata','مصراتة']].map(([key,label])=>{const city=cities[key]||{};if(!city.accessible)return `<section class="city-ops-card"><h4>${label}</h4><div class="city-ops-empty">لا توجد صلاحية لعرض هذه المدينة</div></section>`;return `<section class="city-ops-card"><h4>${label}</h4><div class="city-ops-metrics">${[['MR','طلبات المواد'],['TR','التحويلات'],['RT','الإرجاعات']].map(([type,title])=>`<div class="city-ops-metric"><span>${title}</span><strong>${fmt(city[type]?.total||0)}</strong><small>قيد الإجراء ${fmt(city[type]?.pending||0)}</small></div>`).join('')}</div></section>`}).join('')}</div>`}
 function compactTable(cols,rows){if(!rows.length)return '<div class="empty">لا توجد بيانات بعد</div>';return `<div class="table-wrap executive-table"><table><thead><tr>${cols.map(c=>`<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[2]?c[2](r[c[1]],r):esc(r[c[1]])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 function renderWarehouseQueuesBadge(){let count=0,label='notifications';const pendingTransfers=(wh.transfers||[]).filter(r=>r.status==='pending_approval'&&canApproveTransfer(r)).length;const approvedTransfers=(wh.transfers||[]).filter(r=>r.status==='approved'&&userOwnsTransfer(r)).length;const pendingReturns=(wh.returns||[]).filter(r=>r.status==='pending_warehouse'&&canApproveMaterialReturn(r)).length;if(roleKey()==='admin'){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval'||r.status==='approved').length+pendingTransfers+approvedTransfers+pendingReturns;label='workflow'}else if(canApprove()){count=(wh.mrs||[]).filter(r=>r.status==='pending_approval').length+pendingTransfers;label='workflow'}else if(roleKey()==='warehousemanager'){count=(wh.mrs||[]).filter(r=>r.status==='approved'&&userOwnsMr(r)).length+approvedTransfers+pendingReturns;label='workflow'}else{count=pendingForRequester();label='pending'}setApprovalBadge(count,label)}
 function setApprovalBadge(count,label='notifications'){const badge=document.getElementById('approvalBadge');if(!badge)return;badge.textContent=`${fmt(count)} ${label}`;badge.className='notify-badge'+(Number(count)?' hot':'')}
@@ -2058,6 +2073,7 @@ async function rejectMr(id){if(!canApprove()){toast('Approver فقط يقدر ي
 async function returnMrForEdit(id){if(!canApprove()&&!canManageWarehouse()&&!isManagement()){toast('Only Approval or Warehouse Manager can return an MR for edit');return}const comment=(prompt('Reason for returning this MR to the requester?')||'').trim();if(!comment){toast('Enter a return reason');return}try{toast('Returning MR for edit...');const r=await api(`/api/warehouse/material-requisitions/${id}/return-for-edit`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment})});toast('MR returned to requester for edit');upsertLocalMr(r.requisition);if(String(currentModalMrId)===String(id))closeMrModal();syncWarehouseLater()}catch(e){toast(e.message)}}
 async function issueApprovedMr(id){if(!canManageWarehouse()){toast('Warehouse Manager فقط يقدر يصرف المواد');return}try{toast('جاري صرف المواد...');const r=await api(`/api/warehouse/material-requisitions/${id}/issue`,{method:'POST',body:JSON.stringify({actor:activeUser,title:userRole(),comment:'Issued by warehouse'})});toast('Materials issued '+(r.issue_order||''));upsertLocalMr(r.requisition);syncWarehouseLater()}catch(e){toast(e.message)}}
 function renderExecutiveDashboard(){
+renderCityOperationsSummary();
 // FTTH received quantity changes only when stock is added through Receive Inventory.
 const totalReceived=isSingleRan()?wh.stockUsage.reduce((s,r)=>s+Number(r.total_received||0),0):Number(initialStockReference.summary?.total_quantity||0)+Number(wh.summary?.inventory_receive_total||0);
 const totalOut=wh.stockUsage.reduce((s,r)=>s+Number(r.total_consumed||0),0);
@@ -2089,8 +2105,6 @@ document.getElementById('warehouseOverview').innerHTML=whRows.length?`<div class
 const damaged=wh.damagedStock||{total_quantity:0,items:[],events:[]};
 document.getElementById('damagedStockOverview').innerHTML=damaged.items?.length?`<div class="status-tile warn"><span>Damage warehouse · Total quantity</span><strong>${fmt(damaged.total_quantity)}</strong></div><div class="replenishment-table-wrap"><table class="replenishment-table"><thead><tr><th>Material</th><th>SKU / Part #</th><th>Quantity</th><th>Unit</th></tr></thead><tbody>${damaged.items.map(r=>`<tr><td>${esc(r.product)}</td><td>${esc(r.sku||'')}<br>${esc(r.part_number||'')}</td><td>${fmt(r.quantity)}</td><td>${esc(r.unit||'PCS')}</td></tr>`).join('')}</tbody></table></div><details><summary>Recent damage return references (${fmt(damaged.events?.length||0)})</summary><div class="movement-stream">${(damaged.events||[]).map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>${esc(r.reference||'Return')} · ${esc(r.product)}</b><small>${esc(r.source_warehouse)} · ${fmt(r.quantity)}${r.serial_number?` · Serial ${esc(r.serial_number)}`:''} · ${esc(r.note||'')}</small></div></div>`).join('')}</div></details>`:'<div class="empty-soft">Damage warehouse is currently empty.</div>';
 document.getElementById('virtualDamageInventoryTable').innerHTML=damaged.items?.length?rowsTable([['Warehouse','warehouse'],['Material','product'],['SKU','sku'],['Part #','part_number'],['Quantity','quantity',(value)=>fmt(value)],['Unit','unit']],damaged.items):'<div class="empty-soft">Damage warehouse is currently empty.</div>';
-const focusRows=[...wh.mrs].filter(r=>['pending_approval','approved'].includes(r.status)).slice(0,6);
-document.getElementById('workflowFocus').innerHTML=focusRows.length?`<div class="movement-stream">${focusRows.map(r=>`<div class="movement-card"><span class="movement-type"></span><div><b>MR ${esc(r.order_number)} · ${esc(r.site_id||r.site_address||'No site')}</b><small>${esc(r.status.replace('_',' '))} · ${esc(r.warehouse)} · ${esc(r.requester_name)}</small></div><button class="btn soft" onclick="showMrById(${r.id})">View</button></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد طلبات MR تحتاج إجراء حاليًا.</div>';
 const receiptRows=(wh.receipts||[]).slice(0,5);
 document.getElementById('recentReceipts').innerHTML=receiptRows.length?`<div class="timeline">${receiptRows.map(r=>{const qty=(r.items||[]).reduce((s,it)=>s+Number(it.quantity||0),0);const first=(r.items||[])[0]||{};return `<div class="timeline-item"><span class="timeline-dot"></span><div><b>${esc(r.order_number)} · ${esc(r.warehouse)}</b><small>${esc(first.name||'Materials')} · ${fmt(qty)} pcs · ${esc(r.supplier||'No supplier')}</small></div><small>${esc(r.receipt_date||r.created_at?.slice(0,10)||'')}</small></div>`}).join('')}</div>`:'<div class="empty">لا توجد استلامات بعد</div>';
 const coverageGroups={tripoli:[],misurata:[]};coverageRows.forEach(row=>{if(coverageGroups[row.city])coverageGroups[row.city].push(row)});
@@ -3283,8 +3297,8 @@ restoreServerSession();
 loadInitialStockReference();
 window.addEventListener('hashchange',applyPageLink);
 setInterval(()=>pollNotifications(true),45000);
-setInterval(()=>{if(session&&document.visibilityState==='visible'&&!stockCoverageData.loading)refreshStockCoverage()},60000);
-document.addEventListener('visibilitychange',()=>{if(session&&document.visibilityState==='visible'&&!stockCoverageData.loading)refreshStockCoverage()});
+setInterval(()=>{if(session&&document.visibilityState==='visible'){if(!stockCoverageData.loading)refreshStockCoverage();if(!operationsCityData.loading)refreshOperationsCitySummary()}},60000);
+document.addEventListener('visibilitychange',()=>{if(session&&document.visibilityState==='visible'){if(!stockCoverageData.loading)refreshStockCoverage();if(!operationsCityData.loading)refreshOperationsCitySummary()}});
 setInterval(()=>{sendPresenceHeartbeat();if(isAdmin())loadActiveUsers()},60000);
 var warehouseFiberReference=null;
 var warehouseFiberReferenceRevision='';
