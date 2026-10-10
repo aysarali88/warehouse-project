@@ -171,10 +171,54 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(reference["area_plans"][0]["targetSubEndBox"], 30)
         self.assertEqual(reference["area_plans"][0]["targetCableMeters"], 1200)
 
-    def test_mr_site_aliases_use_albera_as_the_single_name(self):
-        self.assertEqual(main.canonical_mr_history_area("Bera W Taleem"), "Albera")
-        self.assertEqual(main.canonical_mr_history_area("Albera"), "Albera")
+    def test_mr_site_aliases_use_bera_w_taleem_as_the_single_name(self):
+        self.assertEqual(main.canonical_mr_history_area("Bera W Taleem"), "Bera W Taleem")
+        self.assertEqual(main.canonical_mr_history_area("Albera"), "Bera W Taleem")
         self.assertEqual(main.canonical_mr_history_area("Hay Al Andalus Z2"), "Hay Al Andalus Z2")
+        self.assertEqual(main.canonical_rollout_usage_area("Bera W Taleem"), "Bera W Taleem")
+        self.assertEqual(main.canonical_rollout_usage_area("Albera"), "Bera W Taleem")
+
+    def test_rollout_usage_matches_albera_mr_with_bera_w_taleem_field_entries(self):
+        db = SessionLocal()
+        warehouse = Warehouse(name="Bera Alias Test WH")
+        product = Product(sku="BERA-ALIAS-SUB-TEST", name="SUB BOX")
+        db.add_all([warehouse, product])
+        db.flush()
+        requisition = MaterialRequisition(
+            order_number="MR-BERA-ALIAS-TEST",
+            warehouse_id=warehouse.id,
+            site_id="Albera",
+            status="issued",
+        )
+        db.add(requisition)
+        db.flush()
+        db.add_all([
+            MaterialRequisitionItem(requisition_id=requisition.id, product_id=product.id, quantity=10),
+            RolloutRecord(
+                record_id="RDP-BERA-ALIAS-TEST",
+                area="Bera W Taleem",
+                material_type="SUB BOX",
+                actual=8,
+                status="Done",
+            ),
+        ])
+        db.commit()
+        main.clear_rollout_db_cache()
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"))
+        )
+        usage = main.list_rollout_material_usage(admin_request, db, program="FTTH")["usage"]
+        rows = [row for row in usage if row["area"] == "Bera W Taleem" and row["sku"] == product.sku]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["mr_issued_qty"], 10)
+        self.assertEqual(rows[0]["rollout_used_qty"], 8)
+
+        details = main.list_rollout_material_usage_details(
+            admin_request, area="Albera", material="SUB BOX", db=db, program="FTTH"
+        )
+        self.assertEqual(details["total"], 8)
+        db.close()
 
     def test_retired_zone_one_boxes_are_scoped_to_requested_xboxes_and_codes(self):
         self.assertTrue(main.retired_hay_andalus_z1_box({

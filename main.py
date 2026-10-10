@@ -4437,10 +4437,16 @@ def canonical_area_name(value: str) -> str:
     return text_value
 
 
+def canonical_rollout_usage_area(value: str) -> str:
+    if normalize_usage_key(value) in {"berawtaleem", "albera"}:
+        return "Bera W Taleem"
+    return canonical_area_name(value)
+
+
 def canonical_mr_history_area(value: str) -> str:
     text_value = str(value or "").strip()
     if normalize_usage_key(text_value) in {"berawtaleem", "albera"}:
-        return "Albera"
+        return "Bera W Taleem"
     return canonical_area_name(text_value)
 
 
@@ -7253,7 +7259,7 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
     if allowed is not None:
         requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
     for requisition in requisitions_query.all():
-        area = canonical_area_name(requisition.site_id or requisition.site_address)
+        area = canonical_rollout_usage_area(requisition.site_id or requisition.site_address)
         if not area:
             continue
         for item in requisition.items:
@@ -7276,7 +7282,7 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
     if allowed is not None:
         returns_query = returns_query.filter(MaterialReturn.warehouse_id.in_(allowed))
     for returned in returns_query.all():
-        area = canonical_area_name(returned.site_id or returned.site_address)
+        area = canonical_rollout_usage_area(returned.site_id or returned.site_address)
         if not area:
             continue
         for item in returned.items:
@@ -7291,7 +7297,7 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
                 row["warehouses"].add(returned.warehouse.name)
 
     for record in rollout_rows:
-        area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
+        area = canonical_rollout_usage_area(str(record.get("Area") or record.get("area") or "").strip())
         material = str(record.get("material type") or record.get("item") or "").strip()
         if not area or not material:
             continue
@@ -7348,7 +7354,7 @@ def list_rollout_material_usage_details(
     if is_single_ran(program):
         return {"success": True, "records": [], "total": 0, "source": "disabled"}
 
-    area_key = canonical_area_name(area)
+    area_key = canonical_rollout_usage_area(area)
     material_key = canonical_material_key(material)
     if not area_key or not material_key:
         raise HTTPException(status_code=400, detail="Area and material are required")
@@ -7356,7 +7362,7 @@ def list_rollout_material_usage_details(
     rollout_rows, source = rollout_daily_progress_records(db, force=False)
     records = []
     for record in rollout_records_for_session(request, rollout_rows):
-        record_area = canonical_area_name(str(record.get("Area") or record.get("area") or "").strip())
+        record_area = canonical_rollout_usage_area(str(record.get("Area") or record.get("area") or "").strip())
         record_material = str(record.get("material type") or record.get("item") or "").strip()
         status = normalize_usage_key(str(record.get("status") or record.get("staus") or ""))
         actual = safe_float(record.get("actual"))
