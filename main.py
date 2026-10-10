@@ -6395,6 +6395,90 @@ def list_stock_coverage(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     }
 
 
+@app.get("/api/warehouse/operations-by-city")
+def warehouse_operations_by_city(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    warehouses = db.query(Warehouse).filter(
+        Warehouse.program == program_key,
+        or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+    ).all()
+    city_by_warehouse = {}
+    visible_warehouse_ids = set()
+    result = {
+        "tripoli": {"label": "طرابلس", "accessible": allowed is None, "MR": {"total": 0, "pending": 0}, "TR": {"total": 0, "pending": 0}, "RT": {"total": 0, "pending": 0}},
+        "misurata": {"label": "مصراتة", "accessible": allowed is None, "MR": {"total": 0, "pending": 0}, "TR": {"total": 0, "pending": 0}, "RT": {"total": 0, "pending": 0}},
+    }
+
+    for warehouse in warehouses:
+        city_text = normalize_usage_key(f"{warehouse.name or ''} {warehouse.location or ''}")
+        city = "tripoli" if "tripoli" in city_text or "طرابلس" in city_text else "misurata" if any(token in city_text for token in ("misurata", "misrata", "misrat", "مصرات")) else ""
+        if not city:
+            continue
+        city_by_warehouse[warehouse.id] = city
+        if allowed is None or warehouse.id in allowed:
+            visible_warehouse_ids.add(warehouse.id)
+            result[city]["accessible"] = True
+
+    mr_rows = db.query(
+        MaterialRequisition.warehouse_id,
+        MaterialRequisition.status,
+        func.count(MaterialRequisition.id),
+    ).filter(MaterialRequisition.program == program_key)
+    if allowed is not None:
+        mr_rows = mr_rows.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    for warehouse_id, status, count in mr_rows.group_by(MaterialRequisition.warehouse_id, MaterialRequisition.status).all():
+        city = city_by_warehouse.get(warehouse_id)
+        if not city or warehouse_id not in visible_warehouse_ids:
+            continue
+        result[city]["MR"]["total"] += int(count or 0)
+        if str(status or "").strip().lower() in {"draft", "pending_approval", "approved", "signed", "returned_for_edit"}:
+            result[city]["MR"]["pending"] += int(count or 0)
+
+    transfer_query = db.query(
+        MaterialTransfer.from_warehouse_id,
+        MaterialTransfer.to_warehouse_id,
+        MaterialTransfer.status,
+        func.count(MaterialTransfer.id),
+    ).filter(MaterialTransfer.program == program_key)
+    if allowed is not None:
+        transfer_query = transfer_query.filter(or_(
+            MaterialTransfer.from_warehouse_id.in_(allowed),
+            MaterialTransfer.to_warehouse_id.in_(allowed),
+        ))
+    for from_id, to_id, status, count in transfer_query.group_by(
+        MaterialTransfer.from_warehouse_id,
+        MaterialTransfer.to_warehouse_id,
+        MaterialTransfer.status,
+    ).all():
+        touched_cities = {
+            city_by_warehouse[warehouse_id]
+            for warehouse_id in (from_id, to_id)
+            if warehouse_id in city_by_warehouse and warehouse_id in visible_warehouse_ids
+        }
+        for city in touched_cities:
+            result[city]["TR"]["total"] += int(count or 0)
+            if str(status or "").strip().lower() in {"pending_approval", "approved", "returned_for_edit"}:
+                result[city]["TR"]["pending"] += int(count or 0)
+
+    return_query = db.query(
+        MaterialReturn.warehouse_id,
+        MaterialReturn.status,
+        func.count(MaterialReturn.id),
+    ).filter(MaterialReturn.program == program_key)
+    if allowed is not None:
+        return_query = return_query.filter(MaterialReturn.warehouse_id.in_(allowed))
+    for warehouse_id, status, count in return_query.group_by(MaterialReturn.warehouse_id, MaterialReturn.status).all():
+        city = city_by_warehouse.get(warehouse_id)
+        if not city or warehouse_id not in visible_warehouse_ids:
+            continue
+        result[city]["RT"]["total"] += int(count or 0)
+        if str(status or "").strip().lower() == "pending_warehouse":
+            result[city]["RT"]["pending"] += int(count or 0)
+
+    return {"success": True, "program": program_key, "cities": result}
+
+
 def user_can_view_material_return(row: MaterialReturn, viewer: str = "", role: str = "") -> bool:
     role_key = normalize_usage_key(role)
     viewer_key = normalize_usage_key(viewer)
