@@ -72,6 +72,31 @@ class FiberMapManagerTests(unittest.TestCase):
         self.db.rollback()
         self.db.close()
 
+    def test_bera_w_taleem_x2_qlc_routes_are_added_once_with_planned_lengths(self):
+        reference = main.load_fiber_map_reference(self.db, "FTTH")
+        expected = {
+            "X2-H1": 300,
+            "X2-H3": 300,
+            "X2-H5": 500,
+            "X2-H7": 500,
+            "X2-H9": 500,
+        }
+
+        def bera_x2_routes():
+            return [
+                row for row in reference["routes"]
+                if main.rollout_area_key(main.first_value(row, "Area", "Zone", default="")) == main.rollout_area_key("Bera W Taleem")
+                and main.rollout_xbox_key(main.first_value(row, "Related to XBOX", "XBOX", default="")) == "X2"
+                and main.first_value(row, "Route code", default="") in expected
+            ]
+
+        routes = bera_x2_routes()
+        self.assertEqual({row["Route code"]: row["Cable length m"] for row in routes}, expected)
+        self.assertEqual(sum(row["Cable length m"] for row in routes), 2100)
+
+        main.add_bera_w_taleem_x2_qlc_routes(reference)
+        self.assertEqual(len(bera_x2_routes()), len(expected))
+
     @staticmethod
     def make_request(role, program="FTTH"):
         return Request({

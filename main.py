@@ -2361,6 +2361,48 @@ def add_bera_w_taleem_x2_boxes(data: dict) -> None:
         existing.add(key)
 
 
+def add_bera_w_taleem_x2_qlc_routes(data: dict) -> None:
+    additions = (
+        ("X2-H1", "X2", "H1", 300),
+        ("X2-H3", "X2", "H3", 300),
+        ("X2-H5", "X2", "H5", 500),
+        ("X2-H7", "X2", "H7", 500),
+        ("X2-H9", "X2", "H9", 500),
+    )
+    routes = data.setdefault("routes", [])
+    area_key = rollout_area_key("Bera W Taleem")
+    for code, source, target, length in additions:
+        current = next((
+            row for row in routes
+            if rollout_area_key(first_value(row, "Area", "Zone", default="")) == area_key
+            and rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default="")) == "X2"
+            and rollout_code_key(first_value(row, "Route code", "Cable code", default="")) == rollout_code_key(code)
+        ), None)
+        old_length = safe_float(first_value(current, "Cable length m", "cable_length_m", default=0)) if current else 0
+        route = {
+            "Area": "Bera W Taleem",
+            "Zone": "Bera W Taleem",
+            "City": "Misurata",
+            "Related to XBOX": "X2",
+            "XBOX": "X-BOX02",
+            "Part": "x2-part01",
+            "Route code": code,
+            "Route from": source,
+            "Route to": target,
+            "Cable length m": length,
+            "Material type": f"4-coreCable_{length}m",
+        }
+        if current is None:
+            route["Real length m"] = ""
+            routes.append(route)
+        else:
+            current.update(route)
+        difference = length - old_length
+        for plan in data.get("area_plans") or []:
+            if rollout_area_key(plan.get("area")) == area_key and difference:
+                plan["targetCableMeters"] = max(0, safe_float(plan.get("targetCableMeters")) + difference)
+
+
 def add_bera_w_taleem_x1_box(data: dict) -> None:
     additions = (("H5-L3-S4", 5, 3, 4, 50), ("H5-L2-S4", 5, 2, 4, 80), ("H2-L3-S4", 2, 3, 4, 80))
     for code, hub, line, splitter, length in additions:
@@ -2453,6 +2495,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
         add_hay_andalus_z1_x4_box(data)
         add_bera_w_taleem_x1_box(data)
         add_bera_w_taleem_x2_boxes(data)
+        add_bera_w_taleem_x2_qlc_routes(data)
         apply_awlad_baeoo_x1_map_changes(data)
         return data
     for saved_area in saved_areas:
@@ -2491,6 +2534,7 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
     if fiber_map_manager_area_key("Bera W Taleem") not in managed_area_keys:
         add_bera_w_taleem_x1_box(data)
         add_bera_w_taleem_x2_boxes(data)
+    add_bera_w_taleem_x2_qlc_routes(data)
     if fiber_map_manager_area_key("Awlad Baeoo") not in managed_area_keys:
         apply_awlad_baeoo_x1_map_changes(data)
     return data
