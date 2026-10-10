@@ -578,43 +578,119 @@ body.sr-program .login-logo img{
 .homepass-summary-card{border:1px solid #d8e6f1;border-radius:12px;background:#fff;padding:16px 18px;box-shadow:0 8px 22px rgba(17,40,70,.05)}
 .homepass-summary-card span{display:block;color:#5f7387;font-size:12px;font-weight:800}
 .homepass-summary-card strong{display:block;margin-top:6px;color:#0b4d95;font-size:26px;font-weight:900}
-.rollout-city-overview{display:grid;gap:18px;direction:ltr;text-align:left}
-.rollout-city-overview-toolbar{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
-.rollout-city-overview-toolbar h3{margin:0;color:#0b4d95;font-size:20px}
-.rollout-city-overview-toolbar .field{min-width:170px}
-.rollout-city-overview-toolbar .field label{display:block;margin-bottom:5px;color:#5f7387;font-size:12px;font-weight:800}
-.rollout-city-overview .homepass-summary{margin-top:0}
-.rollout-city-overview .homepass-summary-card{width:100%;text-align:left;cursor:pointer;transition:border-color .18s,box-shadow .18s,transform .18s}
-.rollout-city-overview .homepass-summary-card:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(17,40,70,.1)}
-.rollout-city-overview .homepass-summary-card[aria-pressed="true"]{border:2px solid #d8b97a;box-shadow:0 0 0 2px rgba(216,185,122,.12)}
-.rollout-city-overview-city{display:grid;gap:12px}
-.rollout-city-overview-city-head{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #d8e6f1;padding-bottom:8px}
-.rollout-city-overview-city-head h3{margin:0;color:#0b4d95;font-size:18px}
-.rollout-city-overview-city-head span{color:#5f7387;font-size:12px;font-weight:800}
+.rollout-city-overview{--city-bg:#060b17;--city-panel:#101723;--city-muted:#8996ab;--city-text:#e8e5dc;--city-gold:#d8b97a;display:grid;gap:24px;direction:ltr;text-align:left;min-height:100vh;margin:0;padding:26px 32px 36px;color:var(--city-text);background:radial-gradient(ellipse at 77% 30%,rgba(18,74,119,.17),transparent 38%),var(--city-bg);font-family:"IBM Plex Sans",Inter,Arial,sans-serif}
+#rolloutDaily>.card.city-overview-active{--city-bg:#060b17;--city-gold:#d8b97a;padding:0;border:0;border-radius:18px;background:var(--city-bg);box-shadow:0 18px 48px rgba(2,7,16,.28);overflow:hidden}
+#rolloutDaily .city-overview-active #rolloutDailyStats{display:none}
+#rolloutDaily .card.city-overview-active .tabs{margin:0!important;padding:10px 26px;border:0;border-bottom:1px solid rgba(255,255,255,.08);border-radius:0;background:#080e19}
+#rolloutDaily .card.city-overview-active .tab{height:34px;border-color:rgba(255,255,255,.1);border-radius:8px;background:transparent;color:#aab5c5;font-size:13px}
+#rolloutDaily .card.city-overview-active .tab.active{border-color:var(--city-gold);background:rgba(216,185,122,.14);color:#f0d69d}
+#rolloutDaily .card.city-overview-active #rolloutLastUpdated{color:#8996ab}
+#rolloutDaily .card.city-overview-active #rolloutRefreshButton{height:34px;border-color:rgba(255,255,255,.1);border-radius:9px;background:#111a29;color:#b8c2d1;font-size:11px}
+.rollout-city-overview-head{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+.rollout-city-brand{display:flex;align-items:center;gap:12px;min-width:190px}
+.rollout-city-brand-mark{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(145deg,#f1dda7,#bd9550);color:#142033;font-size:10px;font-weight:1000;box-shadow:0 5px 16px rgba(216,185,122,.17)}
+.rollout-city-brand strong{display:block;color:#f1eee7;font-size:14px;font-weight:850}
+.rollout-city-brand small{display:block;margin-top:3px;color:#71809a;font-size:9px;font-weight:800;letter-spacing:1.7px}
+.rollout-city-controls{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.rollout-city-switch{display:flex;gap:3px;padding:4px;border:1px solid rgba(255,255,255,.1);border-radius:11px;background:#111a29}
+.rollout-city-control,.rollout-city-switch button{height:34px;padding:0 13px;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:#111a29;color:#b8c2d1;font-size:11px;font-weight:750;white-space:nowrap}
+#rolloutDaily select.rollout-city-control{height:34px;border-color:rgba(255,255,255,.1);border-radius:9px;background:#111a29;color:#b8c2d1;font-size:11px;font-weight:750}
+.rollout-city-switch button{border-color:transparent;background:transparent}
+.rollout-city-switch button[aria-pressed="true"]{background:rgba(216,185,122,.18);color:#f0d69d}
+.rollout-city-control.healthy{display:flex;align-items:center;gap:7px;color:#4fd6a3}
+.rollout-city-pulse{width:7px;height:7px;border-radius:50%;background:#4fd6a3;box-shadow:0 0 0 4px rgba(79,214,163,.12);animation:city-pulse 1.8s ease-out infinite}
+@keyframes city-pulse{50%{box-shadow:0 0 0 7px rgba(79,214,163,0)}}
+.rollout-city-total-grid{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
+.rollout-city-total-card{min-width:0;min-height:102px;padding:15px 18px;border:1px solid rgba(216,185,122,.14);border-radius:15px;background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.018));text-align:left;cursor:pointer;transition:border-color .18s,background .18s,transform .18s}
+.rollout-city-total-card:hover{transform:translateY(-2px);border-color:rgba(216,185,122,.5)}
+.rollout-city-total-card[aria-pressed="true"]{border:1.5px solid rgba(216,185,122,.72);background:linear-gradient(145deg,rgba(216,185,122,.09),rgba(255,255,255,.025));box-shadow:0 0 0 1px rgba(216,185,122,.09)}
+.rollout-city-total-card span{display:block;color:#8895aa;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase}
+.rollout-city-total-card strong{display:block;margin-top:6px;color:#ece8dc;font-family:"Fraunces",Georgia,serif;font-size:31px;font-weight:600;line-height:1.05}
+.rollout-city-total-card small{display:block;margin-top:5px;color:#96a2b5;font-size:9px}
+.rollout-city-hero{display:grid;gap:17px;padding:22px 24px 23px;border:1px solid rgba(216,185,122,.25);border-radius:19px;background:linear-gradient(112deg,#0b1b37 0%,#102d50 57%,#104762 100%);box-shadow:0 16px 38px rgba(1,8,20,.24)}
+.rollout-city-hero-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.rollout-city-eyebrow{color:var(--city-gold);font-size:9px;font-weight:850;letter-spacing:2px;text-transform:uppercase}
+.rollout-city-hero-head h2{margin:7px 0 0;color:#eee9df;font-family:"Fraunces",Georgia,serif;font-size:28px;font-weight:600;line-height:1.15}
+.rollout-city-status-counts{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+.rollout-city-status-count{padding:6px 10px;border:1px solid transparent;border-radius:999px;font-size:9px;font-weight:850;white-space:nowrap}
+.rollout-city-status-count.completed,.rollout-city-status-pill.completed{background:rgba(79,214,163,.14);color:#4fd6a3}
+.rollout-city-status-count.on-track,.rollout-city-status-pill.on-track{background:rgba(91,151,255,.15);color:#8cb7ff}
+.rollout-city-status-count.at-risk,.rollout-city-status-pill.at-risk{background:rgba(242,178,77,.16);color:#f2b24d}
+.rollout-city-status-count.delayed,.rollout-city-status-pill.delayed{background:rgba(255,122,114,.15);color:#ff8a83}
+.rollout-city-status-count.planned,.rollout-city-status-pill.planned{background:rgba(183,162,255,.16);color:#c3b3ff}
+.rollout-city-status-count.unplanned,.rollout-city-status-pill.unplanned{background:rgba(180,190,205,.12);color:#b5c0d0}
+.rollout-city-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}
+.rollout-city-kpi{min-width:0;min-height:122px;padding:15px 16px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.055)}
+.rollout-city-kpi-label{display:block;color:#b3c2d6;font-size:10px;font-weight:750}
+.rollout-city-kpi-value{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:9px;color:#f1eee7}
+.rollout-city-kpi-value strong{font-family:"Fraunces",Georgia,serif;font-size:29px;font-weight:600;line-height:1}
+.rollout-city-kpi-value span{color:#b7c5d7;font-size:10px;font-weight:750}
+.rollout-city-kpi-detail{display:block;min-height:14px;margin-top:5px;color:#9eafc4;font-size:9px;line-height:1.5}
+.rollout-city-kpi-bar,.rollout-city-metric-bar{height:5px;overflow:hidden;border-radius:99px;background:rgba(255,255,255,.12)}
+.rollout-city-kpi-bar{margin-top:11px}
+.rollout-city-kpi-bar i,.rollout-city-metric-bar i{display:block;width:var(--progress);height:100%;border-radius:inherit;background:linear-gradient(90deg,#e4c77e,#d8b97a);transition:width .8s cubic-bezier(.22,1,.36,1)}
+.rollout-city-areas{display:grid;gap:12px}
+.rollout-city-lower-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:13px}
+.rollout-city-lower-panel{min-width:0;padding:17px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:linear-gradient(155deg,rgba(255,255,255,.045),rgba(255,255,255,.015))}
+.rollout-city-lower-panel h3{margin:0;color:#e8e5dc;font-family:"Fraunces",Georgia,serif;font-size:16px;font-weight:600}
+.rollout-city-lower-panel>p{margin:4px 0 14px;color:#7f8ca2;font-size:9px}
+.rollout-city-timeline-axis{display:flex;justify-content:space-between;margin:0 0 8px 144px;color:#77859b;font-size:8px}
+.rollout-city-timeline-rows{display:grid;gap:10px}
+.rollout-city-timeline-row{display:grid;grid-template-columns:136px minmax(0,1fr);align-items:center;gap:8px}
+.rollout-city-timeline-name{min-width:0;display:flex;justify-content:space-between;gap:7px;color:#cbd4e1;font-size:8px}
+.rollout-city-timeline-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rollout-city-timeline-name small{flex:none;color:#8896ab;font-size:7px}
+.rollout-city-timeline-track{position:relative;height:9px;border-radius:99px;background:rgba(255,255,255,.07)}
+.rollout-city-timeline-window,.rollout-city-timeline-progress,.rollout-city-timeline-delay{position:absolute;top:0;bottom:0;border-radius:99px}
+.rollout-city-timeline-window{background:rgba(91,151,255,.25)}
+.rollout-city-timeline-progress{background:linear-gradient(90deg,#4fd6a3,#5b97ff)}
+.rollout-city-timeline-delay{background:rgba(255,122,114,.82)}
+.rollout-city-timeline-today{position:absolute;top:-6px;bottom:-6px;z-index:2;width:1px;border-left:1px dashed #f2b24d}
+.rollout-city-timeline-today:before{content:"Today";position:absolute;top:-13px;left:3px;color:#f2b24d;font-size:7px;white-space:nowrap}
+.rollout-city-timeline-empty{padding:16px 0;color:#8996ab;font-size:10px}
+.rollout-city-ranking{display:grid;gap:12px}
+.rollout-city-ranking-row{display:grid;grid-template-columns:minmax(82px,1fr) minmax(70px,1.5fr) 34px;align-items:center;gap:8px}
+.rollout-city-ranking-row>span{overflow:hidden;color:#cbd4e1;font-size:8px;text-overflow:ellipsis;white-space:nowrap}
+.rollout-city-ranking-bar{height:6px;overflow:hidden;border-radius:99px;background:rgba(255,255,255,.09)}
+.rollout-city-ranking-bar i{display:block;width:var(--progress);height:100%;border-radius:inherit;background:var(--status-color,#5b97ff)}
+.rollout-city-ranking-row strong{color:#e8e5dc;font-family:"IBM Plex Mono",Consolas,monospace;font-size:8px;text-align:right}
+.rollout-city-areas-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:0 2px}
+.rollout-city-areas-title h3{margin:0;color:#e8e5dc;font-family:"Fraunces",Georgia,serif;font-size:20px;font-weight:600}
+.rollout-city-areas-title p{margin:4px 0 0;color:#7f8ca2;font-size:10px}
+.rollout-city-filters{display:flex;gap:6px;flex-wrap:wrap}
+.rollout-city-filters button{min-height:29px;padding:0 11px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.035);color:#aab5c5;font-size:9px;font-weight:750}
+.rollout-city-filters button[aria-pressed="true"]{border-color:#d8b97a;background:rgba(216,185,122,.09);color:#e4c77e}
 .rollout-city-area-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.rollout-city-area-card{min-width:0;border:1px solid #d8e6f1;border-radius:12px;background:linear-gradient(180deg,#fff,#f7fbff);padding:16px;box-shadow:0 8px 22px rgba(17,40,70,.05)}
-.rollout-city-area-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
-.rollout-city-area-head h4{margin:0;color:#0b4d95;font-size:17px;line-height:1.35;overflow-wrap:anywhere}
-.rollout-city-area-head small{flex:none;color:#5f7387;font-size:11px;font-weight:800}
-.rollout-city-productivity{display:flex;align-items:baseline;gap:8px;margin-bottom:12px;color:#0a335d}
-.rollout-city-productivity strong{font-size:28px;font-weight:900}
-.rollout-city-productivity span{color:#5f7387;font-size:11px;font-weight:800}
-.rollout-city-metric{display:grid;gap:5px;margin-top:11px}
-.rollout-city-metric-label{display:flex;justify-content:space-between;gap:8px;color:#38556f;font-size:12px;font-weight:800}
-.rollout-city-metric-label span{min-width:0;overflow-wrap:anywhere}
-.rollout-city-metric-label span:last-child{text-align:right}
-.rollout-city-metric-label span:first-child{color:#5f7387}
-.rollout-city-meter{height:7px;overflow:hidden;border-radius:99px;background:#e8f0f7}
-.rollout-city-meter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2148f5,#0b81b8)}
-.rollout-city-box-breakdown{margin-top:8px;color:#5f7387;font-size:11px;line-height:1.6}
-.rollout-city-area-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #e5edf4}
-.rollout-city-area-foot small{color:#5f7387;font-size:11px}
-.rollout-city-area-foot .btn{white-space:nowrap}
-.rollout-city-more{justify-self:start}
-.rollout-city-overview-empty{border:1px dashed #c8d8e7;border-radius:12px;padding:28px;text-align:center;color:#5f7387;font-weight:800}
+.rollout-city-area-card{--status-color:#8996ab;min-width:0;min-height:204px;display:grid;grid-template-columns:74px minmax(0,1fr);grid-template-rows:auto 1fr auto;column-gap:13px;row-gap:12px;padding:15px 15px 12px;border:1px solid rgba(255,255,255,.11);border-left:3px solid var(--status-color);border-radius:14px;background:linear-gradient(155deg,rgba(255,255,255,.058),rgba(255,255,255,.018));box-shadow:0 8px 22px rgba(0,0,0,.12);animation:city-card-in .35s both}
+.rollout-city-area-card.completed{--status-color:#4fd6a3}.rollout-city-area-card.on-track{--status-color:#5b97ff}.rollout-city-area-card.at-risk{--status-color:#f2b24d}.rollout-city-area-card.delayed{--status-color:#ff7a72}.rollout-city-area-card.planned{--status-color:#b7a2ff}.rollout-city-area-card.unplanned{--status-color:#98a5b8}
+@keyframes city-card-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.rollout-city-area-head{grid-column:1/-1;display:flex;justify-content:space-between;align-items:flex-start;gap:9px}
+.rollout-city-area-head h4{margin:0;color:#e8e5dc;font-size:13px;font-weight:800;line-height:1.35;overflow-wrap:anywhere}
+.rollout-city-area-head small{display:block;margin-top:3px;color:#8290a5;font-size:8px;font-weight:750;letter-spacing:.8px;text-transform:uppercase}
+.rollout-city-status-pill{flex:none;padding:5px 9px;border-radius:999px;font-size:8px;font-weight:850;white-space:nowrap}
+.rollout-city-ring{position:relative;width:68px;height:68px;align-self:center;display:grid;place-items:center}
+.rollout-city-ring svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.rollout-city-ring circle{fill:none;stroke-width:5}
+.rollout-city-ring .track{stroke:rgba(255,255,255,.1)}
+.rollout-city-ring .value{stroke:var(--status-color);stroke-linecap:round;stroke-dasharray:169.65;stroke-dashoffset:var(--ring-offset);transition:stroke-dashoffset .8s cubic-bezier(.22,1,.36,1)}
+.rollout-city-ring strong{color:#e8e5dc;font-family:"Fraunces",Georgia,serif;font-size:17px;font-weight:600}
+.rollout-city-ring small{position:absolute;top:calc(100% - 7px);color:#7f8ca2;font-size:6px;font-weight:750;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
+.rollout-city-area-metrics{align-self:center;display:grid;gap:9px;min-width:0}
+.rollout-city-area-metric{display:grid;gap:4px}
+.rollout-city-area-metric-label{display:flex;justify-content:space-between;gap:7px;color:#b5c0d0;font-size:8px}
+.rollout-city-area-metric-label span{min-width:0}
+.rollout-city-area-metric-label strong{color:#e8e5dc;font-family:"IBM Plex Mono",Consolas,monospace;font-size:8px;font-weight:650;white-space:nowrap}
+.rollout-city-metric-bar{height:4px;background:rgba(255,255,255,.1)}
+.rollout-city-metric-bar i{background:var(--status-color)}
+.rollout-city-area-foot{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding-top:9px;border-top:1px dashed rgba(255,255,255,.1);color:#78869b;font-size:8px}
+.rollout-city-area-foot strong{color:var(--status-color);font-size:8px;font-weight:800}
+.rollout-city-area-foot .btn{height:28px;padding-inline:8px;border-color:rgba(255,255,255,.12);border-radius:7px;background:rgba(255,255,255,.045);color:#c5d1e0;font-size:9px}
+.rollout-city-more{justify-self:start;height:31px;padding:0 12px;border:1px solid rgba(255,255,255,.13);border-radius:8px;background:#111a29;color:#d5deea;font-size:10px;font-weight:750}
+.rollout-city-overview-empty{border:1px dashed rgba(255,255,255,.2);border-radius:12px;padding:28px;text-align:center;color:#aab5c5;font-weight:750}
 @media(max-width:700px){.homepass-summary{grid-template-columns:1fr}}
-@media(max-width:960px){.rollout-city-area-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.rollout-city-area-grid{grid-template-columns:1fr}.rollout-city-overview-toolbar{align-items:stretch}.rollout-city-overview-toolbar .field{min-width:0}}
+@media(max-width:1060px){.rollout-city-area-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.rollout-city-overview{gap:19px;padding:20px 16px 26px}.rollout-city-total-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.rollout-city-total-card{min-height:88px;padding:12px}.rollout-city-total-card strong{font-size:24px}.rollout-city-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rollout-city-kpi{min-height:112px;padding:12px}.rollout-city-hero{padding:18px}.rollout-city-hero-head h2{font-size:24px}.rollout-city-area-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.rollout-city-area-card{grid-template-columns:60px minmax(0,1fr);column-gap:9px;padding:12px}.rollout-city-ring{width:58px;height:58px}.rollout-city-ring .value{stroke-dasharray:169.65}.rollout-city-lower-grid{grid-template-columns:1fr}.rollout-city-timeline-axis{margin-left:110px}.rollout-city-timeline-row{grid-template-columns:102px minmax(0,1fr)}}
+@media(max-width:500px){.rollout-city-controls{width:100%;justify-content:flex-start}.rollout-city-switch{flex:1;justify-content:space-between}.rollout-city-switch button{padding-inline:8px}.rollout-city-control{padding-inline:9px}.rollout-city-total-grid{grid-template-columns:1fr}.rollout-city-total-card{min-height:74px}.rollout-city-kpi-value strong{font-size:24px}.rollout-city-area-grid{grid-template-columns:1fr}.rollout-city-area-card{min-height:190px}.rollout-city-areas-head{align-items:flex-start}.rollout-city-filters{width:100%}.rollout-city-filters button{flex:1}.rollout-city-timeline-axis{margin-left:0}.rollout-city-timeline-row{grid-template-columns:1fr;gap:4px}}
 .pole-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
 .pole-summary-card{border:1px solid #d8e6f1;border-radius:8px;background:#fff;padding:14px 16px;min-width:0}
 .pole-summary-card h4{margin:0;color:#173c65;font-size:14px}
@@ -1729,7 +1805,7 @@ let selectedRolloutCompareArea='All Areas';
 let historyScanBusy=false;
 let rolloutRefreshBusy=false;
 let rolloutLastUpdated='';
-let rolloutCityOverviewState={city:'',date:'',visible:{Tripoli:6,Misurata:6}};
+let rolloutCityOverviewState={city:'Tripoli',date:'',status:'All',visible:{Tripoli:6,Misurata:6}};
 let fieldEntryState={reference:null,codes:[],latest:[],summary:{},loaded:false,busy:false,saving:false,submissionKey:'',recordQuery:'',recordCount:0,searchTimer:null};
 let fieldEntryEditState={record:null,codes:[]};
 const UI_STATE_KEY='warehouseUiState';
@@ -2901,7 +2977,7 @@ filtered.forEach(r=>{const supervisor=String(r['Supervisor Name']||r.supervisor_
 const data=[...groups.values()].sort((a,b)=>a.area.localeCompare(b.area)||a.supervisor.localeCompare(b.supervisor));const total={xbox:0,hub:0,sub:0,end:0,cable:0};data.forEach(g=>Object.keys(total).forEach(k=>total[k]+=g[k]));const num=v=>Number(v||0).toLocaleString('en-US');
 panel.innerHTML=`<div class="rollout-operations-panel"><div class="rollout-operations-toolbar"><div><h3 style="margin:0">Operations</h3><div class="muted">Supervisor progress by Date</div></div><div class="rollout-operations-filter"><label for="rolloutOperationsDate">Date</label><select id="rolloutOperationsDate" onchange="renderRolloutOperations()"><option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}" ${d===activeDate?'selected':''}>${esc(d)}</option>`).join('')}</select></div></div><div class="rollout-operations-stats"><div class="rollout-operations-stat">Supervisors<strong>${num(data.length)}</strong></div><div class="rollout-operations-stat">Areas<strong>${num(new Set(data.map(g=>g.area)).size)}</strong></div><div class="rollout-operations-stat">Cable length<strong>${num(total.cable)} m</strong></div></div>${data.length?`<div class="rollout-operations-table-wrap"><table class="rollout-operations-table"><thead><tr><th>Supervisor Name</th><th>Area</th><th>XBOX</th><th>HUB BOX</th><th>SUB BOX</th><th>END BOX</th><th>Total Cable (m)</th></tr></thead><tbody>${data.map(g=>`<tr><td>${esc(g.supervisor)}</td><td>${esc(g.area)}</td><td class="num">${num(g.xbox)}</td><td class="num">${num(g.hub)}</td><td class="num">${num(g.sub)}</td><td class="num">${num(g.end)}</td><td class="num">${num(g.cable)}</td></tr>`).join('')}<tr class="total"><td colspan="2">Total</td><td class="num">${num(total.xbox)}</td><td class="num">${num(total.hub)}</td><td class="num">${num(total.sub)}</td><td class="num">${num(total.end)}</td><td class="num">${num(total.cable)}</td></tr></tbody></table></div>`:`<div class="rollout-operations-empty">No rollout records for the selected date.</div>`}</div>`;
 }
-function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){if(roleKey()==='warehousemanager'&&['compare','map','operations','entry'].includes(tab))tab='kpi';const current=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(current==='map'&&tab!=='map')saveWarehouseFiberScroll();if(current!=='map'&&tab==='map')warehouseFiberRestoringTab=true;document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));const panels={kpi:'rolloutDailyKpi',overview:'rolloutDailyCityOverview',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});const rolloutOpen=document.querySelector('.view.active')?.id==='rolloutDaily';if(rolloutOpen&&tab==='kpi'){refreshRolloutDailyProgress(false);ensureRolloutPoleSummary(false)}if(rolloutOpen&&tab==='overview'){renderRolloutCityOverview();refreshRolloutDailyProgress(false);ensureRolloutDashboardDesignReference().then(()=>{if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='overview')renderRolloutCityOverview()})}if(rolloutOpen&&tab==='compare')ensureRolloutUsage(false);if(rolloutOpen&&['map','report','operations'].includes(tab))ensureRolloutDailyDetails(false).then(()=>{if(tab==='map')renderRolloutMapPanel();if(tab==='report')renderRolloutAreaReportPanel();if(tab==='operations')renderRolloutOperations()});if(rolloutOpen&&tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
+function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){if(roleKey()==='warehousemanager'&&['compare','map','operations','entry'].includes(tab))tab='kpi';const current=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(current==='map'&&tab!=='map')saveWarehouseFiberScroll();if(current!=='map'&&tab==='map')warehouseFiberRestoringTab=true;document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));document.querySelector('#rolloutDaily>.card')?.classList.toggle('city-overview-active',tab==='overview');const panels={kpi:'rolloutDailyKpi',overview:'rolloutDailyCityOverview',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});const rolloutOpen=document.querySelector('.view.active')?.id==='rolloutDaily';if(rolloutOpen&&tab==='kpi'){refreshRolloutDailyProgress(false);ensureRolloutPoleSummary(false)}if(rolloutOpen&&tab==='overview'){renderRolloutCityOverview();refreshRolloutDailyProgress(false);ensureRolloutDashboardDesignReference().then(()=>{if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='overview')renderRolloutCityOverview()})}if(rolloutOpen&&tab==='compare')ensureRolloutUsage(false);if(rolloutOpen&&['map','report','operations'].includes(tab))ensureRolloutDailyDetails(false).then(()=>{if(tab==='map')renderRolloutMapPanel();if(tab==='report')renderRolloutAreaReportPanel();if(tab==='operations')renderRolloutOperations()});if(rolloutOpen&&tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
 function x4BranchElements(){
 const branchLengths={
 1:[[100,150,80],[50,100,50,100],[80,80,80,50]],2:[[250,50,150,100],[250,50,50,50],[5,80,80,80],[200,80,80,50]],
@@ -3090,8 +3166,9 @@ function rolloutHomepassSummary(rows,dateFilter=''){
 }
 function rolloutOverviewCity(value){const key=normalizeText(value);if(key==='tripoli')return'Tripoli';if(['misurata','misrata'].includes(key))return'Misurata';return String(value||'').trim()}
 function rolloutOverviewArea(value){return normalizeText(value)==='albera'?'Bera W Taleem':displayRolloutArea(value)}
-function rolloutCityOverviewSetCity(city){rolloutCityOverviewState.city=city==='All Cities'?'':city;renderRolloutCityOverview()}
+function rolloutCityOverviewSetCity(city){rolloutCityOverviewState.city=city==='Both Cities'?'':city;renderRolloutCityOverview()}
 function rolloutCityOverviewSetDate(date){rolloutCityOverviewState.date=date||'';renderRolloutCityOverview()}
+function rolloutCityOverviewSetStatus(status){rolloutCityOverviewState.status=status||'All';renderRolloutCityOverview()}
 function rolloutCityOverviewShowMore(button){const panel=document.getElementById('rolloutDailyCityOverview'),section=button?.closest('.rollout-city-overview-city');if(!panel||!section)return;const city=section.dataset.citySection,total=Number(section.dataset.areaCount||0),current=Number(rolloutCityOverviewState.visible[city]||6);rolloutCityOverviewState.visible[city]=current>=total?6:Math.min(total,current+6);renderRolloutCityOverview()}
 function rolloutCityOverviewOpenArea(button){const city=rolloutOverviewCity(button?.dataset.rolloutCity),area=button?.dataset.rolloutArea;if(!city||!area)return;rolloutDashboardFilters.city=city;rolloutDashboardFilters.area=area;rolloutDashboardFilters.date=rolloutCityOverviewState.date||'';syncWarehouseFiberScope(area);switchRolloutDailyTab('kpi');renderRolloutDailyProgress()}
 function rolloutCityOverviewMetric(city,area,rows){
@@ -3114,6 +3191,28 @@ function rolloutCityOverviewMetric(city,area,rows){
   return{...metric,plan,target:{...target,cableMeters:targetCable,totalBoxes:targetBoxes,users:targetUsers},cablePct,boxPct,usersPct:targetUsers>0?Math.max(0,Math.min(100,metric.actualUsers/targetUsers*100)):0,productivity:configured?(cablePct*.8+boxPct*.2):null};
 }
 function rolloutCityOverviewMetricHtml(label,done,target,pct){const value=target>0?`${fmt(done)} / ${fmt(target)}`:`${fmt(done)} / target not set`;return`<div class="rollout-city-metric"><div class="rollout-city-metric-label"><span>${label}</span><span>${value}</span></div><div class="rollout-city-meter"><i style="width:${target>0?pct:0}%"></i></div></div>`}
+function rolloutCityOverviewStatus(metric,asOf){
+  const plan=metric.plan||{},productivity=Number(metric.productivity);
+  if(metric.productivity!==null&&productivity>=100)return{key:'completed',label:'Completed',detail:'Targets reached'};
+  if(!plan.start||!plan.end||metric.productivity===null)return{key:'planned',label:'Plan not set',detail:'Targets not configured'};
+  if(asOf<plan.start)return{key:'planned',label:'Planned',detail:`Starts ${rolloutCityCompactDate(plan.start)}`};
+  const duration=rolloutDaysInclusive(plan.start,plan.end),elapsed=Math.max(0,Math.floor((new Date(`${asOf}T00:00:00`)-new Date(`${plan.start}T00:00:00`))/86400000)+1),expected=Math.min(1,elapsed/duration),gap=expected-productivity/100;
+  const overdue=Math.max(0,Math.floor((new Date(`${asOf}T00:00:00`)-new Date(`${plan.end}T00:00:00`))/86400000));
+  if(overdue>0)return{key:'delayed',label:'Delayed',detail:`Overdue ${overdue}d`};
+  if(gap>.25)return{key:'delayed',label:'Delayed',detail:'Behind planned pace'};
+  if(gap>.10)return{key:'at-risk',label:'At risk',detail:'Behind planned pace'};
+  return{key:'on-track',label:'On track',detail:gap<-.10?'Ahead of plan':'On time'};
+}
+function rolloutCityCompactDate(value){if(!value)return'—';const date=new Date(`${value}T00:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
+function rolloutCityOverviewAggregate(items){
+  const total=items.reduce((sum,item)=>{const m=item.metric;sum.cable+=m.cableMeters;sum.cableTarget+=m.target.cableMeters;sum.boxes+=m.totalBoxes;sum.boxTarget+=m.target.totalBoxes;sum.users+=m.actualUsers;sum.userTarget+=m.target.users;sum.xbox+=m.xbox;sum.xboxTarget+=m.target.xbox;sum.hub+=m.hubBox;sum.hubTarget+=m.target.hubBox;sum.sub+=m.subEndBox;sum.subTarget+=m.target.subEndBox;return sum},{cable:0,cableTarget:0,boxes:0,boxTarget:0,users:0,userTarget:0,xbox:0,xboxTarget:0,hub:0,hubTarget:0,sub:0,subTarget:0});
+  const cablePct=total.cableTarget?Math.max(0,Math.min(100,total.cable/total.cableTarget*100)):0,boxPct=total.boxTarget?Math.max(0,Math.min(100,total.boxes/total.boxTarget*100)):0;
+  return{...total,cablePct,boxPct,userPct:total.userTarget?Math.max(0,Math.min(100,total.users/total.userTarget*100)):0,productivity:total.cableTarget&&total.boxTarget?cablePct*.8+boxPct*.2:null};
+}
+function rolloutCityOverviewMetricBar(label,done,target,pct,unit=''){
+  const value=target>0?`${fmt(done)} / ${fmt(target)}${unit}`:`${fmt(done)}${unit} / target —`;
+  return`<div class="rollout-city-area-metric"><div class="rollout-city-area-metric-label"><span>${label}</span><strong>${value}</strong></div><div class="rollout-city-metric-bar"><i style="--progress:${target>0?Math.max(0,Math.min(100,pct)):0}%"></i></div></div>`;
+}
 function renderRolloutCityOverview(){
   const panel=document.getElementById('rolloutDailyCityOverview');if(!panel)return;
   if(isSingleRan()){panel.innerHTML='<div class="rollout-city-overview-empty">Rollout Progress is not available for Single RAN.</div>';return}
@@ -3127,29 +3226,54 @@ function renderRolloutCityOverview(){
   const dataCities=rows.map(row=>rolloutOverviewCity(row.city||row.City)).filter(Boolean);
   const cities=[...new Set([...mappedCities,...dataCities])].sort((a,b)=>({Tripoli:0,Misurata:1}[a]??2)-({Tripoli:0,Misurata:1}[b]??2)||a.localeCompare(b));
   const summary=rolloutHomepassSummary(sourceRows,rolloutCityOverviewState.date);
-  const selected=rolloutCityOverviewState.city;
+  const selected=rolloutCityOverviewState.city,asOf=rolloutCityOverviewState.date||rolloutTimelineToday();
   const datesHtml=`<option value="">All dates</option>${dates.map(date=>`<option value="${esc(date)}" ${date===rolloutCityOverviewState.date?'selected':''}>${esc(rolloutDashDateLabel(date))}</option>`).join('')}`;
-  const topCards=[['All Cities','Total Homepass / Actual Users',summary.total],['Misurata','Misurata',summary.Misurata],['Tripoli','Tripoli',summary.Tripoli]];
-  const cardsHtml=topCards.map(([city,label,value])=>`<button type="button" class="homepass-summary-card" aria-pressed="${(city==='All Cities'?!selected:selected===city)?'true':'false'}" onclick="rolloutCityOverviewSetCity('${city}')"><span>${esc(label)}</span><strong>${fmt(value)}</strong></button>`).join('');
-  const sections=cities.filter(city=>!selected||city===selected).map(city=>{
+  const topCards=[['Both Cities','Total Homepass / Actual Users',summary.total,'Both cities'],['Misurata','Misurata',summary.Misurata,'Homepass / actual users'],['Tripoli','Tripoli',summary.Tripoli,'Homepass / actual users']];
+  const cardsHtml=topCards.map(([city,label,value,note])=>`<button type="button" class="rollout-city-total-card" aria-pressed="${(city==='Both Cities'?!selected:selected===city)?'true':'false'}" onclick="rolloutCityOverviewSetCity('${city}')"><span>${esc(label)}</span><strong>${fmt(value)}</strong><small>${esc(note)}</small></button>`).join('');
+  const cityItems=cities.map(city=>{
     const configuredAreas=ROLLOUT_DASHBOARD_AREAS[city]||[];
     const dataAreas=rows.filter(row=>rolloutOverviewCity(row.city||row.City)===city).map(row=>rolloutOverviewArea(row.Area||row.area)).filter(Boolean);
     const areaNames=[];
     [...configuredAreas.map(rolloutOverviewArea),...dataAreas].forEach(area=>{if(normalizeText(area)==='albera')return;if(!areaNames.some(existing=>sameRolloutDashboardArea(existing,area)))areaNames.push(area)});
+    return{city,items:areaNames.map(area=>{const metric=rolloutCityOverviewMetric(city,area,rows);return{city,area,metric,status:rolloutCityOverviewStatus(metric,asOf)}})};
+  });
+  const visibleCities=cityItems.filter(group=>!selected||group.city===selected),allItems=visibleCities.flatMap(group=>group.items),aggregate=rolloutCityOverviewAggregate(allItems);
+  const statusOrder=['completed','on-track','at-risk','delayed','planned'];
+  const statusLabels={completed:'Completed', 'on-track':'On track','at-risk':'At risk',delayed:'Delayed',planned:'Planned'};
+  const statusCounts=statusOrder.map(status=>[status,allItems.filter(item=>item.status.key===status).length]).filter(([,count])=>count>0);
+  const statusClass=status=>status==='on-track'?'on-track':status;
+  const statusHtml=statusCounts.map(([status,count])=>`<span class="rollout-city-status-count ${statusClass(status)}">${count} ${statusLabels[status]}</span>`).join('');
+  const pct=value=>value===null?'—':`${Math.round(value)}%`;
+  const kpiCards=[
+    ['Overall productivity',pct(aggregate.productivity),'weighted','20% boxes + 80% cable progress',aggregate.productivity],
+    ['Cable progress',pct(aggregate.cablePct),`${fmt(aggregate.cable)} m`,`${fmt(aggregate.cable)} / ${fmt(aggregate.cableTarget)} m`,aggregate.cablePct],
+    ['Box deployment',pct(aggregate.boxTarget?Math.min(100,aggregate.boxes/aggregate.boxTarget*100):0),`${fmt(aggregate.boxes)} boxes`,`XBOX ${fmt(aggregate.xbox)}/${fmt(aggregate.xboxTarget)} · HUB ${fmt(aggregate.hub)}/${fmt(aggregate.hubTarget)} · SUB ${fmt(aggregate.sub)}/${fmt(aggregate.subTarget)}`,aggregate.boxTarget?Math.min(100,aggregate.boxes/aggregate.boxTarget*100):0],
+    ['Actual users',fmt(aggregate.users),`${fmt(aggregate.userTarget)} users`,`${aggregate.userTarget?Math.round(aggregate.userPct):0}% of target connected`,aggregate.userPct]
+  ];
+  const kpisHtml=kpiCards.map(([label,value,unit,detail,progress])=>`<article class="rollout-city-kpi"><span class="rollout-city-kpi-label">${esc(label)}</span><div class="rollout-city-kpi-value"><strong>${esc(value)}</strong><span>${esc(unit)}</span></div><small class="rollout-city-kpi-detail">${esc(detail)}</small><div class="rollout-city-kpi-bar"><i style="--progress:${progress===null?0:Math.max(0,Math.min(100,progress))}%"></i></div></article>`).join('');
+  const cityName=selected||'Both Cities',areaCount=allItems.length;
+  const filterOptions=[['All','All areas'],...statusOrder.map(status=>[status,statusLabels[status]])];
+  const filtersHtml=filterOptions.map(([status,label])=>`<button type="button" aria-pressed="${rolloutCityOverviewState.status===status?'true':'false'}" onclick="rolloutCityOverviewSetStatus('${status}')">${label}</button>`).join('');
+  const timelineItems=allItems.filter(item=>item.metric.plan?.start&&item.metric.plan?.end),startDate=timelineItems.map(item=>item.metric.plan.start).sort()[0],lastPlanDate=timelineItems.map(item=>item.metric.plan.end).sort().pop(),endDate=lastPlanDate&&lastPlanDate>asOf?lastPlanDate:asOf;
+  const axisStart=startDate?new Date(`${startDate}T00:00:00`).getTime():0,axisEnd=endDate?new Date(`${endDate}T00:00:00`).getTime():axisStart,totalTimelineDays=Math.max(1,Math.round((axisEnd-axisStart)/86400000)+1);
+  const timelinePosition=date=>Math.max(0,Math.min(100,((new Date(`${date}T00:00:00`).getTime()-axisStart)/86400000)/totalTimelineDays*100));
+  const timelineRows=timelineItems.map(({city,area,metric,status})=>{const plan=metric.plan,planStartOffset=(new Date(`${plan.start}T00:00:00`).getTime()-axisStart)/86400000,windowDays=rolloutDaysInclusive(plan.start,plan.end),windowWidth=windowDays/totalTimelineDays*100,productivity=Math.max(0,Math.min(100,Number(metric.productivity||0))),delayDays=status.key==='delayed'?Math.max(0,Math.floor((new Date(`${asOf}T00:00:00`).getTime()-new Date(`${plan.end}T00:00:00`).getTime())/86400000)):0,delayLeft=(planStartOffset+windowDays)/totalTimelineDays*100,delayWidth=delayDays/totalTimelineDays*100;return`<div class="rollout-city-timeline-row"><div class="rollout-city-timeline-name"><span>${esc(area)}</span><small>${esc(status.label)}</small></div><div class="rollout-city-timeline-track"><i class="rollout-city-timeline-window" style="left:${planStartOffset/totalTimelineDays*100}%;width:${windowWidth}%"></i><i class="rollout-city-timeline-progress" style="left:${planStartOffset/totalTimelineDays*100}%;width:${windowWidth*productivity/100}%"></i>${delayDays?`<i class="rollout-city-timeline-delay" style="left:${delayLeft}%;width:${delayWidth}%"></i>`:''}<i class="rollout-city-timeline-today" style="left:${timelinePosition(asOf)}%"></i></div></div>`}).join('');
+  const statusColors={completed:'#4fd6a3','on-track':'#5b97ff','at-risk':'#f2b24d',delayed:'#ff7a72',planned:'#b7a2ff'};
+  const rankingRows=[...allItems].sort((a,b)=>Number(b.metric.productivity??-1)-Number(a.metric.productivity??-1)).map(({area,metric,status})=>`<div class="rollout-city-ranking-row"><span title="${esc(area)}">${esc(area)}</span><div class="rollout-city-ranking-bar" style="--status-color:${statusColors[status.key]||'#8996ab'}"><i style="--progress:${metric.productivity===null?0:Math.max(0,Math.min(100,metric.productivity))}%"></i></div><strong>${metric.productivity===null?'—':`${Math.round(metric.productivity)}%`}</strong></div>`).join('');
+  const sections=visibleCities.map(({city,items})=>{
     const visible=Math.max(6,Number(rolloutCityOverviewState.visible[city]||6));
-    const shownAreas=areaNames.slice(0,visible);
-    const areaCards=shownAreas.map(area=>{
-      const metric=rolloutCityOverviewMetric(city,area,rows);
-      const productivity=metric.productivity===null?'—':`${metric.productivity.toFixed(0)}%`;
-      const planLabel=metric.plan?.start&&metric.plan?.end?`${rolloutDashDateLabel(metric.plan.start)} – ${rolloutDashDateLabel(metric.plan.end)}`:'Plan dates not set';
-      const targetCount=value=>Number(value)>0?fmt(value):'—';
-      return`<article class="rollout-city-area-card"><div class="rollout-city-area-head"><h4>${esc(area)}</h4><small>${esc(city)}</small></div><div class="rollout-city-productivity"><strong>${productivity}</strong><span>${metric.productivity===null?'Targets not configured':'Productivity · 80% cable / 20% boxes'}</span></div>${rolloutCityOverviewMetricHtml('Cable',metric.cableMeters,metric.target.cableMeters,metric.cablePct)}${rolloutCityOverviewMetricHtml('Boxes',metric.totalBoxes,metric.target.totalBoxes,metric.boxPct)}<div class="rollout-city-box-breakdown">XBOX ${fmt(metric.xbox)} / ${targetCount(metric.target.xbox)} · HUB ${fmt(metric.hubBox)} / ${targetCount(metric.target.hubBox)} · SUB / END ${fmt(metric.subEndBox)} / ${targetCount(metric.target.subEndBox)}</div>${rolloutCityOverviewMetricHtml('Actual users',metric.actualUsers,metric.target.users,metric.usersPct)}<div class="rollout-city-area-foot"><small>${esc(planLabel)}</small><button type="button" class="btn soft" data-rollout-city="${esc(city)}" data-rollout-area="${esc(area)}" onclick="rolloutCityOverviewOpenArea(this)">Open area dashboard</button></div></article>`;
+    const filtered=rolloutCityOverviewState.status==='All'?items:items.filter(item=>item.status.key===rolloutCityOverviewState.status);
+    const shownAreas=filtered.slice(0,visible);
+    const areaCards=shownAreas.map(({area,metric,status})=>{
+      const productivity=metric.productivity===null?0:Math.max(0,Math.min(100,metric.productivity)),ringOffset=(169.65*(1-productivity/100)).toFixed(2);
+      const planLabel=metric.plan?.start&&metric.plan?.end?`${rolloutCityCompactDate(metric.plan.start)} → ${rolloutCityCompactDate(metric.plan.end)}`:'Plan dates not set';
+      return`<article class="rollout-city-area-card ${statusClass(status.key)}"><div class="rollout-city-area-head"><div><h4>${esc(area)}</h4><small>${esc(city)}</small></div><span class="rollout-city-status-pill ${statusClass(status.key)}">${esc(status.label)}</span></div><div class="rollout-city-ring" style="--ring-offset:${ringOffset}"><svg viewBox="0 0 64 64" aria-hidden="true"><circle class="track" cx="32" cy="32" r="27"></circle><circle class="value" cx="32" cy="32" r="27"></circle></svg><strong>${metric.productivity===null?'—':`${Math.round(productivity)}%`}</strong><small>Productivity</small></div><div class="rollout-city-area-metrics">${rolloutCityOverviewMetricBar('Cable',metric.cableMeters,metric.target.cableMeters,metric.cablePct,' m')}${rolloutCityOverviewMetricBar('Boxes',metric.totalBoxes,metric.target.totalBoxes,metric.boxPct)}${rolloutCityOverviewMetricBar('Users',metric.actualUsers,metric.target.users,metric.usersPct)}</div><div class="rollout-city-area-foot"><span>${esc(planLabel)}</span><strong>${esc(status.detail)}</strong><button type="button" class="btn" data-rollout-city="${esc(city)}" data-rollout-area="${esc(area)}" onclick="rolloutCityOverviewOpenArea(this)">Open dashboard</button></div></article>`;
     }).join('');
-    const moreButton=areaNames.length>6?`<button type="button" class="btn soft rollout-city-more" data-area-count="${areaNames.length}" onclick="rolloutCityOverviewShowMore(this)">${visible>=areaNames.length?'Show fewer areas':'Show 6 more areas'}</button>`:'';
-    const cards=areaCards?`<div class="rollout-city-area-grid">${areaCards}</div>`:'<div class="rollout-city-overview-empty">No areas configured for this city.</div>';
-    return`<section class="rollout-city-overview-city" data-city-section="${esc(city)}" data-area-count="${areaNames.length}"><div class="rollout-city-overview-city-head"><h3>${esc(city)}</h3><span>${areaNames.length} ${areaNames.length===1?'area':'areas'}</span></div>${cards}${moreButton}</section>`;
+    const moreButton=filtered.length>6?`<button type="button" class="rollout-city-more" onclick="rolloutCityOverviewShowMore(this)">${visible>=filtered.length?'Show fewer areas':'Show 6 more areas'}</button>`:'';
+    const cards=areaCards?`<div class="rollout-city-area-grid">${areaCards}</div>`:'<div class="rollout-city-overview-empty">No areas match this status.</div>';
+    return`<section class="rollout-city-overview-city" data-city-section="${esc(city)}" data-area-count="${filtered.length}"><div class="rollout-city-areas-title"><h3>${esc(city)} areas</h3></div>${cards}${moreButton}</section>`;
   }).join('');
-  panel.innerHTML=`<div class="rollout-city-overview"><div class="rollout-city-overview-toolbar"><h3>Cities & Areas</h3><div class="field"><label for="rolloutCityOverviewDate">Date</label><select id="rolloutCityOverviewDate" onchange="rolloutCityOverviewSetDate(this.value)">${datesHtml}</select></div></div><div class="homepass-summary" aria-label="Actual user totals">${cardsHtml}</div>${sections||'<div class="rollout-city-overview-empty">No areas are available for this selection.</div>'}</div>`;
+  panel.innerHTML=`<div class="rollout-city-overview"><header class="rollout-city-overview-head"><div class="rollout-city-brand"><span class="rollout-city-brand-mark">GTC</span><div><strong>Rollout Control</strong><small>CITIES · AREAS · PROGRESS</small></div></div><div class="rollout-city-controls"><div class="rollout-city-switch" role="group" aria-label="Select city">${[['Both Cities','Both Cities'],['Tripoli','Tripoli'],['Misurata','Misurata']].map(([city,label])=>`<button type="button" aria-pressed="${(!selected&&city==='Both Cities')||selected===city?'true':'false'}" onclick="rolloutCityOverviewSetCity('${city}')">${label}</button>`).join('')}</div><select class="rollout-city-control" aria-label="Filter by date" onchange="rolloutCityOverviewSetDate(this.value)">${datesHtml}</select><span class="rollout-city-control healthy"><i class="rollout-city-pulse"></i>System healthy</span></div></header><section class="rollout-city-total-grid" aria-label="Homepass totals">${cardsHtml}</section><section class="rollout-city-hero"><div class="rollout-city-hero-head"><div><div class="rollout-city-eyebrow">Live rollout command center</div><h2>${esc(cityName)} · ${areaCount} ${areaCount===1?'area':'areas'}</h2></div><div class="rollout-city-status-counts">${statusHtml}</div></div><div class="rollout-city-kpis">${kpisHtml}</div></section><section class="rollout-city-areas"><div class="rollout-city-areas-head"><div class="rollout-city-areas-title"><h3>${selected?`${esc(selected)} areas`:'City areas'}</h3><p>Each area is tracked with the same metrics · open a card for full details</p></div><div class="rollout-city-filters" role="group" aria-label="Filter areas by status">${filtersHtml}</div></div>${sections||'<div class="rollout-city-overview-empty">No areas are available for this selection.</div>'}</section><section class="rollout-city-lower-grid"><article class="rollout-city-lower-panel"><h3>Timeline vs Plan</h3><p>Planned windows, rollout progress, and overdue time</p>${timelineRows?`<div class="rollout-city-timeline-axis"><span>${esc(rolloutCityCompactDate(startDate))}</span><span>${esc(rolloutCityCompactDate(endDate))}</span></div><div class="rollout-city-timeline-rows">${timelineRows}</div>`:'<div class="rollout-city-timeline-empty">Plan dates are not available for these areas.</div>'}</article><article class="rollout-city-lower-panel"><h3>Productivity Ranking</h3><p>Areas ranked by the same weighted productivity score</p><div class="rollout-city-ranking">${rankingRows||'<div class="rollout-city-timeline-empty">No areas to rank.</div>'}</div></article></section></div>`;
 }
 function renderRolloutDailyProgress(){
 const rows=rolloutDashboardRows(wh.rolloutDailyProgress||[]);
