@@ -3200,7 +3200,8 @@ function rolloutCityOverviewMetric(city,area,rows){
   metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
   metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
   metric.actualUsers=metric.distributionQty*8;
-  const targetCable=isAwlad?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);
+  const isMaqawba=canonicalRolloutArea(area)==='maqawba';
+  const targetCable=isAwlad||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);
   const targetBoxes=Number(target.totalBoxes||0),targetUsers=Number(target.users||plan.targetUsers||0);
   const configured=targetCable>0&&targetBoxes>0;
   const cablePct=targetCable>0?Math.max(0,Math.min(100,metric.cableMeters/targetCable*100)):0;
@@ -3324,7 +3325,7 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||sameRolloutDashboardArea(rowArea,rolloutDashboardFilters.area);
   return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const cableTarget=canonicalRolloutArea(area)==='awladbaeoo'?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);return{name:area,...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const plan=rolloutPlanFor(rolloutDashboardFilters.city,area);const isMaqawba=canonicalRolloutArea(area)==='maqawba';const cableTarget=canonicalRolloutArea(area)==='awladbaeoo'||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);const cableMeters=isMaqawba&&Number.isFinite(Number(plan?.dashboardCableMetersOverride))?Number(plan.dashboardCableMetersOverride):(mapCable?mapCable.installedMeters:raw.cableMeters);return{name:area,...raw,cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
 const mapCable=rolloutMapCableProgressMetric(rolloutDashboardFilters.area,scopedRows);
@@ -3340,7 +3341,7 @@ if(plan){
 }
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
 const baseDashboardTarget=rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0),singleCoreCableQty:acc.singleCoreCableQty+Number(r.target?.singleCoreCableQty||Math.round(Number(r.target?.users||0)/8))}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0,singleCoreCableQty:0}):{...baseDashboardTarget,cableMeters:isAwladDashboard?baseDashboardTarget.cableMeters:(mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters)};
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0),singleCoreCableQty:acc.singleCoreCableQty+Number(r.target?.singleCoreCableQty||Math.round(Number(r.target?.users||0)/8))}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0,singleCoreCableQty:0}):{...baseDashboardTarget,cableMeters:isAwladDashboard||canonicalRolloutArea(rolloutDashboardFilters.area)==='maqawba'?baseDashboardTarget.cableMeters:(mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters)};
 const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
 const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
 const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
