@@ -1317,6 +1317,16 @@ body.sr-program .login-logo img{
           <div class="field full"><label>اسم المادة</label><input id="receiveMaterialName" placeholder="ATB / Cable / Box"></div>
           <div class="field"><label>الكمية</label><input id="receiveQty" type="number" min="1" value="1"></div>
           <div class="field"><label>الوحدة</label><input id="receiveUnit" value="PCS"></div>
+          <div class="field full sr-only hidden">
+            <label>استلام عدة مواد من Excel</label>
+            <div class="actions">
+              <button class="btn soft" type="button" onclick="downloadSrReceiveTemplate()">تنزيل نموذج Excel</button>
+              <input id="receiveItemsExcel" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="previewSrReceiveExcel(this)">
+            </div>
+            <div id="receiveExcelStatus" class="hint">الحقول المشتركة أعلاه تنطبق على كل المواد في الملف.</div>
+            <div id="receiveExcelPreview"></div>
+            <button class="btn primary full" id="receiveExcelSubmit" type="button" onclick="submitSrReceiveExcel()" disabled>إضافة كل المواد للمخزون</button>
+          </div>
           <button class="btn primary full" onclick="receiveInventory()">إضافة للمخزون</button>
         </div>
       </div>
@@ -2432,6 +2442,13 @@ upsertLocalReturn(r.return);
 syncWarehouseLater();
 }catch(e){toast(e.message)}
 }
+let receiveExcelPreviewState=null;
+let receiveExcelPreviewBusy=false;
+let receiveExcelSubmitting=false;
+function downloadSrReceiveTemplate(){window.open(withProgramQuery('/api/warehouse/receive-inventory/excel-template'),'_blank','noopener')}
+function clearReceiveExcelPreview(message='الحقول المشتركة أعلاه تنطبق على كل المواد في الملف.'){receiveExcelPreviewState=null;const preview=document.getElementById('receiveExcelPreview');const status=document.getElementById('receiveExcelStatus');const submit=document.getElementById('receiveExcelSubmit');if(preview)preview.innerHTML='';if(status)status.textContent=message;if(submit)submit.disabled=true}
+async function previewSrReceiveExcel(input){const file=input?.files?.[0];clearReceiveExcelPreview();if(!file)return;if(!isSingleRan()){toast('Excel bulk receive is available in Single RAN only');input.value='';return}if(!receiveWarehouse.value){toast('اختر المستودع قبل معاينة الملف');input.value='';return}receiveExcelPreviewBusy=true;const status=document.getElementById('receiveExcelStatus');if(status)status.textContent='جاري قراءة الملف والتحقق من الأسطر...';const form=new FormData();form.append('items_file',file);form.append('warehouse_id',receiveWarehouse.value);form.append('supplier',receiveSupplier.value.trim());try{const data=await api('/api/warehouse/receive-inventory/preview-excel',{method:'POST',body:form});receiveExcelPreviewState={fileName:file.name,size:file.size,lastModified:file.lastModified,warehouseId:receiveWarehouse.value,supplier:receiveSupplier.value.trim(),items:data.items||[]};const rows=receiveExcelPreviewState.items;const preview=document.getElementById('receiveExcelPreview');const submit=document.getElementById('receiveExcelSubmit');if(preview)preview.innerHTML=`<div class="table-wrap"><table><thead><tr><th>SKU</th><th>Part #</th><th>Description</th><th>Qty</th><th>Unit</th></tr></thead><tbody>${rows.map(item=>`<tr><td>${esc(item.sku)}</td><td>${esc(item.part_number)}</td><td>${esc(item.name)}</td><td>${fmt(item.quantity)}</td><td>${esc(item.unit)}</td></tr>`).join('')}</tbody></table></div>`;if(status)status.textContent=`${fmt(data.row_count)} material rows ready from ${data.file_name}.`;if(submit)submit.disabled=!rows.length}catch(error){if(status)status.textContent=error.message;toast(error.message)}finally{receiveExcelPreviewBusy=false}}
+async function submitSrReceiveExcel(){const input=document.getElementById('receiveItemsExcel');const file=input?.files?.[0];const preview=receiveExcelPreviewState;if(!file||!preview){toast('اختر ملف Excel واعمل معاينة أولاً');return}if(preview.fileName!==file.name||preview.size!==file.size||preview.lastModified!==file.lastModified||preview.warehouseId!==receiveWarehouse.value||preview.supplier!==receiveSupplier.value.trim()){clearReceiveExcelPreview('تغيرت البيانات المشتركة؛ أعد معاينة ملف Excel.');toast('أعد معاينة الملف بعد تغيير المستودع أو المورد');return}if(receiveExcelSubmitting||receiveExcelPreviewBusy)return;receiveExcelSubmitting=true;const submit=document.getElementById('receiveExcelSubmit');if(submit)submit.disabled=true;const form=new FormData();form.append('items_file',file);form.append('receipt_date',receiveDate.value);form.append('receipt_number',receiveReceipt.value.trim());form.append('invoice_number',receiveInvoiceNumber.value.trim());form.append('supplier',receiveSupplier.value.trim());form.append('warehouse_id',receiveWarehouse.value);const invoice=receiveInvoiceFile.files?.[0];if(invoice)form.append('invoice_file',invoice);try{toast('جاري استلام مواد Excel...');const result=await api('/api/warehouse/receive-inventory/bulk',{method:'POST',body:form});input.value='';clearReceiveExcelPreview('تم استلام الملف. يمكنك اختيار ملف آخر.');receiveReceipt.value='';receiveInvoiceNumber.value='';receiveInvoiceFile.value='';clearWarehouseBootstrapCache();toast(`تم استلام ${fmt(result.row_count)} مادة ضمن الإيصال ${result.order_number}`);await loadWarehouse()}catch(error){toast(error.message)}finally{receiveExcelSubmitting=false;if(submit)submit.disabled=!receiveExcelPreviewState?.items?.length}}
 async function receiveInventory(){
 try{
 const qty=Number(receiveQty.value||0);

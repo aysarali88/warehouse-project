@@ -775,6 +775,26 @@ def normalize_email_list(values: list[str]) -> list[str]:
     return emails
 
 
+def sr_admin_movement_notification_emails(db: Session, program: str) -> list[str]:
+    if not is_single_ran(program):
+        return []
+    rows = (
+        db.query(AppUser)
+        .filter(
+            AppUser.program == SINGLE_RAN_PROGRAM,
+            AppUser.status == "active",
+            func.lower(AppUser.role) == "admin",
+            func.lower(AppUser.username) == "husseni",
+        )
+        .all()
+    )
+    return normalize_email_list([row.email for row in rows])
+
+
+def movement_notification_recipients(db: Session, program: str, recipients: list[str]) -> list[str]:
+    return normalize_email_list(recipients + sr_admin_movement_notification_emails(db, program))
+
+
 def active_user_emails(db: Session, role: str, identifiers: list[str] | None = None) -> list[str]:
     query = db.query(AppUser).filter(AppUser.status == "active", func.lower(AppUser.role) == role.strip().lower())
     rows = query.all()
@@ -883,7 +903,7 @@ def is_requisition_warehouse_manager(actor: str, row: MaterialRequisition, db: S
 
 
 def notify_mr_email(row: MaterialRequisition, db: Session, recipients: list[str], subject: str, lines: list[str], audit_prefix: str) -> None:
-    recipients = normalize_email_list(recipients)
+    recipients = movement_notification_recipients(db, row.program, recipients)
     if not recipients:
         logger.warning("MR email skipped: no recipients configured for %s", audit_prefix)
         try:
@@ -928,7 +948,7 @@ def notify_mr_email(row: MaterialRequisition, db: Session, recipients: list[str]
 
 
 def notify_transfer_email(row: MaterialTransfer, db: Session, recipients: list[str], subject: str, lines: list[str], audit_prefix: str) -> None:
-    recipients = normalize_email_list(recipients)
+    recipients = movement_notification_recipients(db, row.program, recipients)
     if not recipients:
         logger.warning("Transfer email skipped: no recipients configured for %s", audit_prefix)
         return
@@ -1347,6 +1367,27 @@ class InventoryReceiveIn(BaseModel):
     created_by: str = "manager"
 
 
+class InventoryReceiveBulkItemIn(BaseModel):
+    sku: str
+    part_number: str = ""
+    name: str
+    quantity: float = Field(gt=0)
+    unit: str = "PCS"
+    qr_code: str = ""
+    category: str = ""
+
+
+class InventoryReceiveBulkIn(BaseModel):
+    program: str = SINGLE_RAN_PROGRAM
+    receipt_date: str = ""
+    receipt_number: str = ""
+    invoice_number: str = ""
+    supplier: str = ""
+    warehouse_id: int
+    items: list[InventoryReceiveBulkItemIn] = Field(min_length=1, max_length=500)
+    created_by: str = "manager"
+
+
 MAX_INVOICE_FILE_BYTES = 10 * 1024 * 1024
 INVOICE_FILE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 INVOICE_CONTENT_TYPES = {
@@ -1387,6 +1428,78 @@ async def inventory_receive_payload(request: Request) -> tuple[InventoryReceiveI
     if len(contents) > MAX_INVOICE_FILE_BYTES:
         raise HTTPException(status_code=400, detail="Invoice file must be 10 MB or smaller")
     return data, filename, INVOICE_CONTENT_TYPES[extension], contents
+
+
+def parse_sr_receive_workbook(uploaded, filename: str) -> list[dict]:
+    safe_name = os.path.basename(str(filename or "").replace("\\", "/"))
+    if os.path.splitext(safe_name)[1].lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail="Materials file must be an .xlsx Excel workbook")
+    content = uploaded
+    if not content or len(content) > MAX_INVOICE_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="Excel file must be non-empty and 10 MB or smaller")
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        sheet = workbook.active
+        header_row = None
+        columns = {}
+        aliases = {
+            "sku": {"sku", "materialsku", "itemcode", "materialcode"},
+            "part_number": {"part", "partnumber", "partnbr", "partno", "partid"},
+            "name": {"description", "materialdescription", "materialname", "itemdescription", "itemname", "name"},
+            "quantity": {"quantity", "qty", "receivedquantity", "receivedqty"},
+            "unit": {"unit", "uom", "unitofmeasure"},
+            "qr_code": {"qrcode", "qr"},
+            "category": {"category", "materialcategory"},
+            "excel_vendor": {"vendor", "supplier"},
+            "excel_warehouse": {"wh", "warehouse", "warehousename"},
+        }
+        for row_number, row in enumerate(sheet.iter_rows(min_row=1, max_row=15, values_only=True), start=1):
+            candidate = {key: index for index, value in enumerate(row) for key, names in aliases.items() if excel_key(value) in names}
+            if "name" in candidate and "quantity" in candidate and ("sku" in candidate or "part_number" in candidate):
+                header_row, columns = row_number, candidate
+                break
+        if header_row is None:
+            raise HTTPException(status_code=400, detail="Excel headers must include Description, Quantity, and either SKU or Part #")
+
+        items = []
+        errors = []
+        for row_number, row in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
+            values = {key: excel_text(row[index]) if index < len(row) else "" for key, index in columns.items()}
+            if not any(values.values()):
+                continue
+            sku = values.get("sku", "") or values.get("part_number", "")
+            name = values.get("name", "")
+            raw_quantity = values.get("quantity", "").replace(",", "")
+            try:
+                quantity = float(raw_quantity)
+            except (TypeError, ValueError):
+                quantity = 0
+            if not sku or not name or not math.isfinite(quantity) or quantity <= 0:
+                errors.append(f"Row {row_number}: SKU/Part #, Description, and a positive Quantity are required")
+                continue
+            items.append({
+                "sku": sku,
+                "part_number": values.get("part_number", ""),
+                "name": name,
+                "quantity": quantity,
+                "unit": values.get("unit", "") or "PCS",
+                "qr_code": values.get("qr_code", ""),
+                "category": values.get("category", ""),
+                "excel_vendor": values.get("excel_vendor", ""),
+                "excel_warehouse": values.get("excel_warehouse", ""),
+                "row_number": row_number,
+            })
+            if len(items) > 500:
+                raise HTTPException(status_code=400, detail="A single Excel receipt can contain up to 500 material rows")
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors[:20]))
+        if not items:
+            raise HTTPException(status_code=400, detail="No material rows found under the Excel headers")
+        return items
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not read the Excel workbook. Check that it is a valid .xlsx file") from exc
 
 
 class InventoryAdjustmentIn(BaseModel):
@@ -9739,6 +9852,189 @@ def receive_stock(data: ReceiveIn, request: Request, db: Session = Depends(db_se
         db.rollback()
         raise
     return {"success": True, "order_number": order.order_number}
+
+
+@app.get("/api/warehouse/receive-inventory/excel-template")
+def download_sr_receive_excel_template(request: Request):
+    if normalize_program(getattr(request.state, "program", "")) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Materials"
+    sheet.append(["SKU", "Part #", "Description", "Quantity", "Unit", "QR Code"])
+    for column, width in {"A": 22, "B": 24, "C": 56, "D": 14, "E": 14, "F": 24}.items():
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A2"
+    stream = io.BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="sr-receive-inventory-template.xlsx"'},
+    )
+
+
+def receive_excel_file_from_form(form) -> tuple[str, bytes]:
+    uploaded = form.get("items_file")
+    if not uploaded or not getattr(uploaded, "filename", ""):
+        raise HTTPException(status_code=400, detail="Choose an Excel file first")
+    filename = os.path.basename(str(uploaded.filename).replace("\\", "/"))
+    content = uploaded.file.read(MAX_INVOICE_FILE_BYTES + 1)
+    if len(content) > MAX_INVOICE_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="Excel file must be 10 MB or smaller")
+    return filename, content
+
+
+def validate_sr_receive_excel_scope(items: list[dict], supplier: str, warehouse: Warehouse) -> None:
+    for item in items:
+        row_number = item["row_number"]
+        row_vendor = item.get("excel_vendor", "").strip()
+        row_warehouse = item.get("excel_warehouse", "").strip()
+        if row_vendor and (not supplier or normalize_text(row_vendor) != normalize_text(supplier)):
+            raise HTTPException(status_code=400, detail=f"Excel row {row_number} vendor does not match the Vendor field")
+        if row_warehouse and normalize_text(row_warehouse) != normalize_text(warehouse.name):
+            raise HTTPException(status_code=400, detail=f"Excel row {row_number} warehouse does not match the selected WH")
+
+
+@app.post("/api/warehouse/receive-inventory/preview-excel")
+async def preview_sr_receive_excel(request: Request, db: Session = Depends(db_session)):
+    if normalize_program(getattr(request.state, "program", "")) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    form = await request.form()
+    try:
+        warehouse_id = int(form.get("warehouse_id", ""))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Select a warehouse before previewing the Excel file") from exc
+    warehouse = require_warehouse_access(request, db, warehouse_id, SINGLE_RAN_PROGRAM)
+    filename, content = receive_excel_file_from_form(form)
+    items = parse_sr_receive_workbook(content, filename)
+    validate_sr_receive_excel_scope(items, str(form.get("supplier", "") or "").strip(), warehouse)
+    safe_items = [{key: value for key, value in item.items() if not key.startswith("excel_")} for item in items]
+    return {"success": True, "file_name": filename, "row_count": len(safe_items), "items": safe_items}
+
+
+@app.post("/api/warehouse/receive-inventory/bulk")
+async def receive_inventory_bulk(request: Request, db: Session = Depends(db_session)):
+    if normalize_program(getattr(request.state, "program", "")) != SINGLE_RAN_PROGRAM:
+        raise HTTPException(status_code=404, detail="Not found")
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    form = await request.form()
+    filename, content = receive_excel_file_from_form(form)
+    parsed_items = parse_sr_receive_workbook(content, filename)
+    raw = {
+        "program": SINGLE_RAN_PROGRAM,
+        "receipt_date": str(form.get("receipt_date", "") or "").strip(),
+        "receipt_number": str(form.get("receipt_number", "") or "").strip(),
+        "invoice_number": str(form.get("invoice_number", "") or "").strip(),
+        "supplier": str(form.get("supplier", "") or "").strip(),
+        "warehouse_id": form.get("warehouse_id", ""),
+        "items": [{key: value for key, value in item.items() if not key.startswith("excel_") and key != "row_number"} for item in parsed_items],
+        "created_by": request_actor(request),
+    }
+    try:
+        data = InventoryReceiveBulkIn.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    warehouse = require_warehouse_access(request, db, data.warehouse_id, SINGLE_RAN_PROGRAM)
+    validate_sr_receive_excel_scope(parsed_items, data.supplier, warehouse)
+
+    invoice_file_name = invoice_file_content_type = ""
+    invoice_file_data = None
+    invoice_upload = form.get("invoice_file")
+    if invoice_upload and getattr(invoice_upload, "filename", ""):
+        invoice_file_name = os.path.basename(str(invoice_upload.filename).replace("\\", "/"))
+        invoice_extension = os.path.splitext(invoice_file_name)[1].lower()
+        if invoice_extension not in INVOICE_FILE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="Invoice must be a PDF, PNG, JPG, or JPEG file")
+        invoice_file_name = re.sub(r"[^A-Za-z0-9._-]", "_", invoice_file_name)
+        invoice_file_data = await invoice_upload.read(MAX_INVOICE_FILE_BYTES + 1)
+        if not invoice_file_data or len(invoice_file_data) > MAX_INVOICE_FILE_BYTES:
+            raise HTTPException(status_code=400, detail="Invoice file must be non-empty and 10 MB or smaller")
+        invoice_file_content_type = INVOICE_CONTENT_TYPES[invoice_extension]
+
+    order = ReceiveOrder(
+        program=SINGLE_RAN_PROGRAM,
+        order_number=data.receipt_number or next_number(db, ReceiveOrder, "SR-GRN"),
+        supplier=data.supplier,
+        receipt_date=data.receipt_date,
+        invoice_number=data.invoice_number,
+        invoice_file_name=invoice_file_name,
+        invoice_file_content_type=invoice_file_content_type,
+        invoice_file_data=invoice_file_data,
+        warehouse_id=data.warehouse_id,
+        created_by=data.created_by,
+    )
+    db.add(order)
+    db.flush()
+    received_items = []
+    for index, item in enumerate(data.items):
+        sku = item.sku.strip()
+        name = material_display_name(item.name.strip(), sku)
+        product = db.query(Product).filter(Product.program == SINGLE_RAN_PROGRAM, Product.sku == sku).first()
+        if product is None and item.part_number.strip():
+            matches = db.query(Product).filter(
+                Product.program == SINGLE_RAN_PROGRAM,
+                Product.part_number == item.part_number.strip(),
+            )
+            if data.supplier:
+                matches = matches.filter(func.lower(Product.vendor) == data.supplier.lower())
+            found = matches.limit(2).all()
+            if len(found) > 1:
+                raise HTTPException(status_code=400, detail=f"Excel row {parsed_items[index]['row_number']}: Part # matches multiple materials; include SKU")
+            product = found[0] if found else None
+        if product is not None and product.tracking_type == "serialized":
+            raise HTTPException(status_code=400, detail=f"Excel row {parsed_items[index]['row_number']}: serialized materials must be received with their serial numbers")
+        if product is None:
+            product = Product(
+                program=SINGLE_RAN_PROGRAM,
+                sku=sku,
+                part_number=product_part_number(sku, item.part_number),
+                category=item.category.strip(),
+                name=name,
+                item_detail=name,
+                vendor=data.supplier,
+                qr_code=item.qr_code.strip(),
+                unit=item.unit.strip() or "PCS",
+                tracking_type="bulk",
+                min_stock=0,
+            )
+            db.add(product)
+            db.flush()
+        else:
+            product.part_number = product_part_number(sku, item.part_number or product.part_number)
+            product.name = material_display_name(name, sku) or product.name
+            product.item_detail = product.item_detail or name
+            product.unit = item.unit.strip() or product.unit or "PCS"
+            product.qr_code = item.qr_code.strip() or product.qr_code
+            product.category = item.category.strip() or product.category
+            if data.supplier:
+                product.vendor = data.supplier
+
+        stock_balance(db, data.warehouse_id, product.id, SINGLE_RAN_PROGRAM).quantity += item.quantity
+        db.add(ReceiveOrderItem(receive_order_id=order.id, product_id=product.id, quantity=item.quantity, serial_number=""))
+        db.add(StockMovement(
+            program=SINGLE_RAN_PROGRAM,
+            movement_type="receive",
+            product_id=product.id,
+            warehouse_id=data.warehouse_id,
+            quantity=item.quantity,
+            serial_number="",
+            reference=order.order_number,
+            created_by=data.created_by,
+            note=f"Excel inventory receive: {filename}",
+        ))
+        received_items.append({"sku": product.sku, "name": product_display_name(product), "quantity": item.quantity, "unit": product.unit})
+
+    log_audit(db, "receive_inventory_excel", "receive_order", order.order_number, data.created_by, {"file_name": filename, "row_count": len(received_items), "warehouse": warehouse.name})
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Receipt number already exists or bulk receive failed") from exc
+    return {"success": True, "order_number": order.order_number, "row_count": len(received_items), "items": received_items}
 
 
 @app.post("/api/warehouse/receive-inventory")
