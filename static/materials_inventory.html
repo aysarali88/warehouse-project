@@ -3139,8 +3139,9 @@ function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
   const design=wfmDesignTargetFor(area);
   if(design)return {...design,users:Number(plan.targetUsers||0),singleCoreCableQty:design.subEndBox};
+  const maqawbaCableTarget=Number(plan.dashboardCableMetersOverride);
   return {
-    cableMeters:Number(plan.targetCableMeters||0),
+    cableMeters:canonicalRolloutArea(area)==='maqawba'&&Number.isFinite(maqawbaCableTarget)?maqawbaCableTarget:Number(plan.targetCableMeters||0),
     subEndBox:Number(plan.targetSubEndBox||0),
     hubBox:Number(plan.targetHubBox||0),
     xbox:Number(plan.targetXbox||0),
