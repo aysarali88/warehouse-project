@@ -75,6 +75,64 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         db.rollback()
         db.close()
 
+    def test_entry_record_search_uses_lightweight_query_and_returns_latest_matches(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-SEARCH-1", area="Ras Ammar", city="Misurata", notes="First"),
+            RolloutRecord(record_id="RDP-SEARCH-2", area="Ras Ammar", city="Misurata", notes="Second"),
+            RolloutRecord(record_id="RDP-SEARCH-3", area="Ras A Tota", city="Misurata", notes="Third"),
+        ])
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_records = main.rollout_daily_progress_records
+        original_refs = main.rollout_code_reference_rows
+        main.rollout_daily_progress_records = lambda *args, **kwargs: self.fail("search should not load the full rollout data")
+        main.rollout_code_reference_rows = lambda *args, **kwargs: self.fail("search should not rebuild code references")
+        try:
+            result = main.rollout_entry_reference(
+                request,
+                query="Ras-Ammar",
+                limit=1,
+                records_only=True,
+                db=db,
+            )
+        finally:
+            main.rollout_daily_progress_records = original_records
+            main.rollout_code_reference_rows = original_refs
+
+        self.assertEqual(result["count"], 2)
+        self.assertEqual([row["ID"] for row in result["latest"]], ["RDP-SEARCH-2"])
+        db.close()
+
+    def test_entry_record_search_preserves_warehouse_manager_scope(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-SEARCH-TRIPOLI", area="Hay Demashq", city="Tripoli"),
+            RolloutRecord(record_id="RDP-SEARCH-MISRATA", area="Maqawba", city="Misurata"),
+        ])
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(
+                    role="Warehouse Manager", name="Tripoli", username="tripoli", warehouse_name="Tripoli"
+                ),
+                program="FTTH",
+            )
+        )
+
+        result = main.rollout_entry_reference(request, records_only=True, db=db)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual([row["ID"] for row in result["latest"]], ["RDP-SEARCH-TRIPOLI"])
+        db.close()
+
     def test_canonical_material_key_groups_cable_lengths_with_or_without_meter_suffix(self):
         equivalent_pairs = [
             ("Single-Core Distribution Cable_50m", "Single-Core Distribution Cable_50"),

@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
 from email.message import EmailMessage
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import func, or_, text
+from sqlalchemy import String, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -5141,8 +5141,59 @@ def rollout_entry_reference(
     xbox: str = "",
     query: str = "",
     limit: int = 50,
+    records_only: bool = False,
     db: Session = Depends(db_session),
 ):
+    if records_only:
+        terms = re.findall(r"[\w]+", str(query or "").strip()[:120], flags=re.UNICODE)
+        searchable_columns = (
+            RolloutRecord.record_id,
+            RolloutRecord.date,
+            RolloutRecord.supervisor_name,
+            RolloutRecord.team_leader,
+            RolloutRecord.area,
+            RolloutRecord.city,
+            RolloutRecord.activity,
+            RolloutRecord.item,
+            RolloutRecord.material_type,
+            RolloutRecord.mount_type,
+            RolloutRecord.item_serial,
+            RolloutRecord.status,
+            RolloutRecord.laser,
+            RolloutRecord.acceptance,
+            RolloutRecord.scan,
+            RolloutRecord.labeling,
+            RolloutRecord.related_to_xbox,
+            RolloutRecord.entry_time,
+            RolloutRecord.cable_code,
+            RolloutRecord.box_code,
+            RolloutRecord.olt,
+            RolloutRecord.cable_route,
+            RolloutRecord.notes,
+            func.cast(RolloutRecord.planned_quantity, String),
+            func.cast(RolloutRecord.actual, String),
+            func.cast(RolloutRecord.stock_remaining, String),
+        )
+        search_query = db.query(RolloutRecord)
+        for term in terms:
+            pattern = f"%{term}%"
+            search_query = search_query.filter(or_(*(column.ilike(pattern) for column in searchable_columns)))
+
+        user = current_user(request)
+        record_limit = min(max(limit, 1), 200)
+        if user.role.strip().lower() == "warehouse manager":
+            matches = [row_to_record(row) for row in search_query.order_by(RolloutRecord.id.desc()).all()]
+            matches = rollout_records_for_session(request, matches)
+            total = len(matches)
+            latest = matches[:record_limit]
+        else:
+            total = search_query.count()
+            latest = [
+                row_to_record(row)
+                for row in search_query.order_by(RolloutRecord.id.desc()).limit(record_limit).all()
+            ]
+        return {"success": True, "records_only": True, "latest": latest, "count": total}
+
     records, source = rollout_daily_progress_records(db, force=False)
     records = rollout_records_for_session(request, records)
     latest_records = records
