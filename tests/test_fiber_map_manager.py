@@ -94,6 +94,14 @@ class FiberMapManagerTests(unittest.TestCase):
         routes = bera_x2_routes()
         self.assertEqual({row["Route code"]: row["Cable length m"] for row in routes}, expected)
         self.assertEqual(sum(row["Cable length m"] for row in routes), 2100)
+        x2_parts = {
+            row["Part"]
+            for row in reference["boxes"]
+            if main.rollout_area_key(main.first_value(row, "Area", "Zone", default="")) == main.rollout_area_key("Bera W Taleem")
+            and main.rollout_xbox_key(main.first_value(row, "Related to XBOX", "XBOX", default="")) == "X2"
+        }
+        self.assertEqual(x2_parts, {"Part01"})
+        self.assertTrue(all(row["Part"] in x2_parts for row in routes))
 
         main.add_bera_w_taleem_x2_qlc_routes(reference)
         self.assertEqual(len(bera_x2_routes()), len(expected))
