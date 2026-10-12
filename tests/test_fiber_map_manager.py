@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,6 +97,26 @@ class FiberMapManagerTests(unittest.TestCase):
 
         main.add_bera_w_taleem_x2_qlc_routes(reference)
         self.assertEqual(len(bera_x2_routes()), len(expected))
+
+    def test_area_builder_preserves_one_decimal_actual_cable_lengths(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append(["X-Box", "Hub", "From", "To Hub", "QLC actual (m)", "QLC precon (m)"])
+        hub_index.append(["X1", "X1-H1", "X1", "X1-H2", 432.171714, 500])
+        hub_index.append(["X1", "X1-H2", "X1-H1", None, 156.383944, 200])
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append(["Sub box", "Hub", "X-Box", "Line", "Sequence", "Actual length (m)", "Precon length (m)", "Splitter"])
+        cable_data.append(["H1-L1-S1", "X1-H1", "X1", "L1", 1, 38, 80, "1:9"])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Test Area", "Misurata")
+        actual_by_route = {row["Route code"]: row["Real length m"] for row in payload["routes"]}
+
+        self.assertEqual(actual_by_route, {"X1-H1": 432.2, "H1-H2": 156.4})
+        self.assertEqual(payload["boxes"][0]["Real length m"], 38)
 
     @staticmethod
     def make_request(role, program="FTTH"):

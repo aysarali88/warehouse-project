@@ -2933,6 +2933,11 @@ def area_builder_number(value) -> int:
     return max(0, int(round(safe_float(value))))
 
 
+def area_builder_actual_length(value) -> int | float:
+    rounded = round(safe_float(value), 1)
+    return int(rounded) if rounded.is_integer() else rounded
+
+
 def area_builder_line_number(value) -> int:
     match = re.search(r"\bL\s*(\d+)\b", str(value or ""), flags=re.I)
     return int(match.group(1)) if match else area_builder_number(value)
@@ -3067,7 +3072,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         line = area_builder_line_number(row.get("line"))
         sequence = area_builder_number(row.get("sequence"))
         planned = area_builder_number(row.get("preconlengthm"))
-        actual = area_builder_number(row.get("actuallengthm"))
+        actual = area_builder_actual_length(row.get("actuallengthm"))
         splitter = str(row.get("splitter") or "").replace(" ", "")
         if not xbox or not hub or line < 1 or sequence < 1 or planned < 1:
             raise HTTPException(status_code=400, detail="Cable Data contains a row without XBOX, HUB, line, sequence, or planned length")
@@ -3109,7 +3114,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         # that hub over the XBOX prefix so H1-to-H2 remains connected.
         source = area_builder_hub_code(source_value) or area_builder_xbox_code(source_value)
         planned = area_builder_number(row.get("qlcpreconm"))
-        actual = area_builder_number(row.get("qlcactualm"))
+        actual = area_builder_actual_length(row.get("qlcactualm"))
         if not xbox or not target or not source or planned < 1:
             raise HTTPException(status_code=400, detail="Hub Index contains a row without XBOX, From, To Hub, or planned length")
         route_code = f"{source}-{target}"
