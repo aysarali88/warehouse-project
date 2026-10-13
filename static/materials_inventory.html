@@ -2577,7 +2577,7 @@ async function mapManagerLoadFieldCodes(area,force=false){
     const data=await api('/api/warehouse/rollout-entry-reference?'+params.toString());
     if(requestId===mapManagerState.fieldCodesRequestId&&document.getElementById('mapManagerArea')?.value===area.name){mapManagerState.fieldCodes=data.codes||[];mapManagerState.fieldCodesError=''}
   }catch(error){if(requestId===mapManagerState.fieldCodesRequestId&&document.getElementById('mapManagerArea')?.value===area.name)mapManagerState.fieldCodesError=error.message}
-  finally{if(requestId===mapManagerState.fieldCodesRequestId){mapManagerState.fieldCodesLoading=false;if(document.getElementById('mapManagerArea')?.value===area.name){if(mapManagerState.builder.mode==='auto'&&!mapManagerState.fieldCodesError)mapManagerState.builder={...mapManagerState.builder,mode:mapManagerMissingBoxes(area).length?'install':'map'};renderMapManagerOptions(false)}}}
+  finally{if(requestId===mapManagerState.fieldCodesRequestId){mapManagerState.fieldCodesLoading=false;if(document.getElementById('mapManagerArea')?.value===area.name)renderMapManagerOptions(false)}}
 }
 async function mapManagerSetBuilderMode(mode){
   if(!['map','install'].includes(mode))return;
@@ -2591,10 +2591,7 @@ async function mapManagerSetBuilderMode(mode){
   renderMapManagerOptions(false);
 }
 function mapManagerRenderAddBuilder(area){
-  const topology=area.topology||[];let builder=mapManagerState.builder||{};const automatic=!['map','install'].includes(builder.mode);
-  if(automatic&&builder.mode!=='auto'){builder={...builder,mode:'auto'};mapManagerState.builder=builder}
-  if(automatic&&mapManagerState.fieldCodesArea!==area.name)mapManagerLoadFieldCodes(area);
-  const mode=builder.mode==='install'?'install':builder.mode==='map'?'map':(mapManagerState.fieldCodesArea===area.name&&mapManagerMissingBoxes(area).length?'install':'map');
+  const topology=area.topology||[],builder=mapManagerState.builder||{},mode=builder.mode==='install'?'install':'map';
   const lineCandidates=area.line_candidates||[];
   const occupied=new Set([...(area.active||[]),...mapManagerState.staged].map(row=>`${row.xbox}:${String(row.code).replaceAll('-','').toUpperCase()}`));
   const freeFor=(box,hubName,lineName)=>[1,2,3,4].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
@@ -2611,7 +2608,7 @@ function mapManagerRenderAddBuilder(area){
   const splitters=mode==='install'?missing.filter(row=>row.xbox===xbox&&row.hub===hub&&row.line===line).map(row=>row.splitter):freeFor(xbox,hub,line);
   const splitter=splitters.includes(Number(builder.splitter))?Number(builder.splitter):(mode==='install'&&firstMissing?.xbox===xbox&&firstMissing.hub===hub&&firstMissing.line===line?firstMissing.splitter:splitters[0]||'');
   const selectedMissing=mode==='install'?missing.find(row=>row.xbox===xbox&&row.hub===hub&&row.line===line&&row.splitter===Number(splitter)):null;
-  mapManagerState.builder={...builder,mode:automatic&&mapManagerState.fieldCodesLoading?'auto':mode,xbox,hub,line,splitter,box_type:selectedMissing?.box_type||builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m??''};
+  mapManagerState.builder={...builder,mode,xbox,hub,line,splitter,box_type:selectedMissing?.box_type||builder.box_type||'SUB BOX',cable_length_m:builder.cable_length_m??''};
   const typeOptions=['SUB BOX','END BOX'];
   const candidatesTarget=document.getElementById('mapManagerLineCandidates');
   if(candidatesTarget){
@@ -2619,7 +2616,6 @@ function mapManagerRenderAddBuilder(area){
     candidatesTarget.classList.toggle('hidden',!lineCandidates.length);
   }
   const modeSwitch=`<div class="map-manager-mode-switch" role="group" aria-label="Map change mode"><button class="btn ${mode==='map'?'primary':'soft'}" type="button" onclick="mapManagerSetBuilderMode('map')" ${mapManagerState.staged.some(row=>row.mode==='install')?'disabled':''}>Add to map</button><button class="btn ${mode==='install'?'primary':'soft'}" type="button" onclick="mapManagerSetBuilderMode('install')" ${mapManagerState.staged.some(row=>row.mode==='map')?'disabled':''}>Record missing installation</button></div>`;
-  if(automatic&&mapManagerState.fieldCodesLoading){document.getElementById('mapManagerOptions').innerHTML=`${modeSwitch}<div class="empty">Checking area boxes...</div>`;return}
   if(mode==='install'&&mapManagerState.fieldCodesLoading){document.getElementById('mapManagerOptions').innerHTML=`${modeSwitch}<div class="empty">Loading missing boxes...</div>`;return}
   if(mode==='install'&&mapManagerState.fieldCodesError){document.getElementById('mapManagerOptions').innerHTML=`${modeSwitch}<div class="empty">${esc(mapManagerState.fieldCodesError)} <button class="btn soft" type="button" onclick="mapManagerReloadFieldCodes()">Retry</button></div>`;return}
   if(mode==='install'&&!missing.length){document.getElementById('mapManagerOptions').innerHTML=`${modeSwitch}<div class="empty">No missing boxes are available for this area.</div>`;return}
