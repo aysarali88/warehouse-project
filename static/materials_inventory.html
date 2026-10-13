@@ -2297,10 +2297,25 @@ const stockWhFilter=document.getElementById('stockWhFilter');
 const selectedStockWh=stockWhFilter?.value||'';
 if(stockWhFilter){
   const names=[...new Set((wh.stockUsage||[]).map(r=>r.warehouse).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b)));
-  stockWhFilter.innerHTML='<option value="">All Warehouses</option>'+names.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('');
+  stockWhFilter.innerHTML='<option value="">All Warehouses</option>'+names.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')+'<option value="Local">Local</option>';
   stockWhFilter.value=selectedStockWh;
 }
-const stockUsageRows=selectedStockWh?(wh.stockUsage||[]).filter(r=>String(r.warehouse)===String(selectedStockWh)):(wh.stockUsage||[]);
+let stockUsageRows=selectedStockWh?(wh.stockUsage||[]).filter(r=>String(r.warehouse)===String(selectedStockWh)):(wh.stockUsage||[]);
+if(selectedStockWh==='Local'){
+  const localByProduct=new Map();
+  (wh.stockUsage||[]).filter(row=>normalizeText(row.vendor)==='local').forEach(row=>{
+    const key=String(row.product_id||`${row.sku}|${row.unit}`);
+    const item=localByProduct.get(key)||{...row,warehouse:'Local',warehouse_id:null,total_received:0,total_consumed:0,rollout_consumed_qty:0,wh_remaining:0,reserved_pending:0,available_stock:0};
+    item.total_received+=Number(row.total_received||0);
+    item.total_consumed+=Number(row.total_consumed||0);
+    item.rollout_consumed_qty+=Number(row.rollout_consumed_qty||0);
+    item.wh_remaining+=Number(row.wh_remaining||0);
+    item.reserved_pending+=Number(row.reserved_pending||0);
+    item.available_stock+=Number(row.available_stock||0);
+    localByProduct.set(key,item);
+  });
+  stockUsageRows=[...localByProduct.values()].map(row=>({...row,usage_percent:row.total_received?Number((row.total_consumed/row.total_received*100).toFixed(2)):0}));
+}
 document.getElementById('recentMovements').innerHTML=myMovements.slice(0,8).length?`<div class="movement-stream">${myMovements.slice(0,8).map(r=>`<div class="movement-card"><span class="movement-type ${esc(r.type)}"></span><div><b>${esc(r.type)} · ${esc(r.sku)}</b><small>${esc(r.reference)} · ${esc(r.warehouse||r.technician||'')} · ${esc(r.created_by)}</small></div><strong>${fmt(r.quantity)}</strong></div>`).join('')}</div>`:'<div class="empty-soft">لا توجد حركات حديثة</div>';
 const lows=wh.stockBalances.filter(b=>Number(b.quantity)<=0 || Number(b.quantity)<=Number((wh.products.find(p=>p.id===b.product_id)||{}).min_stock||0));
 document.getElementById('lowStock').innerHTML=rowsTable([['المستودع','warehouse'],['المادة','sku'],['الرصيد','quantity',(v)=>fmt(v)],['الوحدة','unit']],lows.slice(0,8));
