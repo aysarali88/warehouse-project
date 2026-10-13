@@ -6729,7 +6729,22 @@ def export_inventory_excel(request: Request, warehouse: str = "", program: str =
     program_key = normalize_program(program)
     selected_warehouse = warehouse.strip()
     rows = list_stock_usage(request, program_key, db)["usage"]
-    if selected_warehouse:
+    if normalize_usage_key(selected_warehouse) == "local":
+        local_rows: dict[int, dict] = {}
+        for row in rows:
+            if normalize_usage_key(row.get("vendor") or "") != "local":
+                continue
+            product_id = int(row.get("product_id") or 0)
+            item = local_rows.get(product_id)
+            if item is None:
+                item = {**row, "warehouse": "Local", "total_received": 0, "total_consumed": 0, "rollout_consumed_qty": 0, "wh_remaining": 0, "reserved_pending": 0, "available_stock": 0}
+                local_rows[product_id] = item
+            for field in ("total_received", "total_consumed", "rollout_consumed_qty", "wh_remaining", "reserved_pending", "available_stock"):
+                item[field] += float(row.get(field) or 0)
+        rows = list(local_rows.values())
+        for row in rows:
+            row["usage_percent"] = round((row["total_consumed"] / row["total_received"]) * 100, 2) if row["total_received"] else 0
+    elif selected_warehouse:
         rows = [row for row in rows if row["warehouse"] == selected_warehouse]
 
     workbook = Workbook()
