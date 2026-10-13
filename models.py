@@ -449,6 +449,7 @@ class MaterialReturn(Base):
 
     warehouse = relationship("Warehouse")
     items = relationship("MaterialReturnItem", back_populates="return_order", cascade="all, delete-orphan")
+    sr_material_status = relationship("SrMaterialReturnStatus", back_populates="return_order", uselist=False, cascade="all, delete-orphan", passive_deletes=True)
 
 
 class MaterialReturnItem(Base):
@@ -467,6 +468,15 @@ class MaterialReturnItem(Base):
 
     return_order = relationship("MaterialReturn", back_populates="items")
     product = relationship("Product")
+
+
+class SrMaterialReturnStatus(Base):
+    __tablename__ = "sr_material_return_status"
+
+    return_id = Column(Integer, ForeignKey("material_returns.id", ondelete="CASCADE"), primary_key=True)
+    status = Column(String, nullable=False, default="New")
+
+    return_order = relationship("MaterialReturn", back_populates="sr_material_status")
 
 
 class MaterialScanLog(Base):

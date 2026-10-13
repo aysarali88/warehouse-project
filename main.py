@@ -34,7 +34,7 @@ from sqlalchemy import String, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker
+from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker, sr_engine
 from models import (
     AuditLog,
     AppSession,
@@ -59,6 +59,7 @@ from models import (
     RolloutRecord,
     Site,
     SrMaterialRequisitionSignedCopy,
+    SrMaterialReturnStatus,
     StockBalance,
     StockMovement,
     Technician,
@@ -114,12 +115,15 @@ if len(SESSION_SECRET) < 32:
 
 for program_key, db_engine in all_engines():
     try:
-        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or table.name != SrMaterialRequisitionSignedCopy.__tablename__]
+        sr_only_tables = {SrMaterialRequisitionSignedCopy.__tablename__, SrMaterialReturnStatus.__tablename__}
+        use_shared_database = sr_engine is None or sr_engine.url == db_engine.url
+        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables]
         Base.metadata.create_all(bind=db_engine, tables=tables)
         if program_key == SINGLE_RAN_PROGRAM and db_engine.dialect.name == "postgresql":
             with db_engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {SrMaterialRequisitionSignedCopy.__tablename__} ENABLE ROW LEVEL SECURITY"))
-                conn.execute(text(f"REVOKE ALL ON TABLE {SrMaterialRequisitionSignedCopy.__tablename__} FROM PUBLIC, anon, authenticated"))
+                for table_name in sr_only_tables:
+                    conn.execute(text(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY"))
+                    conn.execute(text(f"REVOKE ALL ON TABLE {table_name} FROM PUBLIC, anon, authenticated"))
     except Exception:
         logger.exception("%s database initialization failed", program_key)
 
@@ -1630,6 +1634,7 @@ class MaterialReturnIn(BaseModel):
     returned_by: str = ""
     received_by: str = ""
     reason: str = ""
+    material_status: str = "New"
     created_by: str = "manager"
     items: list[MaterialReturnItemIn]
 
@@ -4739,6 +4744,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
         "returned_by": row.returned_by,
         "received_by": row.received_by,
         "reason": row.reason,
+        "material_status": row.sr_material_status.status if is_single_ran(getattr(row, "program", DEFAULT_PROGRAM)) and row.sr_material_status else "",
         "status": row.status,
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else "",
@@ -9438,6 +9444,14 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     program_key = normalize_program(data.program)
     source_warehouse = require_warehouse(db, data.warehouse_id, program_key)
     requester_submission = user.role.strip().lower() == "requester"
+    material_status = str(data.material_status or "New").strip()
+    if is_single_ran(program_key):
+        allowed_material_statuses = {"dismantle": "Dismantle", "new": "New"}
+        material_status = allowed_material_statuses.get(material_status.casefold(), "")
+        if not material_status:
+            raise HTTPException(status_code=400, detail="Material Status must be Dismantle or New")
+    else:
+        material_status = ""
     if not requester_submission:
         require_warehouse_access(request, db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
@@ -9459,6 +9473,8 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     )
     db.add(row)
     db.flush()
+    if is_single_ran(program_key):
+        row.sr_material_status = SrMaterialReturnStatus(status=material_status)
 
     stock_added_quantity = 0
     damaged_quantity_quarantined = 0
