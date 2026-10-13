@@ -2556,6 +2556,14 @@ function mapManagerSelect(id,label,options,value,onchange='mapManagerBuilderChan
   const rows=options.map(option=>{const key=typeof option==='object'?option.value:option;const text=typeof option==='object'?option.label:option;return `<option value="${esc(key)}" ${String(key)===String(value)?'selected':''}>${esc(text)}</option>`}).join('');
   return `<div class="field"><label>${esc(label)}</label><select id="${id}" onchange="${onchange}"><option value="">Select ${esc(label)}</option>${rows}</select></div>`
 }
+function mapManagerPreparedBoxes(area){
+  if(normalizeText(area?.name)!==normalizeText('Ras Ammar'))return[];
+  const wanted=new Set();
+  [['X1','H13','L1'],['X1','H13','L2'],['X2','H6','L1'],['X2','H6','L2'],['X2','H6','L3']].forEach(([xbox,hub,line])=>{
+    for(let splitter=1;splitter<=4;splitter++)wanted.add(`${xbox}:${`${hub}-${line}-S${splitter}`.replaceAll('-','').toUpperCase()}`);
+  });
+  return(area.active||[]).filter(row=>wanted.has(`${row.xbox}:${String(row.code||'').replaceAll('-','').toUpperCase()}`)).sort((a,b)=>a.xbox.localeCompare(b.xbox)||a.code.localeCompare(b.code,undefined,{numeric:true}));
+}
 function mapManagerRenderAddBuilder(area){
   const topology=area.topology||[],builder=mapManagerState.builder||{};
   const lineCandidates=area.line_candidates||[];
@@ -2574,6 +2582,7 @@ function mapManagerRenderAddBuilder(area){
     candidatesTarget.innerHTML=lineCandidates.length?`<h3>Missing lines</h3><p>Enable only the line you need. This does not add a box or cable.</p>${lineCandidates.map(row=>`<div class="map-manager-line-row"><div><strong>${esc(row.xbox)} · ${esc(row.hub)} · ${esc(row.line)}</strong><small>${row.enabled?`Enabled${row.enabled_by?` · ${esc(row.enabled_by)}`:''}${row.enabled_at?` · ${esc(row.enabled_at.slice(0,16).replace('T',' '))}`:''}`:'Not enabled'}</small></div><button class="btn ${row.enabled?'soft':'primary'}" type="button" onclick="toggleMapManagerLine('${esc(row.xbox)}','${esc(row.hub)}','${esc(row.line)}',${!row.enabled})">${row.enabled?'Disable line':'Enable line'}</button></div>`).join('')}`:'';
     candidatesTarget.classList.toggle('hidden',!lineCandidates.length);
   }
+  const preparedBoxes=mapManagerPreparedBoxes(area);
   const html=`<div class="form map-manager-builder">
     ${mapManagerSelect('mapManagerXbox','XBOX',topology.map(row=>row.xbox),xbox)}
     ${mapManagerSelect('mapManagerHub','HUB',hubs.map(row=>row.hub),hub)}
@@ -2584,6 +2593,7 @@ function mapManagerRenderAddBuilder(area){
     <div class="map-manager-generated"><span>Generated code</span><strong>${hub&&line&&splitter?`${hub}-${line}-S${splitter}`:'No unused splitter available'}</strong></div>
     <button class="btn soft" id="mapManagerStageButton" type="button" onclick="stageMapManagerAdd()" ${!splitter||!mapManagerState.builder.cable_length_m?'disabled':''}>Add to batch</button>
   </div>
+  ${preparedBoxes.length?`<div class="map-manager-staged"><strong>Prepared boxes already on the map (${preparedBoxes.length})</strong>${preparedBoxes.map(row=>`<div class="map-manager-option"><span>${esc(row.xbox)} · ${esc(row.code)}</span><small>${esc(row.box_type)}</small><small>${fmt(row.cable_length_m)} m</small></div>`).join('')}</div>`:''}
   ${mapManagerState.staged.length?`<div class="map-manager-staged"><strong>Pending additions (${mapManagerState.staged.length})</strong>${mapManagerState.staged.map((row,index)=>`<div class="map-manager-option"><span>${esc(row.xbox)} · ${esc(row.code)} · ${esc(row.box_type)}</span><small>${fmt(row.cable_length_m)} m</small><button class="btn soft map-manager-remove" type="button" onclick="removeStagedMapManagerAdd(${index})" title="Remove from batch">×</button></div>`).join('')}</div>`:''}`;
   document.getElementById('mapManagerOptions').innerHTML=html;
 }
