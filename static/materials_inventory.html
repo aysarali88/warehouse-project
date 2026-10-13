@@ -3767,6 +3767,8 @@ function rolloutMapCableProgressMetric(area,rows){
 }
 function wfmUnique(rows,key){const seen=new Set();return(rows||[]).filter(row=>{const value=key(row);if(!value||seen.has(value))return false;seen.add(value);return true})}
 function wfmOrdinal(value){const match=String(value??'').match(/\d+/);return match?Number(match[0]):0}
+const wfmNaturalCollator=new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
+function wfmNaturalCompare(left,right){return wfmNaturalCollator.compare(String(left??''),String(right??''))}
 function wfmApplyHayAndalusZone3X9MapEdits(area,xbox,sourceRows){
   const areaKey=canonicalRolloutArea(area)==='awladbaeoo'?'awladbaeoo':normalizeText(area),xboxKey=wfmXboxKey(xbox);
   if(areaKey!=='hayalandaluszone3'&&areaKey!=='awladbaeoo')return sourceRows;
@@ -3792,7 +3794,7 @@ function wfmParts(area,xbox){
   const routes=wfmApplyHayAndalusZone3X9RouteEdits(area,xbox,wfmUnique((warehouseFiberReference.routes||[]).filter(row=>wfmAreaMatches(row,area)&&(!xbox||wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))===wfmXboxKey(xbox))),row=>[wfmValue(row,['Related to XBOX']),wfmValue(row,['Part']),wfmValue(row,['Route code'])].join('|')));
   const groups=new Map();
   [...boxes,...routes].forEach(row=>{const key=`${wfmValue(row,['Related to XBOX','XBOX'])}|${wfmValue(row,['Part'])||'Part01'}`;if(!groups.has(key))groups.set(key,{xbox:wfmValue(row,['Related to XBOX','XBOX']),part:wfmValue(row,['Part'])||'Part01',boxes:[],routes:[]});(boxes.includes(row)?groups.get(key).boxes:groups.get(key).routes).push(row)});
-  return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length).sort((a,b)=>wfmOrdinal(a.part)-wfmOrdinal(b.part)||String(a.part).localeCompare(String(b.part)))
+  return [...groups.values()].map(group=>{const hubs=[...new Set(group.boxes.map(row=>wfmOrdinal(wfmValue(row,['Hub']))).filter(Boolean))].sort((a,b)=>a-b);const title=wfmValue(group.routes[0]||group.boxes[0],['XBOX'])||`X-BOX${wfmXboxKey(group.xbox).slice(1)}`;return{area,xbox:group.xbox,part:group.part,title:`${title} / ${group.part}`,subtitle:hubs.length?`HUB H${Math.min(...hubs)} to H${Math.max(...hubs)}`:'HUB map',hubs,boxRows:group.boxes,routeRows:group.routes}}).filter(part=>part.hubs.length).sort((a,b)=>wfmNaturalCompare(a.part,b.part))
 }
 function wfmDashboardParts(area){
   return wfmParts(area,'');
@@ -4013,7 +4015,7 @@ function renderStaticFiberMapImages(scope,showStatus=true){
 }
 function wfmSavedSchematicScope(scope){
   if(!scope||!warehouseFiberReference?.schematics?.length)return null;
-  const rows=warehouseFiberReference.schematics.filter(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(scope.area)&&wfmXboxKey(row.xbox)===wfmXboxKey(scope.xbox)).sort((a,b)=>wfmOrdinal(a.sheet_name)-wfmOrdinal(b.sheet_name)||String(a.sheet_name).localeCompare(String(b.sheet_name)));
+  const rows=warehouseFiberReference.schematics.filter(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(scope.area)&&wfmXboxKey(row.xbox)===wfmXboxKey(scope.xbox)).sort((a,b)=>wfmNaturalCompare(a.sheet_name,b.sheet_name));
   if(!rows.length)return null;
   const images=rows.map(row=>({title:row.sheet_name,src:`/api/warehouse/fiber-map-schematic?area=${encodeURIComponent(row.area)}&sheet=${encodeURIComponent(row.sheet_name)}&program=${encodeURIComponent(normalizeProgram(currentProgram))}`}));
   return {...scope,images};
