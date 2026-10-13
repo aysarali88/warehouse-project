@@ -35,6 +35,7 @@ class FiberMapManagerTests(unittest.TestCase):
         self.db = SessionLocal()
         self.db.query(main.AuditLog).delete()
         self.db.query(main.FiberMapArea).delete()
+        self.db.query(main.RolloutRecord).filter(main.RolloutRecord.area == "Test Map Manager").delete(synchronize_session=False)
         boxes = []
         for splitter in range(1, 4):
             boxes.append({
@@ -213,6 +214,65 @@ class FiberMapManagerTests(unittest.TestCase):
             expected_revision=updated["revision"],
         ), request, self.db)
         self.assertEqual(restored["changed"], 1)
+
+    def test_requester_can_record_missing_box_and_cable_without_changing_map_design(self):
+        request = self.make_request("Requester")
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
+        selected = area["active"][0]
+        payload = main.FiberMapMissingInstallIn(
+            area=area["name"],
+            expected_revision=area["revision"],
+            submission_key="test-install-submission-0001",
+            entries=[{"xbox": selected["xbox"], "code": selected["code"], "cable_length_m": 37.5}],
+        )
+
+        result = main.fiber_map_manager_install_missing(payload, request, self.db)
+
+        self.assertFalse(result["replayed"])
+        self.assertEqual(result["changed"], 1)
+        self.assertEqual(len(result["records"]), 2)
+        box = next(row for row in result["records"] if row["box code"])
+        cable = next(row for row in result["records"] if row["cable code"])
+        self.assertEqual(box["box code"], selected["code"])
+        self.assertEqual(box["actual"], 1)
+        self.assertEqual(cable["cable code"], selected["code"])
+        self.assertEqual(cable["material type"], "Single-Core Distribution Cable_37.5m")
+        self.assertEqual(cable["actual"], 1)
+
+        map_after = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
+        self.assertEqual(map_after["revision"], area["revision"])
+        self.assertEqual(map_after["active"], area["active"])
+
+        replay = main.fiber_map_manager_install_missing(payload, request, self.db)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(len(replay["records"]), 2)
+        self.assertEqual(
+            self.db.query(main.RolloutRecord).filter(main.RolloutRecord.area == area["name"]).count(),
+            2,
+        )
+
+        duplicate = main.FiberMapMissingInstallIn(
+            area=area["name"],
+            expected_revision=area["revision"],
+            submission_key="test-install-submission-0002",
+            entries=[{"xbox": selected["xbox"], "code": selected["code"], "cable_length_m": 37.5}],
+        )
+        with self.assertRaises(HTTPException) as conflict:
+            main.fiber_map_manager_install_missing(duplicate, request, self.db)
+        self.assertEqual(conflict.exception.status_code, 409)
+
+    def test_management_cannot_record_missing_box_installations(self):
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
+        selected = area["active"][0]
+        payload = main.FiberMapMissingInstallIn(
+            area=area["name"],
+            expected_revision=area["revision"],
+            submission_key="test-install-submission-0003",
+            entries=[{"xbox": selected["xbox"], "code": selected["code"], "cable_length_m": 37.5}],
+        )
+        with self.assertRaises(HTTPException) as denied:
+            main.fiber_map_manager_install_missing(payload, self.make_request("Management"), self.db)
+        self.assertEqual(denied.exception.status_code, 403)
 
     def test_management_role_cannot_change_map(self):
         area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["active"])
