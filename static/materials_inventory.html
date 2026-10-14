@@ -2594,7 +2594,7 @@ function mapManagerRenderAddBuilder(area){
   const topology=area.topology||[],builder=mapManagerState.builder||{},mode=builder.mode==='install'?'install':'map';
   const lineCandidates=area.line_candidates||[];
   const occupied=new Set([...(area.active||[]),...mapManagerState.staged].map(row=>`${row.xbox}:${String(row.code).replaceAll('-','').toUpperCase()}`));
-  const freeFor=(box,hubName,lineName)=>[1,2,3,4].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
+  const freeFor=(box,hubName,lineName)=>[1,2,3,4,5].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
   const missing=mode==='install'?mapManagerMissingBoxes(area):[];
   const firstMissing=missing[0];
   const choicesXboxes=mode==='install'?[...new Set(missing.map(row=>row.xbox))]:topology.map(row=>row.xbox);
@@ -3028,7 +3028,7 @@ function fieldEntryApplyItemMode(){const pigtail=fieldEntryIsPigtail();['feMater
 function fieldEntryItemChanged(){const mat=fieldEntryMaterialOptions();fieldEntryFillSelect('feMaterialType',mat,fieldEntryDefaultMaterial());fieldEntryRefreshCodes();fieldEntryApplyItemMode();fieldEntryUpdateStockRemaining()}
 function fieldEntryMaterialChanged(){fieldEntryRefreshCodes();fieldEntryUpdateStockRemaining()}
 function fieldEntryCityKey(value){const key=normalizeText(value);return ['misurata','misrata'].includes(key)?'misurata':key}
-function fieldEntryCityChanged(){const city=document.getElementById('feCity');if(city)fieldEntryFillSelect('feCity',['Misurata'],'Misurata');const selectedArea=document.getElementById('feArea')?.value||'';const areas=(fieldEntryState.reference?.areas||[]).filter(a=>fieldEntryCityKey(a.city)==='misurata').map(a=>a.area);fieldEntryFillSelect('feArea',[...new Set(areas)],selectedArea);fieldEntryAreaChanged()}
+function fieldEntryCityChanged(){const city=document.getElementById('feCity'),areaRows=fieldEntryState.reference?.areas||[],extraCities=[...new Set(areaRows.map(row=>String(row.city||'').trim()).filter(value=>value&&!['misurata','tripoli'].includes(fieldEntryCityKey(value))))],cities=['Misurata','Tripoli',...extraCities];if(city)fieldEntryFillSelect('feCity',cities,city.value||'Misurata');const selectedCity=fieldEntryCityKey(city?.value||'Misurata'),selectedArea=document.getElementById('feArea')?.value||'';const areas=areaRows.filter(a=>fieldEntryCityKey(a.city)===selectedCity).map(a=>a.area);fieldEntryFillSelect('feArea',[...new Set(areas)],selectedArea);fieldEntryAreaChanged()}
 function fieldEntryAreaChanged(){const area=document.getElementById('feArea')?.value||'';const map=fieldEntryState.reference?.xboxes_by_area||{};fieldEntryFillSelect('feXbox',map[area]||[]);fieldEntryScopeChanged()}
 function fieldEntryScopeChanged(){fieldEntryItemChanged();loadFieldEntryReference(false)}
 function fieldEntryReset(clearScope=true){fieldEntryState.submissionKey='';if(clearScope){document.getElementById('feCity').selectedIndex=0;fieldEntryCityChanged()}document.getElementById('feId').value=fieldEntryState.reference?.next_id||'Auto';document.getElementById('feDate').value=today();if(clearScope){document.getElementById('feSupervisor').value=activeUser||'';document.getElementById('feTeamLeader').value=activeUser||''}document.getElementById('feCode').value='';document.getElementById('feSerial').value='';document.getElementById('feActual').value=1;document.getElementById('feStockRemaining').value=0;['feAccessoryClamp','feAccessoryWedge','feAccessoryStoring','feAccessoryHook','feAccessoryPole'].forEach(id=>{const input=document.getElementById(id);if(input)input.value=0});document.getElementById('feStatus').value='Done';document.getElementById('feNotes').value='';document.getElementById('feWarning').classList.add('hidden');fieldEntryRefreshCodes()}
@@ -3044,7 +3044,7 @@ function fieldEntrySavedContext(){try{return JSON.parse(localStorage.getItem(fie
 function fieldEntryRememberLastEntry(){const get=id=>document.getElementById(id)?.value||'';if(!get('feCity'))return;const context={city:get('feCity'),area:get('feArea'),xbox:get('feXbox'),supervisor:get('feSupervisor'),teamLeader:get('feTeamLeader'),activity:get('feActivity'),item:get('feItem'),material:get('feMaterialType'),mountType:get('feMountType'),cableRoute:get('feCableRoute'),status:get('feStatus'),laser:fieldEntryToggleValue('laser'),acceptance:fieldEntryToggleValue('acceptance'),scan:fieldEntryToggleValue('scan'),labeling:fieldEntryToggleValue('labeling')};localStorage.setItem(fieldEntryContextKey(),JSON.stringify(context))}
 function fieldEntryRestoreLastEntry(){const context=fieldEntrySavedContext();if(!context.city)return;const set=(id,value)=>{const el=document.getElementById(id);if(!el)return;if(el.tagName==='SELECT'){if([...el.options].some(option=>option.value===value))el.value=value;return}el.value=value||''};set('feCity',context.city);fieldEntryCityChanged();set('feArea',context.area);fieldEntryAreaChanged();set('feXbox',context.xbox);set('feSupervisor',context.supervisor);set('feTeamLeader',context.teamLeader);set('feActivity',context.activity);set('feItem',context.item);fieldEntryItemChanged();set('feMaterialType',context.material);set('feMountType',context.mountType);set('feCableRoute',context.cableRoute);set('feStatus',context.status);['laser','acceptance','scan','labeling'].forEach(name=>{const value=context[name];if(value)document.querySelectorAll(`[data-fe-toggle="${name}"] button`).forEach(button=>button.classList.toggle('active',button.textContent.trim()===value))});fieldEntryRefreshCodes();fieldEntryUpdateStockRemaining()}
 const fieldEntryRestoreLastEntryBase=fieldEntryRestoreLastEntry;
-fieldEntryRestoreLastEntry=function(){const context=fieldEntrySavedContext();if(fieldEntryCityKey(context.city)!=='misurata'){fieldEntrySetDefaultArea();return}context.city='Misurata';if(normalizeText(context.area)==='hayalandalus'){context.area='Hay Al Andalus Zone 2';localStorage.setItem(fieldEntryContextKey(),JSON.stringify(context))}fieldEntryRestoreLastEntryBase()}
+fieldEntryRestoreLastEntry=function(){const context=fieldEntrySavedContext();if(fieldEntryCityKey(context.city)==='misurata'&&normalizeText(context.area)==='hayalandalus'){context.area='Hay Al Andalus Zone 2';localStorage.setItem(fieldEntryContextKey(),JSON.stringify(context))}fieldEntryRestoreLastEntryBase()}
 function fieldEntrySetDefaultArea(){const city=document.getElementById('feCity');if(city)city.value='Misurata';fieldEntryCityChanged()}
 const fieldEntryResetBase=fieldEntryReset;
 fieldEntryReset=function(clearScope=true){fieldEntryResetBase(clearScope);if(clearScope){localStorage.removeItem(fieldEntryContextKey());fieldEntrySetDefaultArea();return}fieldEntryRestoreLastEntry()}
@@ -3244,14 +3244,15 @@ function setRolloutDashboardFilter(key,value){
   if(key==='area'||key==='city')syncWarehouseFiberScope(rolloutDashboardFilters.area);
   renderRolloutDailyProgress();
 }
-function rolloutHomepassSummary(rows,dateFilter=''){
+function rolloutHomepassSummary(rows,dateFilter='',cityFilter='',areaFilter=''){
   const totals={Tripoli:0,Misurata:0};
   const groups=new Map();
   (rows||[]).forEach(row=>{
     if(dateFilter&&String(row.Date||'').slice(0,10)!==dateFilter)return;
-    const cityText=normalizeText(row.city||row.City||'');
-    const city=cityText==='tripoli'?'Tripoli':(['misurata','misrata'].includes(cityText)?'Misurata':'');
+    const city=rolloutOverviewCity(row.city||row.City||'');
+    if(cityFilter&&city!==rolloutOverviewCity(cityFilter))return;
     const area=String(row.Area||row.area||'').trim();
+    if(areaFilter&&normalizeText(areaFilter)!=='allareas'&&!sameRolloutDashboardArea(area,areaFilter))return;
     if(!city||!area)return;
     const key=`${city}\u0000${normalizeText(area)}`;
     const group=groups.get(key)||{city,area,rows:[]};
@@ -3261,8 +3262,10 @@ function rolloutHomepassSummary(rows,dateFilter=''){
   groups.forEach(group=>{
     const metric=rolloutMetricFromRows(rolloutDashboardMetricRows(group.rows,group.area));
     const plan=rolloutPlanFor(group.city,group.area)||{};
-    if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
-    else metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+    if(!dateFilter){
+      if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
+      else metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+    }
     totals[group.city]+=metric.distributionQty*8;
   });
   totals.total=totals.Tripoli+totals.Misurata;
@@ -3456,7 +3459,7 @@ const diff=actualPct-plannedPct;
 const timelineGood=diff>=-5;
 const displayedArea=normalizeText(rolloutDashboardFilters.area)==='allareas'?'All Areas':rolloutDashboardFilters.area;
 const areaName=displayedArea||'All Areas';
-const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date);
+const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date,rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;

@@ -3251,6 +3251,9 @@ def fiber_map_manager_line_key(value) -> str:
 
 
 FIBER_MAP_MANAGER_LINE_CANDIDATES = {
+    "rasammar": {
+        "X1": {"H13": {"L4"}},
+    },
     "hayalandaluszone1": {
         "X1": {"H1": {"L4"}},
         "X3": {"H4": {"L3", "L4"}},
@@ -3509,7 +3512,7 @@ def fiber_map_manager_install_missing(data: FiberMapMissingInstallIn, request: R
         if target_key in seen_targets:
             raise HTTPException(status_code=400, detail="A box was selected more than once")
         seen_targets.add(target_key)
-        code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-4])", code_key)
+        code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-5])", code_key)
         active = active_by_key.get(target_key)
         if not code_match or active is None:
             raise HTTPException(status_code=409, detail="One or more selected boxes are no longer on the active map")
@@ -3782,9 +3785,9 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
         area_rows = [row for row in current.get("boxes") or [] if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         seed_rows = [row for row in fiber_map_manager_catalog(db, program_key, current) if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         for selection, key in zip(data.selections, selected_keys):
-            code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-4])", key[1])
+            code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-5])", key[1])
             if not code_match:
-                raise HTTPException(status_code=400, detail="Generated box code must use H-L-S1 to S4 format")
+                raise HTTPException(status_code=400, detail="Generated box code must use H-L-S1 to S5 format")
             hub = f"H{int(code_match.group(1))}"
             line = f"L{int(code_match.group(2))}"
             splitter = int(code_match.group(3))
