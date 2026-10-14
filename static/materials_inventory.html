@@ -2594,7 +2594,7 @@ function mapManagerRenderAddBuilder(area){
   const topology=area.topology||[],builder=mapManagerState.builder||{},mode=builder.mode==='install'?'install':'map';
   const lineCandidates=area.line_candidates||[];
   const occupied=new Set([...(area.active||[]),...mapManagerState.staged].map(row=>`${row.xbox}:${String(row.code).replaceAll('-','').toUpperCase()}`));
-  const freeFor=(box,hubName,lineName)=>[1,2,3,4].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
+  const freeFor=(box,hubName,lineName)=>[1,2,3,4,5].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
   const missing=mode==='install'?mapManagerMissingBoxes(area):[];
   const firstMissing=missing[0];
   const choicesXboxes=mode==='install'?[...new Set(missing.map(row=>row.xbox))]:topology.map(row=>row.xbox);
@@ -3244,14 +3244,15 @@ function setRolloutDashboardFilter(key,value){
   if(key==='area'||key==='city')syncWarehouseFiberScope(rolloutDashboardFilters.area);
   renderRolloutDailyProgress();
 }
-function rolloutHomepassSummary(rows,dateFilter=''){
+function rolloutHomepassSummary(rows,dateFilter='',cityFilter='',areaFilter=''){
   const totals={Tripoli:0,Misurata:0};
   const groups=new Map();
   (rows||[]).forEach(row=>{
     if(dateFilter&&String(row.Date||'').slice(0,10)!==dateFilter)return;
-    const cityText=normalizeText(row.city||row.City||'');
-    const city=cityText==='tripoli'?'Tripoli':(['misurata','misrata'].includes(cityText)?'Misurata':'');
+    const city=rolloutOverviewCity(row.city||row.City||'');
+    if(cityFilter&&city!==rolloutOverviewCity(cityFilter))return;
     const area=String(row.Area||row.area||'').trim();
+    if(areaFilter&&normalizeText(areaFilter)!=='allareas'&&!sameRolloutDashboardArea(area,areaFilter))return;
     if(!city||!area)return;
     const key=`${city}\u0000${normalizeText(area)}`;
     const group=groups.get(key)||{city,area,rows:[]};
@@ -3261,8 +3262,10 @@ function rolloutHomepassSummary(rows,dateFilter=''){
   groups.forEach(group=>{
     const metric=rolloutMetricFromRows(rolloutDashboardMetricRows(group.rows,group.area));
     const plan=rolloutPlanFor(group.city,group.area)||{};
-    if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
-    else metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+    if(!dateFilter){
+      if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
+      else metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+    }
     totals[group.city]+=metric.distributionQty*8;
   });
   totals.total=totals.Tripoli+totals.Misurata;
@@ -3456,7 +3459,7 @@ const diff=actualPct-plannedPct;
 const timelineGood=diff>=-5;
 const displayedArea=normalizeText(rolloutDashboardFilters.area)==='allareas'?'All Areas':rolloutDashboardFilters.area;
 const areaName=displayedArea||'All Areas';
-const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date);
+const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date,rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;

@@ -308,6 +308,20 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
         self.assertTrue(all(row["cable_length_m"] == 37.5 for row in selected))
 
+    def test_generated_code_supports_fifth_splitter_and_ras_ammar_h13_l4(self):
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
+        payload = main.FiberMapChangeIn(
+            area=area["name"],
+            action="add",
+            selections=[{"xbox": "X1", "code": "H1-L1-S5", "box_type": "SUB BOX", "cable_length_m": 50}],
+            expected_revision=area["revision"],
+        )
+        result = main.fiber_map_manager_change(payload, self.request, self.db)
+        self.assertEqual(result["changed"], 1)
+        self.assertTrue(main.fiber_map_manager_can_add_empty_line("Ras Ammar", "X1", "H13", "L4"))
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
+        self.assertIn(("X1", "H1L1S5"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]})
+
     def test_hay_andalus_z1_missing_lines_require_activation_before_add(self):
         boxes = []
         for xbox, hub in (("X4", "H3"), ("X1", "H1")):
@@ -394,6 +408,7 @@ class FiberMapManagerTests(unittest.TestCase):
 
     def test_confirmed_line_candidates_are_exact_and_activation_creates_no_box_rows(self):
         expected = {
+            ("rasammar", "X1", "H13", "L4"),
             ("hayalandaluszone1", "X1", "H1", "L4"),
             ("hayalandaluszone1", "X3", "H4", "L3"),
             ("hayalandaluszone1", "X3", "H4", "L4"),
