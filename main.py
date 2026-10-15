@@ -10212,6 +10212,127 @@ async def receive_inventory(request: Request, db: Session = Depends(db_session))
     }
 
 
+@app.post("/api/warehouse/receive-inventory/multi")
+async def receive_inventory_multi(request: Request, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Warehouse Manager")
+    form = await request.form()
+    try:
+        items = json.loads(str(form.get("items", "[]")))
+        data = InventoryReceiveBulkIn.model_validate({
+            "program": normalize_program(getattr(request.state, "program", form.get("program", DEFAULT_PROGRAM))),
+            "receipt_date": str(form.get("receipt_date", "") or "").strip(),
+            "receipt_number": str(form.get("receipt_number", "") or "").strip(),
+            "invoice_number": str(form.get("invoice_number", "") or "").strip(),
+            "supplier": str(form.get("supplier", "") or "").strip(),
+            "warehouse_id": form.get("warehouse_id", ""),
+            "items": items,
+            "created_by": request_actor(request),
+        })
+    except (json.JSONDecodeError, ValidationError) as exc:
+        detail = exc.errors() if isinstance(exc, ValidationError) else "Invalid material items"
+        raise HTTPException(status_code=422, detail=detail) from exc
+
+    program_key = normalize_program(data.program)
+    warehouse = require_warehouse_access(request, db, data.warehouse_id, program_key)
+    products_by_sku = {}
+    for index, item in enumerate(data.items, start=1):
+        sku = item.sku.strip()
+        name = material_display_name(item.name.strip(), sku)
+        if not sku or not name:
+            raise HTTPException(status_code=400, detail=f"Material row {index} requires SKU and material name")
+        key = normalize_text(sku)
+        product = products_by_sku.get(key)
+        if key not in products_by_sku:
+            product = db.query(Product).filter(Product.program == program_key, Product.sku == sku).first()
+            products_by_sku[key] = product
+        if product is not None and product.tracking_type == "serialized":
+            raise HTTPException(status_code=400, detail=f"Material row {index}: serialized material must be received with serial numbers")
+
+    invoice_file_name = invoice_file_content_type = ""
+    invoice_file_data = None
+    invoice_upload = form.get("invoice_file")
+    if invoice_upload and getattr(invoice_upload, "filename", ""):
+        invoice_file_name = os.path.basename(str(invoice_upload.filename).replace("\\", "/"))
+        extension = os.path.splitext(invoice_file_name)[1].lower()
+        if extension not in INVOICE_FILE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="Invoice must be a PDF, PNG, JPG, or JPEG file")
+        invoice_file_name = re.sub(r"[^A-Za-z0-9._-]", "_", invoice_file_name)
+        invoice_file_data = await invoice_upload.read(MAX_INVOICE_FILE_BYTES + 1)
+        if not invoice_file_data or len(invoice_file_data) > MAX_INVOICE_FILE_BYTES:
+            raise HTTPException(status_code=400, detail="Invoice file must be non-empty and 10 MB or smaller")
+        invoice_file_content_type = INVOICE_CONTENT_TYPES[extension]
+
+    order = ReceiveOrder(
+        program=program_key,
+        order_number=data.receipt_number or next_number(db, ReceiveOrder, "SR-GRN" if program_key == SINGLE_RAN_PROGRAM else "GRN"),
+        supplier=data.supplier,
+        receipt_date=data.receipt_date,
+        invoice_number=data.invoice_number,
+        invoice_file_name=invoice_file_name,
+        invoice_file_content_type=invoice_file_content_type,
+        invoice_file_data=invoice_file_data,
+        warehouse_id=data.warehouse_id,
+        created_by=data.created_by,
+    )
+    db.add(order)
+    db.flush()
+    received_items = []
+    for item in data.items:
+        sku = item.sku.strip()
+        key = normalize_text(sku)
+        name = material_display_name(item.name.strip(), sku)
+        product = products_by_sku.get(key)
+        if product is None:
+            product = Product(
+                program=program_key,
+                sku=sku,
+                part_number=product_part_number(sku, item.part_number),
+                category=item.category.strip(),
+                name=name,
+                item_detail=name,
+                vendor=data.supplier,
+                qr_code=item.qr_code.strip(),
+                unit=item.unit.strip() or "PCS",
+                tracking_type="bulk",
+                min_stock=0,
+            )
+            db.add(product)
+            db.flush()
+            products_by_sku[key] = product
+        else:
+            product.part_number = product_part_number(sku, item.part_number or product.part_number)
+            product.name = material_display_name(name, sku) or product.name
+            product.item_detail = product.item_detail or name
+            product.unit = item.unit.strip() or product.unit or "PCS"
+            product.qr_code = item.qr_code.strip() or product.qr_code
+            product.category = item.category.strip() or product.category
+            if data.supplier:
+                product.vendor = data.supplier
+
+        stock_balance(db, data.warehouse_id, product.id, program_key).quantity += item.quantity
+        db.add(ReceiveOrderItem(receive_order_id=order.id, product_id=product.id, quantity=item.quantity, serial_number=""))
+        db.add(StockMovement(
+            program=program_key,
+            movement_type="receive",
+            product_id=product.id,
+            warehouse_id=data.warehouse_id,
+            quantity=item.quantity,
+            serial_number="",
+            reference=order.order_number,
+            created_by=data.created_by,
+            note="Multi-item inventory receive",
+        ))
+        received_items.append({"sku": product.sku, "name": product_display_name(product), "quantity": item.quantity, "unit": product.unit})
+
+    log_audit(db, "receive_inventory_multi", "receive_order", order.order_number, data.created_by, {"row_count": len(received_items), "warehouse": warehouse.name})
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Receipt number already exists or multi-item receive failed") from exc
+    return {"success": True, "order_number": order.order_number, "row_count": len(received_items), "items": received_items}
+
+
 @app.post("/api/warehouse/adjust-inventory")
 def adjust_inventory(data: InventoryAdjustmentIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Warehouse Manager")
