@@ -3459,7 +3459,7 @@ const diff=actualPct-plannedPct;
 const timelineGood=diff>=-5;
 const displayedArea=normalizeText(rolloutDashboardFilters.area)==='allareas'?'All Areas':rolloutDashboardFilters.area;
 const areaName=displayedArea||'All Areas';
-const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date,rolloutDashboardFilters.city,rolloutDashboardFilters.area);
+const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date);
 const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
