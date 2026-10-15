@@ -34,7 +34,7 @@ from sqlalchemy import String, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker
+from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker, sr_engine
 from models import (
     AuditLog,
     AppSession,
@@ -59,6 +59,7 @@ from models import (
     RolloutRecord,
     Site,
     SrMaterialRequisitionSignedCopy,
+    SrMaterialReturnStatus,
     StockBalance,
     StockMovement,
     Technician,
@@ -114,12 +115,15 @@ if len(SESSION_SECRET) < 32:
 
 for program_key, db_engine in all_engines():
     try:
-        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or table.name != SrMaterialRequisitionSignedCopy.__tablename__]
+        sr_only_tables = {SrMaterialRequisitionSignedCopy.__tablename__, SrMaterialReturnStatus.__tablename__}
+        use_shared_database = sr_engine is None or sr_engine.url == db_engine.url
+        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables]
         Base.metadata.create_all(bind=db_engine, tables=tables)
         if program_key == SINGLE_RAN_PROGRAM and db_engine.dialect.name == "postgresql":
             with db_engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {SrMaterialRequisitionSignedCopy.__tablename__} ENABLE ROW LEVEL SECURITY"))
-                conn.execute(text(f"REVOKE ALL ON TABLE {SrMaterialRequisitionSignedCopy.__tablename__} FROM PUBLIC, anon, authenticated"))
+                for table_name in sr_only_tables:
+                    conn.execute(text(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY"))
+                    conn.execute(text(f"REVOKE ALL ON TABLE {table_name} FROM PUBLIC, anon, authenticated"))
     except Exception:
         logger.exception("%s database initialization failed", program_key)
 
@@ -1293,6 +1297,24 @@ class FiberMapChangeIn(BaseModel):
     target_users: int = Field(default=0, ge=0, le=10_000_000)
 
 
+class FiberMapMissingInstallEntryIn(BaseModel):
+    xbox: str
+    code: str
+    cable_length_m: float = Field(ge=1, le=100_000)
+
+
+class FiberMapMissingInstallIn(BaseModel):
+    area: str
+    expected_revision: str
+    submission_key: str
+    entries: list[FiberMapMissingInstallEntryIn] = Field(min_length=1, max_length=100)
+    date: str = ""
+    supervisor_name: str = ""
+    team_leader: str = ""
+    notes: str = ""
+    cable_route: str = "Aerial"
+
+
 class FiberMapLineToggleIn(BaseModel):
     area: str
     xbox: str
@@ -1630,6 +1652,7 @@ class MaterialReturnIn(BaseModel):
     returned_by: str = ""
     received_by: str = ""
     reason: str = ""
+    material_status: str = "New"
     created_by: str = "manager"
     items: list[MaterialReturnItemIn]
 
@@ -3228,6 +3251,9 @@ def fiber_map_manager_line_key(value) -> str:
 
 
 FIBER_MAP_MANAGER_LINE_CANDIDATES = {
+    "rasammar": {
+        "X1": {"H13": {"L4"}},
+    },
     "hayalandaluszone1": {
         "X1": {"H1": {"L4"}},
         "X3": {"H4": {"L3", "L4"}},
@@ -3449,6 +3475,192 @@ def fiber_map_manager_get_options(request: Request, db: Session = Depends(db_ses
     )
 
 
+@app.post("/api/warehouse/fiber-map-manager/install-missing")
+def fiber_map_manager_install_missing(data: FiberMapMissingInstallIn, request: Request, db: Session = Depends(db_session)):
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    if program_key != DEFAULT_PROGRAM:
+        raise HTTPException(status_code=403, detail="Missing-box installation is available only for FTTH")
+    user = require_roles(request, "Admin", "Requester")
+    actor = user.name or user.username
+    submission_key = str(data.submission_key or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{16,96}", submission_key):
+        raise HTTPException(status_code=400, detail="Invalid installation submission key")
+
+    current = load_fiber_map_reference(db, program_key)
+    area_option = next(
+        (row for row in fiber_map_manager_options(db, program_key)["areas"]
+         if fiber_map_manager_area_key(row["name"]) == fiber_map_manager_area_key(data.area)),
+        None,
+    )
+    if area_option is None:
+        raise HTTPException(status_code=404, detail="Area is not available in the approved map catalog")
+    area_name = area_option["name"]
+    snapshot = fiber_map_manager_snapshot(current, area_name)
+    if not hmac.compare_digest(snapshot["revision"], data.expected_revision):
+        raise HTTPException(status_code=409, detail="The map changed. Refresh the options and review your selection again.")
+
+    targets = []
+    seen_targets = set()
+    active_by_key = {
+        (row["xbox"], rollout_code_key(row["code"])): row
+        for row in area_option["active"]
+    }
+    for entry in data.entries:
+        xbox = rollout_xbox_key(entry.xbox)
+        code_key = rollout_code_key(entry.code)
+        target_key = (xbox, code_key)
+        if target_key in seen_targets:
+            raise HTTPException(status_code=400, detail="A box was selected more than once")
+        seen_targets.add(target_key)
+        code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-5])", code_key)
+        active = active_by_key.get(target_key)
+        if not code_match or active is None:
+            raise HTTPException(status_code=409, detail="One or more selected boxes are no longer on the active map")
+        targets.append({
+            "xbox": xbox,
+            "code": active["code"],
+            "box_type": active["box_type"],
+            "cable_length": float(entry.cable_length_m),
+        })
+
+    def submission_keys():
+        values = []
+        for target in targets:
+            digest = hashlib.sha256(
+                f"{area_name}|{target['xbox']}|{rollout_code_key(target['code'])}".encode("utf-8")
+            ).hexdigest()[:16]
+            values.append((target, f"{submission_key}-{digest}-box", f"{submission_key}-{digest}-cable"))
+        return values
+
+    keyed_targets = submission_keys()
+
+    def replay_if_saved():
+        box_keys = [box_key for _, box_key, _ in keyed_targets]
+        saved = db.query(RolloutRecord).filter(RolloutRecord.submission_key.in_(box_keys)).all()
+        saved_by_key = {row.submission_key: row for row in saved}
+        if len(saved_by_key) != len(box_keys):
+            return None
+        all_keys = [key for _, box_key, cable_key in keyed_targets for key in (box_key, cable_key)]
+        rows = db.query(RolloutRecord).filter(RolloutRecord.submission_key.in_(all_keys)).all()
+        return [row_to_record(row) for row in rows]
+
+    with ROLLOUT_SYNC_LOCK:
+        replayed_records = replay_if_saved()
+        if replayed_records is not None:
+            records, _ = rollout_daily_progress_records(db, force=False)
+            return {
+                "success": True,
+                "replayed": True,
+                "changed": len(targets),
+                "records": replayed_records,
+                "summary": rollout_entry_summary(records),
+            }
+
+        existing_candidates = db.query(RolloutRecord).filter(
+            or_(RolloutRecord.box_code != "", RolloutRecord.cable_code != "")
+        ).all()
+        for target, _box_key, _cable_key in keyed_targets:
+            duplicates = [
+                row for row in existing_candidates
+                if rollout_area_key(row.area) == rollout_area_key(area_name)
+                and rollout_xbox_key(row.related_to_xbox) == target["xbox"]
+                and rollout_record_code_type(row) == "box"
+                and rollout_code_key(row.box_code) == rollout_code_key(target["code"])
+            ]
+            if duplicates:
+                raise HTTPException(status_code=409, detail=f"{target['code']} is no longer missing. Refresh the list.")
+            if not rollout_reference_matches(area_name, target["xbox"], target["code"], "box", db, program_key):
+                raise HTTPException(status_code=409, detail=f"{target['code']} is not an approved box code")
+            if not rollout_reference_matches(area_name, target["xbox"], target["code"], "cable", db, program_key):
+                raise HTTPException(status_code=409, detail=f"{target['code']} has no approved distribution-cable reference")
+
+        created_rows = []
+        try:
+            counter = rollout_entry_counter(db)
+            entry_date = str(data.date or "").strip() or datetime.now(TRIPOLI_TZ).date().isoformat()
+            supervisor = str(data.supervisor_name or "").strip() or actor
+            team_leader = str(data.team_leader or "").strip() or actor
+            for target, box_key, cable_key in keyed_targets:
+                common = {
+                    "Date": entry_date,
+                    "Supervisor Name": supervisor,
+                    "team leader": team_leader,
+                    "Area": area_name,
+                    "city": area_option["city"] or "",
+                    "Activity": "Installation",
+                    "Related to XBOX": target["xbox"],
+                    "mount type": "",
+                    "item serial": "",
+                    "planed quantity": 1,
+                    "stock remaining": 0,
+                    "staus": "Done",
+                    "laser": "No",
+                    "acceptance": "No",
+                    "scan": "No",
+                    "labeling": "No",
+                    "Notes": str(data.notes or "").strip(),
+                }
+                box_payload = {
+                    **common,
+                    "ID": allocate_rollout_entry_id(db, counter),
+                    "submission_key": box_key,
+                    "item": target["box_type"],
+                    "material type": target["box_type"],
+                    "actual": 1,
+                    "code_type": "box",
+                    "box code": target["code"],
+                    "cable code": "",
+                }
+                box_row, _ = upsert_rollout_record(box_payload, db)
+                created_rows.append(box_row)
+
+                cable_exists = any(
+                    rollout_area_key(row.area) == rollout_area_key(area_name)
+                    and rollout_xbox_key(row.related_to_xbox) == target["xbox"]
+                    and rollout_record_code_type(row) == "cable"
+                    and rollout_code_key(row.cable_code) == rollout_code_key(target["code"])
+                    for row in existing_candidates
+                )
+                if cable_exists:
+                    continue
+                actual_length = target["cable_length"]
+                length_label = f"{actual_length:g}"
+                cable_payload = {
+                    **common,
+                    "ID": allocate_rollout_entry_id(db, counter),
+                    "submission_key": cable_key,
+                    "item": "Cable",
+                    "material type": f"Single-Core Distribution Cable_{length_label}m",
+                    "actual": 1,
+                    "code_type": "cable",
+                    "box code": "",
+                    "cable code": target["code"],
+                    "Cable route": str(data.cable_route or "Aerial").strip() or "Aerial",
+                }
+                cable_row, _ = upsert_rollout_record(cable_payload, db)
+                created_rows.append(cable_row)
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="An installation was saved concurrently. Refresh the map before retrying.") from exc
+        except Exception:
+            db.rollback()
+            raise
+
+    clear_warehouse_cache()
+    clear_rollout_db_cache()
+    for row in created_rows:
+        db.refresh(row)
+    records, _ = rollout_daily_progress_records(db, force=False)
+    return {
+        "success": True,
+        "replayed": False,
+        "changed": len(targets),
+        "records": [row_to_record(row) for row in created_rows],
+        "summary": rollout_entry_summary(records),
+    }
+
+
 @app.post("/api/warehouse/fiber-map-manager/line")
 def fiber_map_manager_toggle_line(data: FiberMapLineToggleIn, request: Request, db: Session = Depends(db_session)):
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
@@ -3573,9 +3785,9 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
         area_rows = [row for row in current.get("boxes") or [] if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         seed_rows = [row for row in fiber_map_manager_catalog(db, program_key, current) if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) == fiber_map_manager_area_key(area_name)]
         for selection, key in zip(data.selections, selected_keys):
-            code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-4])", key[1])
+            code_match = re.fullmatch(r"H(\d+)L(\d+)S([1-5])", key[1])
             if not code_match:
-                raise HTTPException(status_code=400, detail="Generated box code must use H-L-S1 to S4 format")
+                raise HTTPException(status_code=400, detail="Generated box code must use H-L-S1 to S5 format")
             hub = f"H{int(code_match.group(1))}"
             line = f"L{int(code_match.group(2))}"
             splitter = int(code_match.group(3))
@@ -4739,6 +4951,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
         "returned_by": row.returned_by,
         "received_by": row.received_by,
         "reason": row.reason,
+        "material_status": row.sr_material_status.status if is_single_ran(getattr(row, "program", DEFAULT_PROGRAM)) and row.sr_material_status else "",
         "status": row.status,
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else "",
@@ -9468,6 +9681,14 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     program_key = normalize_program(data.program)
     source_warehouse = require_warehouse(db, data.warehouse_id, program_key)
     requester_submission = user.role.strip().lower() == "requester"
+    material_status = str(data.material_status or "New").strip()
+    if is_single_ran(program_key):
+        allowed_material_statuses = {"dismantle": "Dismantle", "new": "New"}
+        material_status = allowed_material_statuses.get(material_status.casefold(), "")
+        if not material_status:
+            raise HTTPException(status_code=400, detail="Material Status must be Dismantle or New")
+    else:
+        material_status = ""
     if not requester_submission:
         require_warehouse_access(request, db, data.warehouse_id, program_key)
     data.created_by = request_actor(request)
@@ -9489,6 +9710,8 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     )
     db.add(row)
     db.flush()
+    if is_single_ran(program_key):
+        row.sr_material_status = SrMaterialReturnStatus(status=material_status)
 
     stock_added_quantity = 0
     damaged_quantity_quarantined = 0

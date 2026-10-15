@@ -15,6 +15,7 @@ try:
 except FileNotFoundError:
     pass
 os.environ["FTTH_DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ["SR_DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two-characters-long"
 
@@ -440,6 +441,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             db,
         )["return"]
         self.assertEqual(pending["status"], "pending_warehouse")
+        self.assertEqual(pending["material_status"], "")
         self.assertEqual(db.query(StockBalance).filter_by(warehouse_id=warehouse.id, product_id=product.id).one().quantity, 10)
         self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"]).count(), 0)
         self.assertEqual(db.query(Warehouse).filter_by(
@@ -562,6 +564,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
                 program="SINGLE_RAN",
                 warehouse_id=warehouse.id,
                 returned_by="SR Requester",
+                material_status="Dismantle",
                 items=[main.MaterialReturnItemIn(
                     product_id=product.id,
                     quantity=2,
@@ -573,8 +576,21 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             db,
         )["return"]
         self.assertEqual(pending["status"], "pending_warehouse")
+        self.assertEqual(pending["material_status"], "Dismantle")
         self.assertEqual([item["serial_number"] for item in pending["items"]], ["SR-SERIAL-001", "SR-SERIAL-002"])
         self.assertTrue(all(item["quantity"] == 1 for item in pending["items"]))
+        new_return = main.create_material_return(
+            main.MaterialReturnIn(
+                program="SINGLE_RAN",
+                warehouse_id=warehouse.id,
+                returned_by="SR Requester",
+                material_status="New",
+                items=[main.MaterialReturnItemIn(product_id=product.id, quantity=1, condition="Good")],
+            ),
+            requester_request,
+            db,
+        )["return"]
+        self.assertEqual(new_return["material_status"], "New")
         self.assertEqual(
             {row.status for row in db.query(ProductSerial).filter(ProductSerial.program == "SINGLE_RAN").all()},
             {main.SR_DAMAGE_PENDING_NEW},
