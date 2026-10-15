@@ -8904,7 +8904,7 @@ def warehouse_notifications(request: Request, user: str = "", program: str = DEF
 
 
 @app.get("/api/warehouse/receive-orders")
-def list_receive_orders(request: Request, limit: int = 50, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def list_receive_orders(request: Request, limit: int = 50, offset: int = 0, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     query = (
         db.query(ReceiveOrder)
@@ -8915,8 +8915,23 @@ def list_receive_orders(request: Request, limit: int = 50, program: str = DEFAUL
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         query = query.filter(ReceiveOrder.warehouse_id.in_(allowed))
-    rows = query.limit(min(limit, 200)).all()
+    rows = query.offset(max(offset, 0)).limit(min(max(limit, 1), 200)).all()
     return {"success": True, "receipts": [receive_order_to_dict(r) for r in rows]}
+
+
+@app.get("/api/warehouse/receive-orders/{order_id}")
+def get_receive_order(order_id: int, request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    program_key = normalize_program(program)
+    row = (
+        db.query(ReceiveOrder)
+        .options(joinedload(ReceiveOrder.warehouse), selectinload(ReceiveOrder.items).joinedload(ReceiveOrderItem.product))
+        .filter(ReceiveOrder.id == order_id, ReceiveOrder.program == program_key)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    require_warehouse_access(request, db, row.warehouse_id, program_key)
+    return {"success": True, "receipt": receive_order_to_dict(row)}
 
 
 @app.get("/api/warehouse/receive-orders/{order_id}/invoice")
