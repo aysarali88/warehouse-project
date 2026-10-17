@@ -1890,6 +1890,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:363,targetHubBox:27,targetXbox:3,targetCableMeters:41595,targetUsers:2904,dashboardSubEndOffset:-4,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-750,adjustmentSubEndBox:-5,note:'Completed: 41,595 m cable, 363 SUB / END boxes, 27 HUB boxes, 3 XBOXes, and 363 single-core cables (2,904 users). Previous X9 scope removals remain documented.'},
+  {city:'Misurata',area:'Bera W Taleem',targetSubEndBox:213,targetHubBox:17,targetXbox:2,targetCableMeters:27780,targetUsers:1704,dashboardCableTargetOverride:27780,dashboardSubEndTargetOverride:213,dashboardHubTargetOverride:17,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:213,dashboardUsersTargetOverride:1704,dashboardCableMetersOverride:27780,dashboardSubEndOverride:213,dashboardSingleCoreOverride:213,note:'Completed: 27,780 m cable, 213 SUB / END boxes, 17 HUB boxes, 2 XBOXes, and 213 single-core cables (1,704 users).'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:408,targetHubBox:30,targetXbox:3,targetCableMeters:37765,targetUsers:3200,dashboardCableMetersOverride:37765,dashboardSubEndOverride:408,dashboardSingleCoreOverride:400,note:'Maqawba completed: 37,765m cable, 408 SUB / END boxes, and 400 Single-Core Distribution cables.'},
   {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:262,targetHubBox:20,targetXbox:2,targetCableMeters:30805,targetUsers:2096,note:'Dashboard targets use the complete active Awlad Baeoo fiber-map design.'},
   {city:'Misurata',area:'Ras A Tota',start:'2026-08-15',end:'2026-09-01',targetSubEndBox:194,targetHubBox:16,targetXbox:2,targetCableMeters:21995,targetUsers:1552,note:'Project completed. Total installed cable: 21,995 m. Design updates: X2-H6 moved END from L4-S2 (100m) to L1-S4 (50m). X2-H2 replaced L3-S4 (150m) with L4-S1 SUB (100m) and L4-S2 END (80m). X2-H5-L1-S3 (80m) and X2-H6-L3-S3 (80m) were removed; X1-H5-L1-S3 SUB (100m), X1-H5-L1-S4 END (80m), and X2-H6-L2-S4 END (100m) were added. Removed X1-H1-L2-S4 END (50m) and added X1-H9-L4-S3 END (80m). Latest update: removed X1-H3-L3-S4 END (80m). Cable target includes 18,830m Single-Core Distribution plus 4,020m 4-core. Net total after latest update: +70m cable and SUB / END box total unchanged.'}
@@ -3260,16 +3261,35 @@ function rolloutPlanFor(city,area){
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
   const design=wfmDesignTargetFor(area);
-  if(design)return {...design,users:Number(plan.targetUsers||0),singleCoreCableQty:design.subEndBox};
+  const planValue=(key,fallback)=>plan[key]!==undefined&&plan[key]!==null&&plan[key]!==''&&Number.isFinite(Number(plan[key]))?Number(plan[key]):fallback;
+  const users=planValue('dashboardUsersTargetOverride',Number(plan.targetUsers||0));
   const maqawbaCableTarget=Number(plan.dashboardCableMetersOverride);
+  const cableFallback=isMaqawbaRolloutArea(area)&&Number.isFinite(maqawbaCableTarget)?maqawbaCableTarget:Number(design?.cableMeters??plan.targetCableMeters??0);
+  const subEndFallback=Number(design?.subEndBox??plan.targetSubEndBox??0);
+  const hubFallback=Number(design?.hubBox??plan.targetHubBox??0);
+  const xboxFallback=Number(design?.xbox??plan.targetXbox??0);
+  const subEndBox=planValue('dashboardSubEndTargetOverride',subEndFallback);
+  const hubBox=planValue('dashboardHubTargetOverride',hubFallback);
+  const xbox=planValue('dashboardXboxTargetOverride',xboxFallback);
   return {
-    cableMeters:isMaqawbaRolloutArea(area)&&Number.isFinite(maqawbaCableTarget)?maqawbaCableTarget:Number(plan.targetCableMeters||0),
-    subEndBox:Number(plan.targetSubEndBox||0),
-    hubBox:Number(plan.targetHubBox||0),
-    xbox:Number(plan.targetXbox||0),
-    totalBoxes:Number(plan.targetSubEndBox||0)+Number(plan.targetHubBox||0)+Number(plan.targetXbox||0),
-    users:Number(plan.targetUsers||0)
+    cableMeters:planValue('dashboardCableTargetOverride',cableFallback),
+    subEndBox,
+    hubBox,
+    xbox,
+    totalBoxes:subEndBox+hubBox+xbox,
+    singleCoreCableQty:planValue('dashboardSingleCoreTargetOverride',Number(design?.subEndBox??Math.round(users/8))),
+    users
   };
+}
+function applyRolloutDashboardMetricOverrides(metric,plan){
+  if(plan.dashboardCableMetersOverride!==undefined&&Number.isFinite(Number(plan.dashboardCableMetersOverride)))metric.cableMeters=Number(plan.dashboardCableMetersOverride);
+  if(plan.dashboardSubEndOverride!==undefined&&Number.isFinite(Number(plan.dashboardSubEndOverride)))metric.subEndBox=Number(plan.dashboardSubEndOverride);
+  if(plan.dashboardSingleCoreOverride!==undefined&&Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
+  metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
+  metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
+  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
+  metric.actualUsers=metric.distributionQty*8;
+  return metric;
 }
 function setRolloutDashboardFilter(key,value){
   rolloutDashboardFilters[key]=key==='date'?(Array.isArray(value)?value:value?[value]:[]):value||'';
@@ -3324,15 +3344,9 @@ function rolloutCityOverviewMetric(city,area,rows){
   const metricRows=rolloutDashboardMetricRows(areaRows,area),raw=rolloutMetricFromRows(metricRows),mapCable=rolloutMapCableProgressMetric(area,metricRows),plan=rolloutPlanFor(city,area)||{},target=rolloutTargetFor(city,area);
   const isAwlad=canonicalRolloutArea(area)==='awladbaeoo';
   const metric={...raw,cableMeters:isAwlad?raw.cableMeters:(mapCable?mapCable.installedMeters:raw.cableMeters)};
-  if(Number.isFinite(Number(plan.dashboardCableMetersOverride)))metric.cableMeters=Number(plan.dashboardCableMetersOverride);
-  if(Number.isFinite(Number(plan.dashboardSubEndOverride)))metric.subEndBox=Number(plan.dashboardSubEndOverride);
-  if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
-  metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
-  metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
-  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
-  metric.actualUsers=metric.distributionQty*8;
+  applyRolloutDashboardMetricOverrides(metric,plan);
   const isMaqawba=isMaqawbaRolloutArea(area);
-  const targetCable=isAwlad||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);
+  const targetCable=plan.dashboardCableTargetOverride!==undefined?Number(plan.dashboardCableTargetOverride):isAwlad||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);
   const targetBoxes=Number(target.totalBoxes||0),targetUsers=Number(target.users||plan.targetUsers||0);
   const configured=targetCable>0&&targetBoxes>0;
   const cablePct=targetCable>0?Math.max(0,Math.min(100,metric.cableMeters/targetCable*100)):0;
@@ -3458,23 +3472,24 @@ const scopedRows=rows.filter(r=>{
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||sameRolloutDashboardArea(rowArea,rolloutDashboardFilters.area);
   return rolloutDashboardDateMatches(rowDate,selectedDates)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
-const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const plan=rolloutPlanFor(rolloutDashboardFilters.city,area);const isMaqawba=isMaqawbaRolloutArea(area);const cableTarget=canonicalRolloutArea(area)==='awladbaeoo'||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);const cableMeters=isMaqawba&&Number.isFinite(Number(plan?.dashboardCableMetersOverride))?Number(plan.dashboardCableMetersOverride):(mapCable?mapCable.installedMeters:raw.cableMeters);return{name:area,...raw,cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
+const allMetricRows=areaOptions.map(area=>{
+  const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);
+  const raw=rolloutMetricFromRows(areaRows),mapCable=rolloutMapCableProgressMetric(area,areaRows),target=rolloutTargetFor(rolloutDashboardFilters.city,area),plan=rolloutPlanFor(rolloutDashboardFilters.city,area)||{};
+  const metric={...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters};
+  applyRolloutDashboardMetricOverrides(metric,plan);
+  const isMapCableTarget=canonicalRolloutArea(area)!=='awladbaeoo'&&!isMaqawbaRolloutArea(area)&&plan.dashboardCableTargetOverride===undefined;
+  const cableTarget=isMapCableTarget&&mapCable?mapCable.targetMeters:target.cableMeters;
+  return{name:area,...metric,target:{...target,cableMeters:cableTarget}};
+}).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
 const mapCable=rolloutMapCableProgressMetric(rolloutDashboardFilters.area,scopedRows);
 const metric={...rawMetric,cableMeters:isAwladDashboard?rolloutMetricFromRows(scopedRows).cableMeters:(mapCable?mapCable.installedMeters:rawMetric.cableMeters)};
-if(plan){
-  if(Number.isFinite(Number(plan.dashboardCableMetersOverride)))metric.cableMeters=Number(plan.dashboardCableMetersOverride);
-  if(Number.isFinite(Number(plan.dashboardSubEndOverride)))metric.subEndBox=Number(plan.dashboardSubEndOverride);
-  if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
-  metric.subEndBox=Math.max(0,metric.subEndBox+Number(plan.dashboardSubEndOffset||0));
-  metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
-  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
-  metric.actualUsers=metric.distributionQty*8;
-}
+applyRolloutDashboardMetricOverrides(metric,plan||{});
 const isAllDashboardArea=normalizeText(rolloutDashboardFilters.area)==='allareas';
 const baseDashboardTarget=rolloutTargetFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
-const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0),singleCoreCableQty:acc.singleCoreCableQty+Number(r.target?.singleCoreCableQty||Math.round(Number(r.target?.users||0)/8))}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0,singleCoreCableQty:0}):{...baseDashboardTarget,cableMeters:isAwladDashboard||isMaqawbaRolloutArea(rolloutDashboardFilters.area)?baseDashboardTarget.cableMeters:(mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters)};
+const useMapCableTarget=!isAwladDashboard&&!isMaqawbaRolloutArea(rolloutDashboardFilters.area)&&plan?.dashboardCableTargetOverride===undefined;
+const dashboardTarget=isAllDashboardArea?allMetricRows.reduce((acc,r)=>({cableMeters:acc.cableMeters+Number(r.target?.cableMeters||0),totalBoxes:acc.totalBoxes+Number(r.target?.totalBoxes||0),users:acc.users+Number(r.target?.users||0),subEndBox:acc.subEndBox+Number(r.target?.subEndBox||0),hubBox:acc.hubBox+Number(r.target?.hubBox||0),xbox:acc.xbox+Number(r.target?.xbox||0),singleCoreCableQty:acc.singleCoreCableQty+Number(r.target?.singleCoreCableQty||Math.round(Number(r.target?.users||0)/8))}),{cableMeters:0,totalBoxes:0,users:0,subEndBox:0,hubBox:0,xbox:0,singleCoreCableQty:0}):{...baseDashboardTarget,cableMeters:useMapCableTarget&&mapCable?mapCable.targetMeters:baseDashboardTarget.cableMeters};
 const targetCableMeters=Math.max(Number(dashboardTarget.cableMeters||0),1);
 const targetBoxes=Math.max(Number(dashboardTarget.totalBoxes||0),1);
 const cableScore=Math.min(100,(metric.cableMeters/targetCableMeters)*100);
