@@ -815,6 +815,18 @@ body.sr-program .login-logo img{
   font-size:16px;
   font-weight:800;
 }
+#rolloutDaily .rollout-date-picker{position:relative;min-width:190px}
+#rolloutDaily .rollout-date-picker>summary{height:46px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px;border:1px solid #cfe0fb;border-radius:12px;background:#fff;color:#12365b;font-size:15px;font-weight:800;cursor:pointer;list-style:none}
+#rolloutDaily .rollout-date-picker>summary::-webkit-details-marker{display:none}
+#rolloutDaily .rollout-date-picker>summary:after{content:"";width:8px;height:8px;border-right:2px solid #183b60;border-bottom:2px solid #183b60;transform:rotate(45deg) translateY(-2px);flex:none}
+#rolloutDaily .rollout-date-picker[open]>summary{border-color:#2e78df;box-shadow:0 0 0 3px rgba(46,120,223,.12)}
+#rolloutDaily .rollout-date-menu{position:absolute;z-index:30;top:calc(100% + 6px);left:0;width:max(100%,240px);max-height:340px;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border:1px solid #cfe0fb;border-radius:10px;background:#fff;box-shadow:0 12px 28px rgba(20,50,80,.18)}
+#rolloutDaily .rollout-date-menu-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-bottom:1px solid #e2ebf5;color:#60748b;font-size:12px;font-weight:800}
+#rolloutDaily .rollout-date-menu-actions button{border:0;background:transparent;color:#1559ae;font:inherit;font-weight:900;cursor:pointer}
+#rolloutDaily .rollout-date-options{overflow:auto;padding:4px 6px}
+#rolloutDaily .rollout-date-option{display:flex;align-items:center;gap:9px;padding:7px 6px;border-radius:6px;color:#173b60;font-size:14px;font-weight:700;cursor:pointer}
+#rolloutDaily .rollout-date-option:hover{background:#eff6fc}
+#rolloutDaily .rollout-date-option input{width:16px;height:16px;margin:0;accent-color:#176bd1;flex:none}
 #rolloutDaily .command-hero{
   border-radius:20px;
   padding:28px;
@@ -1854,7 +1866,8 @@ let activeUsers=[];
 let currentEditingMrId=null;
 let mrSubmitBusy=false;
 let currentEditingTransferId=null;
-let rolloutDashboardFilters={date:'',city:'Tripoli',area:'Hay Demashq'};
+let rolloutDashboardFilters={date:[],city:'Tripoli',area:'Hay Demashq'};
+let rolloutDashboardDatePickerOpen=false;
 const FIELD_TEAM_LEADERS=[
   'ابراهيم قاسم الحرار',
   'احمد محمد القعود',
@@ -3259,7 +3272,7 @@ function rolloutTargetFor(city,area){
   };
 }
 function setRolloutDashboardFilter(key,value){
-  rolloutDashboardFilters[key]=value||'';
+  rolloutDashboardFilters[key]=key==='date'?(Array.isArray(value)?value:value?[value]:[]):value||'';
   if(key==='city'){
     const options=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
     rolloutDashboardFilters.area=options.includes(rolloutDashboardFilters.area)?rolloutDashboardFilters.area:(options[0]||'All Areas');
@@ -3267,11 +3280,16 @@ function setRolloutDashboardFilter(key,value){
   if(key==='area'||key==='city')syncWarehouseFiberScope(rolloutDashboardFilters.area);
   renderRolloutDailyProgress();
 }
+function rolloutDashboardSelectedDates(){const value=rolloutDashboardFilters.date;return [...new Set((Array.isArray(value)?value:value?[value]:[]).map(date=>String(date||'').slice(0,10)).filter(Boolean))].sort()}
+function rolloutDashboardDateMatches(date,selectedDates){return !selectedDates.length||selectedDates.includes(String(date||'').slice(0,10))}
+function setRolloutDashboardDateSelection(date,checked){const selected=new Set(rolloutDashboardSelectedDates());if(checked)selected.add(date);else selected.delete(date);rolloutDashboardFilters.date=[...selected].sort();rolloutDashboardDatePickerOpen=true;renderRolloutDailyProgress()}
+function clearRolloutDashboardDateSelection(){rolloutDashboardFilters.date=[];rolloutDashboardDatePickerOpen=true;renderRolloutDailyProgress()}
 function rolloutHomepassSummary(rows,dateFilter='',cityFilter='',areaFilter=''){
   const totals={Tripoli:0,Misurata:0};
   const groups=new Map();
+  const selectedDates=Array.isArray(dateFilter)?dateFilter:(dateFilter?[dateFilter]:[]);
   (rows||[]).forEach(row=>{
-    if(dateFilter&&String(row.Date||'').slice(0,10)!==dateFilter)return;
+    if(selectedDates.length&&!selectedDates.includes(String(row.Date||'').slice(0,10)))return;
     const city=rolloutOverviewCity(row.city||row.City||'');
     if(cityFilter&&city!==rolloutOverviewCity(cityFilter))return;
     const area=String(row.Area||row.area||'').trim();
@@ -3285,7 +3303,7 @@ function rolloutHomepassSummary(rows,dateFilter='',cityFilter='',areaFilter=''){
   groups.forEach(group=>{
     const metric=rolloutMetricFromRows(rolloutDashboardMetricRows(group.rows,group.area));
     const plan=rolloutPlanFor(group.city,group.area)||{};
-    if(!dateFilter){
+    if(!selectedDates.length){
       if(Number.isFinite(Number(plan.dashboardSingleCoreOverride)))metric.distributionQty=Number(plan.dashboardSingleCoreOverride);
       else metric.distributionQty=Math.max(0,metric.distributionQty+Number(plan.dashboardSingleCoreOffset||0));
     }
@@ -3300,7 +3318,7 @@ function rolloutCityOverviewSetCity(city){rolloutCityOverviewState.city=city==='
 function rolloutCityOverviewSetDate(date){rolloutCityOverviewState.date=date||'';renderRolloutCityOverview()}
 function rolloutCityOverviewSetStatus(status){rolloutCityOverviewState.status=status||'All';renderRolloutCityOverview()}
 function rolloutCityOverviewShowMore(button){const panel=document.getElementById('rolloutDailyCityOverview'),section=button?.closest('.rollout-city-overview-city');if(!panel||!section)return;const city=section.dataset.citySection,total=Number(section.dataset.areaCount||0),current=Number(rolloutCityOverviewState.visible[city]||6);rolloutCityOverviewState.visible[city]=current>=total?6:Math.min(total,current+6);renderRolloutCityOverview()}
-function rolloutCityOverviewOpenArea(button){const city=rolloutOverviewCity(button?.dataset.rolloutCity),area=button?.dataset.rolloutArea;if(!city||!area)return;rolloutDashboardFilters.city=city;rolloutDashboardFilters.area=area;rolloutDashboardFilters.date=rolloutCityOverviewState.date||'';syncWarehouseFiberScope(area);switchRolloutDailyTab('kpi');renderRolloutDailyProgress()}
+function rolloutCityOverviewOpenArea(button){const city=rolloutOverviewCity(button?.dataset.rolloutCity),area=button?.dataset.rolloutArea;if(!city||!area)return;rolloutDashboardFilters.city=city;rolloutDashboardFilters.area=area;rolloutDashboardFilters.date=rolloutCityOverviewState.date?[rolloutCityOverviewState.date]:[];syncWarehouseFiberScope(area);switchRolloutDailyTab('kpi');renderRolloutDailyProgress()}
 function rolloutCityOverviewMetric(city,area,rows){
   const areaRows=rows.filter(row=>rolloutOverviewCity(row.city||row.City)===city&&sameRolloutDashboardArea(row.Area||row.area,area));
   const metricRows=rolloutDashboardMetricRows(areaRows,area),raw=rolloutMetricFromRows(metricRows),mapCable=rolloutMapCableProgressMetric(area,metricRows),plan=rolloutPlanFor(city,area)||{},target=rolloutTargetFor(city,area);
@@ -3425,6 +3443,8 @@ if(!rows.length){
   return;
 }
 const dateOptions=[...new Set(rows.map(r=>String(r.Date||'').slice(0,10)).filter(Boolean))].sort();
+const selectedDates=rolloutDashboardSelectedDates().filter(date=>dateOptions.includes(date));
+rolloutDashboardFilters.date=selectedDates;
 const cityOptions=[...new Set([...Object.keys(ROLLOUT_DASHBOARD_AREAS),...rows.map(r=>String(r.city||r.City||'').trim()).filter(Boolean)])];
 if(!cityOptions.includes(rolloutDashboardFilters.city))rolloutDashboardFilters.city=cityOptions[0]||'Tripoli';
 const mappedAreas=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
@@ -3436,7 +3456,7 @@ const scopedRows=rows.filter(r=>{
   const rowCity=String(r.city||r.City||'').trim();
   const rowArea=String(r.Area||r.area||'').trim();
   const areaOk=normalizeText(rolloutDashboardFilters.area)==='allareas'||sameRolloutDashboardArea(rowArea,rolloutDashboardFilters.area);
-  return (!rolloutDashboardFilters.date||rowDate===rolloutDashboardFilters.date)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
+  return rolloutDashboardDateMatches(rowDate,selectedDates)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
 const allMetricRows=areaOptions.map(area=>{const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);const raw=rolloutMetricFromRows(areaRows);const mapCable=rolloutMapCableProgressMetric(area,areaRows);const target=rolloutTargetFor(rolloutDashboardFilters.city,area);const plan=rolloutPlanFor(rolloutDashboardFilters.city,area);const isMaqawba=isMaqawbaRolloutArea(area);const cableTarget=canonicalRolloutArea(area)==='awladbaeoo'||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);const cableMeters=isMaqawba&&Number.isFinite(Number(plan?.dashboardCableMetersOverride))?Number(plan.dashboardCableMetersOverride):(mapCable?mapCable.installedMeters:raw.cableMeters);return{name:area,...raw,cableMeters,target:{...target,cableMeters:cableTarget}}}).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
@@ -3468,11 +3488,11 @@ const targetXbox=Math.max(Number(dashboardTarget.xbox||plan?.targetXbox||0),1);
 const usersPct=Math.min(100,(metric.actualUsers/Math.max(targetUsers,1))*100);
   // A new area must not inherit the latest Field Entry date from another area.
   // Until it has its own completed record, show its configured project start.
-  const latest=metric.latestDate||rolloutDashboardFilters.date||plan?.start||rolloutTimelineToday();
+  const latest=metric.latestDate||selectedDates[selectedDates.length-1]||plan?.start||rolloutTimelineToday();
 const timelineStart=plan?.start||ROLLOUT_DASHBOARD_PLAN.map(p=>p.start).sort()[0]||latest;
 const timelineEnd=plan?.end||ROLLOUT_DASHBOARD_PLAN.map(p=>p.end).sort().pop()||latest;
 const totalDays=rolloutDaysInclusive(timelineStart,timelineEnd);
-const selectedDate=rolloutDashboardFilters.date||rolloutTimelineToday();
+const selectedDate=selectedDates[selectedDates.length-1]||rolloutTimelineToday();
 const timelineStartMs=new Date(`${timelineStart}T00:00:00`).getTime();
 const selectedDateMs=new Date(`${selectedDate}T00:00:00`).getTime();
 const elapsedDays=Number.isFinite(timelineStartMs)&&Number.isFinite(selectedDateMs)?Math.min(totalDays,Math.max(0,Math.floor((selectedDateMs-timelineStartMs)/86400000)+1)):0;
@@ -3482,8 +3502,9 @@ const diff=actualPct-plannedPct;
 const timelineGood=diff>=-5;
 const displayedArea=normalizeText(rolloutDashboardFilters.area)==='allareas'?'All Areas':rolloutDashboardFilters.area;
 const areaName=displayedArea||'All Areas';
-const homepassSummary=rolloutHomepassSummary(rows,rolloutDashboardFilters.date);
-const dateOptionsHtml=`<option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}">${esc(rolloutDashDateLabel(d))}</option>`).join('')}`;
+const homepassSummary=rolloutHomepassSummary(rows,selectedDates);
+const dateSelectionLabel=selectedDates.length===1?rolloutDashDateLabel(selectedDates[0]):selectedDates.length?`${selectedDates.length} dates selected`:'All dates';
+const dateOptionsHtml=`<div class="rollout-date-menu-actions"><button type="button" onclick="clearRolloutDashboardDateSelection()">All dates</button><span>${selectedDates.length} selected</span></div><div class="rollout-date-options">${dateOptions.slice().reverse().map(date=>`<label class="rollout-date-option"><input type="checkbox" value="${esc(date)}" ${selectedDates.includes(date)?'checked':''} onchange="setRolloutDashboardDateSelection(this.value,this.checked)"><span>${esc(rolloutDashDateLabel(date))}</span></label>`).join('')}</div>`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
 const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
@@ -3491,9 +3512,9 @@ const adjustmentHtml=plan&&(Number(plan.adjustmentCableMeters||0)||Number(plan.a
 table.innerHTML=`
 <div class="rollout-management">
   <div class="mgmt-toolbar">
-    <div class="field"><label>Date</label><select onchange="setRolloutDashboardFilter('date',this.value)">${dateOptionsHtml}</select></div>
-    <div class="field"><label>City</label><select onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
-    <div class="field"><label>Area</label><select onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
+    <div class="field rollout-date-field"><label>Date</label><details class="rollout-date-picker" ${rolloutDashboardDatePickerOpen?'open':''} ontoggle="rolloutDashboardDatePickerOpen=this.open"><summary aria-label="Date filter, ${esc(dateSelectionLabel)}">${esc(dateSelectionLabel)}</summary><div class="rollout-date-menu">${dateOptionsHtml}</div></details></div>
+    <div class="field"><label>City</label><select id="rolloutDashboardCity" onchange="setRolloutDashboardFilter('city',this.value)">${cityOptionsHtml}</select></div>
+    <div class="field"><label>Area</label><select id="rolloutDashboardArea" onchange="setRolloutDashboardFilter('area',this.value)">${areaOptionsHtml}</select></div>
   </div>
   <section class="homepass-summary" aria-label="Homepass totals">
     <div class="homepass-summary-card"><span>Total Homepass / Actual Users</span><strong>${fmt(homepassSummary.total)}</strong></div>
@@ -3554,10 +3575,10 @@ table.innerHTML=`
     </tbody></table>
   </div>
 </div>`;
-const dashboardSelects=table.querySelectorAll('.mgmt-toolbar select');
-if(dashboardSelects[0])dashboardSelects[0].value=rolloutDashboardFilters.date;
-if(dashboardSelects[1])dashboardSelects[1].value=rolloutDashboardFilters.city;
-if(dashboardSelects[2])dashboardSelects[2].value=rolloutDashboardFilters.area;
+const dashboardCitySelect=table.querySelector('#rolloutDashboardCity');
+const dashboardAreaSelect=table.querySelector('#rolloutDashboardArea');
+if(dashboardCitySelect)dashboardCitySelect.value=rolloutDashboardFilters.city;
+if(dashboardAreaSelect)dashboardAreaSelect.value=rolloutDashboardFilters.area;
 renderRolloutWarehouseVsField();
 renderRolloutAreaReportPanel(topRows);
 switchRolloutDailyTab(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi');
