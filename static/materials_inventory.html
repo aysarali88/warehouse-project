@@ -2055,13 +2055,17 @@ function api(path,opts={}){
   const request=(async()=>{
     const send=()=>fetch(path,{cache:'no-store',credentials:'same-origin',...opts,headers});
     let res=await send();
-    let data=await res.json().catch(()=>({}));
+    const responseText=await res.text();
+    let data={};
+    try{data=JSON.parse(responseText)}catch{}
     if(res.status===403&&data.detail==='Invalid CSRF token'&&await refreshCsrfToken()){
       headers['X-CSRF-Token']=csrfToken;
       res=await send();
-      data=await res.json().catch(()=>({}));
+      const retryText=await res.text();
+      data={};
+      try{data=JSON.parse(retryText)}catch{}
     }
-    if(!res.ok||(!allowApiFailure&&data.success===false))throw new Error(data.detail||data.message||'Request failed');
+    if(!res.ok||(!allowApiFailure&&data.success===false))throw new Error(data.detail||data.message||`Request failed (HTTP ${res.status})`);
     return data;
   })();
   if(mutationKey)pendingMutationRequests.set(mutationKey,request);
