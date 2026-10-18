@@ -5929,7 +5929,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         if light
         else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
-    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(request, 60, program_key, db)
+    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(request, limit=60, program=program_key, db=db)
     transfers = (
         list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
         if light
