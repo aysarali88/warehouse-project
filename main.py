@@ -10201,9 +10201,9 @@ def validate_sr_receive_excel_scope(items: list[dict], supplier: str, warehouse:
         row_number = item["row_number"]
         row_vendor = item.get("excel_vendor", "").strip()
         row_warehouse = item.get("excel_warehouse", "").strip()
-        if row_vendor and (not supplier or normalize_text(row_vendor) != normalize_text(supplier)):
+        if row_vendor and (not supplier or normalize_usage_key(row_vendor) != normalize_usage_key(supplier)):
             raise HTTPException(status_code=400, detail=f"Excel row {row_number} vendor does not match the Vendor field")
-        if row_warehouse and normalize_text(row_warehouse) != normalize_text(warehouse.name):
+        if row_warehouse and normalize_usage_key(row_warehouse) != normalize_usage_key(warehouse.name):
             raise HTTPException(status_code=400, detail=f"Excel row {row_number} warehouse does not match the selected WH")
 
 
@@ -10463,7 +10463,7 @@ async def receive_inventory_multi(request: Request, db: Session = Depends(db_ses
         name = material_display_name(item.name.strip(), sku)
         if not sku or not name:
             raise HTTPException(status_code=400, detail=f"Material row {index} requires SKU and material name")
-        key = normalize_text(sku)
+        key = normalize_usage_key(sku)
         product = products_by_sku.get(key)
         if key not in products_by_sku:
             product = db.query(Product).filter(Product.program == program_key, Product.sku == sku).first()
@@ -10502,7 +10502,7 @@ async def receive_inventory_multi(request: Request, db: Session = Depends(db_ses
     received_items = []
     for item in data.items:
         sku = item.sku.strip()
-        key = normalize_text(sku)
+        key = normalize_usage_key(sku)
         name = material_display_name(item.name.strip(), sku)
         product = products_by_sku.get(key)
         if product is None:
