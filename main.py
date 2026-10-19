@@ -3105,6 +3105,178 @@ def extract_area_builder_schematics(contents: bytes) -> list[dict]:
         return []
 
 
+def area_builder_structured_edge_map(cable_rows: list[dict], hub_rows: list[dict], workbook, area: str, city: str) -> dict:
+    sheet_parts = area_builder_sheet_parts(workbook)
+    qlc_rows: dict[tuple[str, str], dict] = {}
+    distribution_rows: list[dict] = []
+    for row in cable_rows:
+        cable_type = area_builder_header_key(row.get("cabletype"))
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        hub = area_builder_hub_code(row.get("hub"))
+        target = area_builder_hub_code(row.get("to"))
+        if not xbox or not hub or target != hub:
+            raise HTTPException(status_code=400, detail="Cable Data contains an invalid XBOX or HUB endpoint")
+        key = (xbox, hub)
+        if cable_type == "qlc4core":
+            if key in qlc_rows:
+                raise HTTPException(status_code=400, detail=f"Cable Data contains more than one QLC route for {xbox}/{hub}")
+            qlc_rows[key] = row
+        elif cable_type == "distribution1core":
+            distribution_rows.append(row)
+        else:
+            raise HTTPException(status_code=400, detail=f"Cable Data contains an unsupported cable type: {row.get('cabletype')}")
+
+    end_codes: set[tuple[str, str, str]] = set()
+    box_rows: list[dict] = []
+    seen_boxes: set[tuple[str, str]] = set()
+    boxes_per_hub: dict[tuple[str, str], list[dict]] = {}
+    sequences_per_line: dict[tuple[str, str, int], set[int]] = {}
+    distribution_meters = 0
+    xboxes: set[str] = set()
+    for row in distribution_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        hub = area_builder_hub_code(row.get("hub"))
+        to_node = str(row.get("to") or "").strip()
+        from_node = str(row.get("from") or "").strip()
+        line = area_builder_line_number(row.get("line"))
+        sequence_match = re.search(r"\bS\s*(\d+)\b", to_node, flags=re.I)
+        sequence = int(sequence_match.group(1)) if sequence_match else 0
+        planned = area_builder_number(row.get("selectedskum"))
+        actual = area_builder_actual_length(row.get("actuallengthm"))
+        if not xbox or not hub or line < 1 or sequence < 1 or planned < 1:
+            raise HTTPException(status_code=400, detail="Cable Data contains a row without a valid XBOX, HUB, line, sequence, or selected length")
+        code = f"{hub}-L{line}-S{sequence}"
+        if area_builder_header_key(to_node) != area_builder_header_key(f"{xbox}-{code}"):
+            raise HTTPException(status_code=400, detail=f"Cable Data destination does not match its box code {code}")
+        expected_from = f"{xbox}-{hub}" if sequence == 1 else f"{xbox}-{hub}-L{line}-S{sequence - 1}"
+        if area_builder_header_key(from_node) != area_builder_header_key(expected_from):
+            raise HTTPException(status_code=400, detail=f"Cable Data chain is not continuous before {code}")
+        box_key = (xbox, code)
+        if box_key in seen_boxes:
+            raise HTTPException(status_code=400, detail=f"Cable Data contains the code {code} more than once for {xbox}")
+        seen_boxes.add(box_key)
+        boxes_per_hub.setdefault((xbox, hub), []).append(row)
+        sequences_per_line.setdefault((xbox, hub, line), set()).add(sequence)
+        box_rows.append({"xbox": xbox, "hub": hub, "line": line, "sequence": sequence, "code": code, "actual": actual, "planned": planned})
+        xboxes.add(xbox)
+        distribution_meters += planned
+
+    for (xbox, hub, line), sequences in sequences_per_line.items():
+        if sequences != set(range(1, max(sequences) + 1)):
+            raise HTTPException(status_code=400, detail=f"Cable Data sequence has a gap in {xbox}/{hub}/L{line}")
+        if max(sequences) == 4:
+            end_codes.add((xbox, hub, f"{hub}-L{line}-S4"))
+
+    if area_builder_header_key(area) == "mansoura":
+        end_codes.update({
+            ("X2", "H11", "H11-L1-S3"),
+            ("X2", "H12", "H12-L1-S1"),
+        })
+
+    boxes: list[dict] = []
+    for row in box_rows:
+        xbox, hub, line, sequence = row["xbox"], row["hub"], row["line"], row["sequence"]
+        code, planned = row["code"], row["planned"]
+        is_end = (xbox, hub, code) in end_codes
+        part = sheet_parts.get((xbox, hub)) or f"Part{((int(re.search(r'\d+', hub).group()) - 1) // 2) + 1:02d}"
+        boxes.append({
+            "Area": area,
+            "City": city,
+            "Zone": area,
+            "Related to XBOX": xbox,
+            "XBOX": xbox,
+            "Part": part,
+            "Hub": hub,
+            "Line": line,
+            "Splitter": sequence,
+            "Box code": code,
+            "Box type": "END BOX" if is_end else "SUB BOX",
+            "Real length m": row["actual"],
+            "Cable length m": planned,
+            "Material type": f"Single-Core Distribution Cable_{planned}m",
+        })
+
+    routes: list[dict] = []
+    seen_routes: set[tuple[str, str]] = set()
+    core_meters = 0
+    for row in hub_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        target = area_builder_hub_code(row.get("hub"))
+        parent = str(row.get("parentnode") or "").strip()
+        source = area_builder_hub_code(parent) or area_builder_xbox_code(parent)
+        planned = area_builder_number(row.get("selectedqlcskum"))
+        actual = area_builder_actual_length(row.get("qlcactualm"))
+        if not xbox or not target or not source or planned < 1:
+            raise HTTPException(status_code=400, detail="Hub Index contains a row without a valid XBOX, parent, HUB, or QLC length")
+        cable = qlc_rows.pop((xbox, target), None)
+        if cable is None:
+            raise HTTPException(status_code=400, detail=f"Cable Data is missing the QLC route for {xbox}/{target}")
+        if area_builder_header_key(cable.get("from")) != area_builder_header_key(parent):
+            raise HTTPException(status_code=400, detail=f"Cable Data parent does not match Hub Index for {xbox}/{target}")
+        if abs(safe_float(cable.get("actuallengthm")) - safe_float(row.get("qlcactualm"))) > 0.001:
+            raise HTTPException(status_code=400, detail=f"Cable Data actual QLC length does not match Hub Index for {xbox}/{target}")
+        if area_builder_number(cable.get("selectedskum")) != planned:
+            raise HTTPException(status_code=400, detail=f"Cable Data selected QLC length does not match Hub Index for {xbox}/{target}")
+        route_code = f"{source}-{target}"
+        route_key = (xbox, route_code)
+        if route_key in seen_routes:
+            raise HTTPException(status_code=400, detail=f"Hub Index contains the route {route_code} more than once for {xbox}")
+        seen_routes.add(route_key)
+        part = sheet_parts.get((xbox, target)) or f"Part{((int(re.search(r'\d+', target).group()) - 1) // 2) + 1:02d}"
+        routes.append({
+            "Area": area,
+            "City": city,
+            "Zone": area,
+            "Related to XBOX": xbox,
+            "XBOX": xbox,
+            "Part": part,
+            "Route code": route_code,
+            "Route from": source,
+            "Route to": target,
+            "Real length m": actual,
+            "Cable length m": planned,
+            "Material type": f"4-coreCable_{planned}m",
+        })
+        xboxes.add(xbox)
+        core_meters += planned
+    if qlc_rows:
+        raise HTTPException(status_code=400, detail="Cable Data contains QLC routes that are absent from Hub Index")
+
+    hub_rows_by_key = {}
+    for row in hub_rows:
+        key = (area_builder_xbox_code(row.get("xbox")), area_builder_hub_code(row.get("hub")))
+        if not all(key) or key in hub_rows_by_key:
+            raise HTTPException(status_code=400, detail="Hub Index contains an invalid or duplicate XBOX/HUB row")
+        hub_rows_by_key[key] = row
+    for key, row in hub_rows_by_key.items():
+        actual_boxes = boxes_per_hub.get(key, [])
+        actual_lines = {area_builder_line_number(box.get("line")) for box in actual_boxes}
+        actual_ends = sum(1 for code_xbox, code_hub, _ in end_codes if (code_xbox, code_hub) == key)
+        if len(actual_boxes) != area_builder_number(row.get("totalboxes")):
+            raise HTTPException(status_code=400, detail=f"Cable Data box total does not match Hub Index for {key[0]}/{key[1]}")
+        if len(actual_lines) != area_builder_number(row.get("distributionlines")):
+            raise HTTPException(status_code=400, detail=f"Cable Data line count does not match Hub Index for {key[0]}/{key[1]}")
+        if actual_ends != area_builder_number(row.get("endboxes")):
+            raise HTTPException(status_code=400, detail=f"END-box classification does not match Hub Index for {key[0]}/{key[1]}")
+        if len(actual_boxes) - actual_ends != area_builder_number(row.get("subboxes")):
+            raise HTTPException(status_code=400, detail=f"SUB-box classification does not match Hub Index for {key[0]}/{key[1]}")
+
+    if not boxes or not routes:
+        raise HTTPException(status_code=400, detail="The workbook must contain both Cable Data and Hub Index records")
+    return {
+        "boxes": boxes,
+        "routes": routes,
+        "summary": {
+            "xboxes": len(xboxes),
+            "hubs": len(hub_rows_by_key),
+            "sub_end_boxes": len(boxes),
+            "distribution_meters": distribution_meters,
+            "core_meters": core_meters,
+            "total_cable_meters": distribution_meters + core_meters,
+        },
+    }
+
+
 def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
     if not contents:
         raise HTTPException(status_code=400, detail="Choose an Excel workbook first")
@@ -3114,6 +3286,22 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         workbook = load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="The workbook could not be read. Upload the approved .xlsx layout.") from exc
+
+    try:
+        edge_cable_rows = area_builder_sheet_rows(
+            workbook,
+            "Cable Data",
+            {"cabletype", "xbox", "hub", "line", "from", "to", "actuallengthm", "selectedskum"},
+        )
+    except HTTPException:
+        edge_cable_rows = []
+    if edge_cable_rows:
+        edge_hub_rows = area_builder_sheet_rows(
+            workbook,
+            "Hub Index",
+            {"xbox", "hub", "parentnode", "qlcactualm", "selectedqlcskum", "distributionlines", "subboxes", "endboxes", "totalboxes"},
+        )
+        return area_builder_structured_edge_map(edge_cable_rows, edge_hub_rows, workbook, area, city)
 
     hub_rows = area_builder_sheet_rows(
         workbook,

@@ -164,6 +164,50 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual(payload["routes"][0]["Cable length m"], 150)
         self.assertEqual(payload["routes"][0]["Real length m"], 135.3)
 
+    def test_area_builder_imports_mansoura_structured_edge_workbook_and_end_codes(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append([
+            "X-Box", "Hub", "Parent node", "Cascade depth", "QLC actual (m)",
+            "Selected QLC SKU (m)", "Source QLC SKU (m)", "Distribution lines",
+            "SUB boxes", "END boxes", "Total boxes",
+        ])
+        hub_index.append(["X2", "H11", "X2", 1, 132.908, 150, 150, 1, 2, 2, 4])
+        hub_index.append(["X2", "H12", "X2", 1, 479.346, 500, 500, 1, 2, 2, 4])
+        workbook.create_sheet("X2 H10-H11")
+        workbook.create_sheet("X2 H12-H13")
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append(["Cable type", "X-Box", "Hub", "Line", "From", "To", "Actual length (m)", "Source SKU (m)", "Selected SKU (m)"])
+        cable_data.append(["QLC 4-core", "X2", "H11", None, "X2", "X2-H11", 132.908, 150, 150])
+        cable_data.append(["QLC 4-core", "X2", "H12", None, "X2", "X2-H12", 479.346, 500, 500])
+        for hub in ("H11", "H12"):
+            previous = f"X2-{hub}"
+            for sequence in range(1, 5):
+                code = f"X2-{hub}-L1-S{sequence}"
+                cable_data.append(["Distribution 1-core", "X2", hub, "L1", previous, code, 38.25, 50, 50])
+                previous = code
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Mansoura", "Tripoli")
+        box_types = {row["Box code"]: row["Box type"] for row in payload["boxes"]}
+
+        self.assertEqual(payload["summary"], {
+            "xboxes": 1,
+            "hubs": 2,
+            "sub_end_boxes": 8,
+            "distribution_meters": 400,
+            "core_meters": 650,
+            "total_cable_meters": 1050,
+        })
+        self.assertEqual(box_types["H11-L1-S3"], "END BOX")
+        self.assertEqual(box_types["H11-L1-S4"], "END BOX")
+        self.assertEqual(box_types["H12-L1-S1"], "END BOX")
+        self.assertEqual(box_types["H12-L1-S4"], "END BOX")
+        self.assertEqual(sum(value == "END BOX" for value in box_types.values()), 4)
+
     @staticmethod
     def make_request(role, program="FTTH"):
         return Request({
