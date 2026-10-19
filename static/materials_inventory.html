@@ -1885,12 +1885,13 @@ function displayRolloutArea(value){const raw=normalizeText(value);if(raw==='bera
 function isMaqawbaRolloutArea(value){return normalizeText(canonicalRolloutArea(value))==='maqawba'}
 function rolloutDashboardRows(rows){return(rows||[]).filter(row=>normalizeText(row.Area||row.area||'')!=='albera')}
 function sameRolloutDashboardArea(a,b){return normalizeText(canonicalRolloutArea(a))===normalizeText(canonicalRolloutArea(b))}
-const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3','Al-Dhel Street'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
+const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3','Al-Dhel Street','Mansoura'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
 const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:363,targetHubBox:27,targetXbox:3,targetCableMeters:41595,targetUsers:2904,dashboardSubEndOffset:-4,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-750,adjustmentSubEndBox:-5,note:'Completed: 41,595 m cable, 363 SUB / END boxes, 27 HUB boxes, 3 XBOXes, and 363 single-core cables (2,904 users). Previous X9 scope removals remain documented.'},
   {city:'Tripoli',area:'Al-Dhel Street',start:'2026-11-01',end:'2026-12-08',targetSubEndBox:809,targetHubBox:61,targetXbox:5,targetCableMeters:76560,targetUsers:5328,dashboardCableTargetOverride:76560,dashboardSubEndTargetOverride:809,dashboardHubTargetOverride:61,dashboardXboxTargetOverride:5,dashboardSingleCoreTargetOverride:809,dashboardUsersTargetOverride:5328},
+  {city:'Tripoli',area:'Mansoura',start:'2026-11-01',end:'2026-11-21',targetSubEndBox:415,targetHubBox:31,targetXbox:2,targetCableMeters:39925,targetUsers:2704,dashboardCableTargetOverride:39925,dashboardSubEndTargetOverride:415,dashboardHubTargetOverride:31,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:415,dashboardUsersTargetOverride:2704},
   {city:'Misurata',area:'Bera W Taleem',targetSubEndBox:213,targetHubBox:17,targetXbox:2,targetCableMeters:27780,targetUsers:1704,dashboardCableTargetOverride:27780,dashboardSubEndTargetOverride:213,dashboardHubTargetOverride:17,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:213,dashboardUsersTargetOverride:1704,dashboardCableMetersOverride:27780,dashboardSubEndOverride:213,dashboardSingleCoreOverride:213,note:'Completed: 27,780 m cable, 213 SUB / END boxes, 17 HUB boxes, 2 XBOXes, and 213 single-core cables (1,704 users).'},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:408,targetHubBox:30,targetXbox:3,targetCableMeters:37765,targetUsers:3200,dashboardCableMetersOverride:37765,dashboardSubEndOverride:408,dashboardSingleCoreOverride:400,note:'Maqawba completed: 37,765m cable, 408 SUB / END boxes, and 400 Single-Core Distribution cables.'},
   {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:262,targetHubBox:20,targetXbox:2,targetCableMeters:30805,targetUsers:2096,note:'Dashboard targets use the complete active Awlad Baeoo fiber-map design.'},
@@ -4108,7 +4109,8 @@ var WFM_MAP_SCOPES=[
   {id:'ras-a-tota-x2',title:'Ras A Tota - X-BOX2',area:'Ras A Tota',xbox:'X2'}
 ];
 ['X1','X2','X3','X4','X5'].forEach(xbox=>WFM_MAP_SCOPES.push({id:`al-dhel-street-${xbox.toLowerCase()}`,title:`Al-Dhel Street - X-BOX${xbox.slice(1)}`,area:'Al-Dhel Street',xbox}));
-const WFM_STRUCTURED_ONLY_MAP_AREAS=new Set(['al dhel street']);
+['X1','X2'].forEach(xbox=>WFM_MAP_SCOPES.push({id:`mansoura-${xbox.toLowerCase()}`,title:`Mansoura - X-BOX${xbox.slice(1)}`,area:'Mansoura',xbox}));
+const WFM_STRUCTURED_ONLY_MAP_AREAS=new Set(['al dhel street','mansoura']);
 function wfmMapAreaKey(value){
   const key=normalizeText(value||'').replace(/\s+/g,' ');
   if(key==='hay al andalus zone 2'||key==='hay andalus zone 2')return 'hay andalus zone 2';
