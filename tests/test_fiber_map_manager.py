@@ -127,6 +127,43 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual(actual_by_route, {"X1-H1": 432.2, "H1-H2": 156.4})
         self.assertEqual(payload["boxes"][0]["Real length m"], 38)
 
+    def test_area_builder_derives_end_box_from_final_splitter_and_hub_subbox_count(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append(["X-Box", "Hub", "From", "To Hub", "QLC actual (m)", "QLC precon (m)", "Sub boxes"])
+        hub_index.append(["X1", "X1H1", "X1", "X1H2", 40, 50, 3])
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append(["Sub box", "Hub", "X-Box", "Line", "Sequence", "Actual length (m)", "Precon length (m)", "Splitter"])
+        for sequence in range(1, 5):
+            cable_data.append([f"X1H1-L1-S{sequence}", "X1H1", "X1", "L1", sequence, 40, 50, None])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Test Area", "Tripoli")
+
+        self.assertEqual([row["Box type"] for row in payload["boxes"]], ["SUB BOX"] * 3 + ["END BOX"])
+
+    def test_area_builder_applies_explicit_al_dhel_x4_h1_h2_length(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append(["X-Box", "Hub", "From", "To Hub", "QLC actual (m)", "QLC precon (m)", "Sub boxes"])
+        hub_index.append(["X4", "X4H2", "X4H1", "X4H3", 135.2925, None, 1])
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append(["Sub box", "Hub", "X-Box", "Line", "Sequence", "Actual length (m)", "Precon length (m)", "Splitter"])
+        cable_data.append(["X4H2-L1-S1", "X4H2", "X4", "L1", 1, 20, 50, None])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Al-Dhel Street", "Tripoli")
+
+        self.assertEqual(payload["routes"][0]["Route code"], "H1-H2")
+        self.assertEqual(payload["routes"][0]["Cable length m"], 150)
+        self.assertEqual(payload["routes"][0]["Real length m"], 135.3)
+
     @staticmethod
     def make_request(role, program="FTTH"):
         return Request({

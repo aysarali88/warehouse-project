@@ -2943,8 +2943,8 @@ def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str
 
 
 def area_builder_hub_code(value) -> str:
-    match = re.search(r"\b(H\s*\d+)\b", str(value or "").upper())
-    return f"H{int(re.search(r'\d+', match.group(1)).group())}" if match else ""
+    match = re.search(r"(?:\bX\s*(?:-?\s*BOX)?\s*-?\s*0*\d+\s*-?\s*)?H\s*0*(\d+)\b", str(value or "").upper())
+    return f"H{int(match.group(1))}" if match else ""
 
 
 def area_builder_xbox_code(value) -> str:
@@ -2959,6 +2959,53 @@ def area_builder_number(value) -> int:
 def area_builder_actual_length(value) -> int | float:
     rounded = round(safe_float(value), 1)
     return int(rounded) if rounded.is_integer() else rounded
+
+
+def area_builder_end_box_codes(cable_rows: list[dict], hub_rows: list[dict]) -> set[str]:
+    line_rows: dict[tuple[str, str, int], list[dict]] = {}
+    box_counts: dict[tuple[str, str], int] = {}
+    end_codes: set[tuple[str, str, str]] = set()
+    for row in cable_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        hub = area_builder_hub_code(row.get("hub"))
+        line = area_builder_line_number(row.get("line"))
+        sequence = area_builder_number(row.get("sequence"))
+        if not xbox or not hub or line < 1 or sequence < 1:
+            continue
+        line_rows.setdefault((xbox, hub, line), []).append(row)
+        box_counts[(xbox, hub)] = box_counts.get((xbox, hub), 0) + 1
+        splitter = str(row.get("splitter") or "").replace(" ", "").lower()
+        if "1:8" in splitter or "1x8" in splitter:
+            end_codes.add((xbox, hub, f"{hub}-L{line}-S{sequence}"))
+
+    for key, rows in line_rows.items():
+        has_explicit_end = any(
+            "1:8" in str(row.get("splitter") or "").replace(" ", "").lower()
+            or "1x8" in str(row.get("splitter") or "").replace(" ", "").lower()
+            for row in rows
+        )
+        if has_explicit_end:
+            continue
+        final_row = max(rows, key=lambda row: area_builder_number(row.get("sequence")))
+        sequence = area_builder_number(final_row.get("sequence"))
+        if sequence == 4:
+            end_codes.add((key[0], key[1], f"{key[1]}-L{key[2]}-S{sequence}"))
+
+    for row in hub_rows:
+        xbox = area_builder_xbox_code(row.get("xbox"))
+        hub = area_builder_hub_code(row.get("hub"))
+        declared = row.get("subboxes")
+        if not xbox or not hub or declared in (None, ""):
+            continue
+        end_count = sum(1 for end_xbox, end_hub, _ in end_codes if (end_xbox, end_hub) == (xbox, hub))
+        actual = box_counts.get((xbox, hub), 0) - end_count
+        expected = area_builder_number(declared)
+        if actual != expected:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cable Data END-box classification for {xbox}/{hub} does not match Hub Index Sub boxes ({actual} vs {expected})",
+            )
+    return {code for _, _, code in end_codes if code}
 
 
 def area_builder_line_number(value) -> int:
@@ -3078,6 +3125,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         "Cable Data",
         {"subbox", "hub", "xbox", "line", "sequence", "actuallengthm", "preconlengthm", "splitter"},
     )
+    end_box_codes = area_builder_end_box_codes(cable_rows, hub_rows)
 
     boxes: list[dict] = []
     routes: list[dict] = []
@@ -3104,7 +3152,7 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         if box_key in seen_boxes:
             raise HTTPException(status_code=400, detail=f"Cable Data contains the code {code} more than once for {xbox}")
         seen_boxes.add(box_key)
-        is_end = "1:8" in splitter or "1x8" in splitter.lower()
+        is_end = code in end_box_codes or "1:8" in splitter.lower() or "1x8" in splitter.lower()
         boxes.append(
             {
                 "Area": area,
@@ -3138,9 +3186,14 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         source = area_builder_hub_code(source_value) or area_builder_xbox_code(source_value)
         planned = area_builder_number(row.get("qlcpreconm"))
         actual = area_builder_actual_length(row.get("qlcactualm"))
-        if not xbox or not target or not source or planned < 1:
+        if not xbox or not target or not source:
             raise HTTPException(status_code=400, detail="Hub Index contains a row without XBOX, From, To Hub, or planned length")
         route_code = f"{source}-{target}"
+        if planned < 1 and area_builder_header_key(area) in {"aldhelstreet", "alzelstreet"}:
+            if xbox == "X4" and route_code == "H1-H2":
+                planned = 150
+        if planned < 1:
+            raise HTTPException(status_code=400, detail="Hub Index contains a row without XBOX, From, To Hub, or planned length")
         route_key = (xbox, route_code)
         if route_key in seen_routes:
             raise HTTPException(status_code=400, detail=f"Hub Index contains the route {route_code} more than once for {xbox}")
