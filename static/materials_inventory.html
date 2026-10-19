@@ -3525,6 +3525,7 @@ const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</o
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
 const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
 const adjustmentHtml=plan&&(Number(plan.adjustmentCableMeters||0)||Number(plan.adjustmentSubEndBox||0))?`<div class="mini-row"><div><b>Dashboard total adjustment</b><small>${fmt(Math.abs(Number(plan.adjustmentCableMeters||0)))} m cable removed · ${fmt(Math.abs(Number(plan.adjustmentSubEndBox||0)))} SUB / END boxes removed</small></div><strong>${fmt(targetCableMeters)} m / ${fmt(targetSubEndBox)} SUB</strong></div>`:'';
+const projectNoteHtml=sameRolloutDashboardArea(areaName,'Al-Dhel Street')?'':`<div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div>${adjustmentHtml}</div></div>`;
 table.innerHTML=`
 <div class="rollout-management">
   <div class="mgmt-toolbar">
@@ -3558,7 +3559,7 @@ table.innerHTML=`
     </div>
   </div>
   <div class="dash-grid">
-    <div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div>${adjustmentHtml}</div></div>
+    ${projectNoteHtml}
     <div class="dash-panel"><h3>Box Details</h3><div class="mini-list"><div class="mini-row"><div><b>SUB / END BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.subEndBox)}</strong></div><div class="mini-row"><div><b>HUB BOX</b><small>Installed from field records</small></div><strong>${fmt(metric.hubBox)}</strong></div><div class="mini-row"><div><b>XBOX</b><small>Installed from field records</small></div><strong>${fmt(metric.xbox)}</strong></div></div></div>
   </div>
   <div class="mgmt-timeline">
