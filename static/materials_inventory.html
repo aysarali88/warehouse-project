@@ -3283,7 +3283,7 @@ function rolloutTargetFor(city,area){
     hubBox,
     xbox,
     totalBoxes:subEndBox+hubBox+xbox,
-    singleCoreCableQty:planValue('dashboardSingleCoreTargetOverride',Number(design?.subEndBox??Math.round(users/8))),
+    singleCoreCableQty:subEndBox,
     users
   };
 }
