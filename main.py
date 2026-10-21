@@ -8658,6 +8658,18 @@ def find_warehouse_for_import(db: Session, grid: list[list[str]], default_wareho
     return row
 
 
+def material_requisition_import_program(request: Request, submitted_program: str = "") -> str:
+    session_program = normalize_program(
+        getattr(request.state, "session_program", getattr(request.state, "program", DEFAULT_PROGRAM))
+    )
+    submitted_program = str(submitted_program or "").strip()
+    if submitted_program and not is_valid_program_value(submitted_program):
+        raise HTTPException(status_code=400, detail="Invalid program scope")
+    if submitted_program and normalize_program(submitted_program) != session_program:
+        raise HTTPException(status_code=403, detail="Program scope does not match this session")
+    return session_program
+
+
 MR_ORDER_PATTERN = re.compile(r"^MR-([A-Z0-9]+)-(\d+)$")
 
 
@@ -8899,10 +8911,19 @@ async def preview_sr_request_items_excel(
     return {"success": True, **result}
 
 
-def import_mr_sheet(db: Session, sheet, filename: str, default_warehouse_id: int, actor: str, program: str = DEFAULT_PROGRAM) -> MaterialRequisition:
+def import_mr_sheet(
+    db: Session,
+    sheet,
+    filename: str,
+    default_warehouse_id: int,
+    actor: str,
+    request: Request,
+    program: str = DEFAULT_PROGRAM,
+) -> MaterialRequisition:
     program_key = normalize_program(program)
     grid = sheet_grid(sheet)
     warehouse = find_warehouse_for_import(db, grid, default_warehouse_id, program_key)
+    require_warehouse_access(request, db, warehouse.id, program_key)
     items = parse_import_items(db, grid, program_key)
     today = local_today()
     order_number = next_material_requisition_number(db, warehouse, program_key)
@@ -8961,12 +8982,12 @@ async def import_material_requisition_excels(
     files: list[UploadFile] = File(...),
     default_warehouse_id: int = Form(0),
     actor: str = Form("Import"),
-    program: str = Form(DEFAULT_PROGRAM),
+    program: str = Form(""),
     db: Session = Depends(db_session),
 ):
     require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
     require_roles(request, "Admin", "Management", "Warehouse Manager")
-    program_key = normalize_program(program)
+    program_key = material_requisition_import_program(request, program)
     actor = request_actor(request)
     if default_warehouse_id:
         require_warehouse_access(request, db, default_warehouse_id, program_key)
@@ -8983,7 +9004,15 @@ async def import_material_requisition_excels(
             if sheet.sheet_state != "visible":
                 continue
             try:
-                row = import_mr_sheet(db, sheet, upload.filename or "MR.xlsx", default_warehouse_id, actor, program_key)
+                row = import_mr_sheet(
+                    db,
+                    sheet,
+                    upload.filename or "MR.xlsx",
+                    default_warehouse_id,
+                    actor,
+                    request,
+                    program_key,
+                )
                 db.commit()
                 db.refresh(row)
                 imported_rows.append(row)
