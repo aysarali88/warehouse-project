@@ -261,7 +261,14 @@ for program_key, db_engine in all_engines():
     except Exception:
         logger.exception("%s optional database migration failed", program_key)
 
-app = FastAPI(title="FTTH Rollout")
+def fastapi_docs_options(render_env: str | None = None) -> dict[str, str | None]:
+    render_value = os.getenv("RENDER", "") if render_env is None else render_env
+    if str(render_value).strip().lower() == "true":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
+
+
+app = FastAPI(title="FTTH Rollout", **fastapi_docs_options())
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 PROGRAM_LABELS = {
