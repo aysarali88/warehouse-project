@@ -2941,6 +2941,8 @@ def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str
     header_map: dict[str, int] = {}
     for index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
         candidate = {area_builder_header_key(value): column for column, value in enumerate(row) if area_builder_header_key(value)}
+        if "subendbox" in candidate and "subbox" not in candidate:
+            candidate["subbox"] = candidate["subendbox"]
         if required_headers.issubset(candidate):
             header_row = index
             header_map = candidate
@@ -4210,19 +4212,11 @@ async def preview_area_builder(
         raise HTTPException(status_code=400, detail="Upload an .xlsx workbook")
     contents = await workbook.read()
     payload = build_area_map_from_workbook(contents, area_name, city_name)
-    schematics = extract_area_builder_schematics(contents)
     return {
         "success": True,
         "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users},
         **payload,
-        "schematics": [
-            {
-                "sheet_name": row["sheet_name"],
-                "xbox": row["xbox"],
-                "image_url": f"data:{row['content_type']};base64,{base64.b64encode(row['image_data']).decode('ascii')}",
-            }
-            for row in schematics
-        ],
+        "schematics": [],
         "preview": {"boxes": payload["boxes"][:12], "routes": payload["routes"][:12]},
     }
 
@@ -4253,7 +4247,6 @@ async def publish_area_builder(
         raise HTTPException(status_code=409, detail="This area already exists. Use the map editor for changes to an existing area.")
     contents = await workbook.read()
     payload = build_area_map_from_workbook(contents, area_name, city_name)
-    schematics = extract_area_builder_schematics(contents)
     actor = request_actor(request)
     saved = FiberMapArea(
         program=program_key,
@@ -4266,24 +4259,12 @@ async def publish_area_builder(
         created_by=actor,
     )
     db.add(saved)
-    for schematic in schematics:
-        db.add(
-            FiberMapSchematic(
-                program=program_key,
-                area=area_name,
-                xbox=schematic["xbox"],
-                sheet_name=schematic["sheet_name"],
-                content_type=schematic["content_type"],
-                image_data=schematic["image_data"],
-                created_by=actor,
-            )
-        )
     if not db.query(Site).filter(Site.program == program_key, func.lower(Site.name) == area_name.lower()).first():
         db.add(Site(program=program_key, name=area_name))
-    log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, "schematics": len(schematics), **payload["summary"]})
+    log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, **payload["summary"]})
     db.commit()
     clear_rollout_db_cache()
-    return {"success": True, "message": f"{area_name} was published", "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users}, "schematics": [{"sheet_name": row["sheet_name"], "xbox": row["xbox"]} for row in schematics], **payload}
+    return {"success": True, "message": f"{area_name} was published", "area": {"name": area_name, "city": city_name, "start_date": start, "end_date": end, "target_users": users}, "schematics": [], **payload}
 
 
 def rollout_manual_hub_allowed(area: str, xbox: str, hub_code: str) -> bool:

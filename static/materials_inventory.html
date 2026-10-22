@@ -1999,13 +1999,6 @@ async function previewAreaBuilder(){
 function buildAreaBuilderPreview(){
   if(!areaBuilderPreviewState){toast('Review the workbook first');return}
   const preview=document.getElementById('areaBuilderMapPreview');if(!preview)return;
-  const schematics=areaBuilderPreviewState.schematics||[];
-  if(schematics.length){
-    preview.classList.remove('hidden');
-    preview.innerHTML=`<h3>Map preview</h3><p>This draft uses the original schematic images from the workbook tabs. It has not been published.</p><div class="fiber-map-schematic-list">${schematics.map(row=>`<article class="fiber-map-schematic-card"><h4>${esc(row.sheet_name)}</h4><img src="${esc(row.image_url)}" alt="${esc(row.sheet_name)} map schematic"></article>`).join('')}</div>`;
-    toast('Original workbook schematics are ready for review');
-    return;
-  }
   const area=areaBuilderPreviewState.area?.name||'';
   const previewData={boxes:areaBuilderPreviewState.boxes||[],routes:areaBuilderPreviewState.routes||[]};
   const previousReference=warehouseFiberReference;
