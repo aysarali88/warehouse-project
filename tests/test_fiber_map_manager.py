@@ -388,6 +388,10 @@ class FiberMapManagerTests(unittest.TestCase):
         selected = [row for row in field_rows if row["area"] == "Test Map Manager" and row["xbox"] == "X1" and main.rollout_code_key(row["code"]) == "H1L1S4"]
         self.assertEqual({row["type"] for row in selected}, {"box", "cable"})
         self.assertTrue(all(row["cable_length_m"] == 37.5 for row in selected))
+        saved_map = self.db.query(main.FiberMapArea).filter(main.FiberMapArea.area == "Test Map Manager").one()
+        saved_boxes = json.loads(saved_map.design_data)["boxes"]
+        added_box = next(row for row in saved_boxes if row["Box code"] == "H1-L1-S4")
+        self.assertEqual(added_box["Material type"], "Single-Core Distribution Cable_37.5m")
 
     def test_generated_code_supports_fifth_splitter_and_ras_ammar_h13_l4(self):
         area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
@@ -402,6 +406,97 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertTrue(main.fiber_map_manager_can_add_empty_line("Ras Ammar", "X1", "H13", "L4"))
         updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Test Map Manager")
         self.assertIn(("X1", "H1L1S5"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]})
+
+    def test_ras_ammar_map_builder_caps_new_boxes_at_s4(self):
+        ras_ammar_boxes = [{
+            "Area": "Ras Ammar",
+            "Zone": "Ras Ammar",
+            "City": "Misurata",
+            "Related to XBOX": "X2",
+            "XBOX": "X-BOX02",
+            "Part": "Part01",
+            "Hub": "H6",
+            "Line": 2,
+            "Splitter": splitter,
+            "Box code": f"H6-L2-S{splitter}",
+            "Box type": "SUB BOX",
+            "Real length m": "",
+            "Cable length m": 50,
+            "Material type": "Single-Core Distribution Cable_50m",
+            "dB": "",
+        } for splitter in range(1, 4)]
+        self.db.add(main.FiberMapArea(
+            program="FTTH",
+            area="Ras Ammar",
+            city="Misurata",
+            start_date="",
+            end_date="",
+            target_users=0,
+            design_data=json.dumps({"boxes": ras_ammar_boxes, "routes": []}),
+            created_by="test",
+        ))
+        self.db.commit()
+        main.clear_rollout_db_cache()
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Ras Ammar")
+        self.assertEqual(area["max_splitter"], 4)
+        self.assertEqual(main.fiber_map_manager_splitter_limit("Ras Ammar"), 4)
+        self.assertEqual(main.fiber_map_manager_splitter_limit("Test Map Manager"), 5)
+        before = area["active"]
+
+        with self.assertRaises(HTTPException) as rejected:
+            main.fiber_map_manager_change(main.FiberMapChangeIn(
+                area=area["name"],
+                action="add",
+                selections=[{"xbox": "X2", "code": "H6-L2-S5", "box_type": "END BOX", "cable_length_m": 50}],
+                expected_revision=area["revision"],
+            ), self.request, self.db)
+        self.assertEqual(rejected.exception.status_code, 400)
+        unchanged = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Ras Ammar")
+        self.assertEqual(unchanged["active"], before)
+
+        added = main.fiber_map_manager_change(main.FiberMapChangeIn(
+            area=area["name"],
+            action="add",
+            selections=[{"xbox": "X2", "code": "H6-L2-S4", "box_type": "END BOX", "cable_length_m": 100.0}],
+            expected_revision=area["revision"],
+        ), self.request, self.db)
+        self.assertEqual(added["changed"], 1)
+        final_area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Ras Ammar")
+        self.assertIn(("X2", "H6L2S4"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in final_area["active"]})
+        saved_map = self.db.query(main.FiberMapArea).filter(main.FiberMapArea.area == "Ras Ammar").one()
+        saved_boxes = json.loads(saved_map.design_data)["boxes"]
+        added_box = next(row for row in saved_boxes if row["Box code"] == "H6-L2-S4")
+        self.assertEqual(added_box["Material type"], "Single-Core Distribution Cable_100m")
+        added_box["Material type"] = "Single-Core Distribution Cable_100.0m"
+        saved_map.design_data = json.dumps({"boxes": saved_boxes, "routes": []})
+        self.db.commit()
+        main.ROLLOUT_CODE_REFERENCE_CACHE.clear()
+        field_code = next(
+            row for row in main.rollout_code_reference_rows(self.db, "FTTH")
+            if row["area"] == "Ras Ammar" and row["code"] == "H6-L2-S4" and row["type"] == "cable"
+        )
+        self.assertEqual(field_code["material_type"], "Single-Core Distribution Cable_100m")
+        self.assertIn("100.0m", self.db.query(main.FiberMapArea).filter(main.FiberMapArea.area == "Ras Ammar").one().design_data)
+
+    def test_rollout_cable_material_label_formats_integral_and_decimal_lengths(self):
+        self.assertEqual(
+            main.normalize_rollout_cable_material_type("Single-Core Distribution Cable_100.0m"),
+            "Single-Core Distribution Cable_100m",
+        )
+        self.assertEqual(
+            main.normalize_rollout_cable_material_type("Single-Core Distribution Cable_100.50m"),
+            "Single-Core Distribution Cable_100.5m",
+        )
+        record, _ = main.upsert_rollout_record({
+            "ID": "RDP-FORMAT-1",
+            "material type": "Single-Core Distribution Cable_100.0m",
+        }, self.db)
+        self.assertEqual(record.material_type, "Single-Core Distribution Cable_100m")
+        self.assertEqual(main.row_to_record(record)["material type"], "Single-Core Distribution Cable_100m")
+        legacy_record = main.RolloutRecord(record_id="RDP-FORMAT-OLD", material_type="Single-Core Distribution Cable_100.0m")
+        self.assertEqual(main.row_to_record(legacy_record)["material type"], "Single-Core Distribution Cable_100m")
+        self.assertEqual(legacy_record.material_type, "Single-Core Distribution Cable_100.0m")
 
     def test_hay_andalus_z1_missing_lines_require_activation_before_add(self):
         boxes = []
