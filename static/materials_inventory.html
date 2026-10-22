@@ -2637,7 +2637,8 @@ function mapManagerRenderAddBuilder(area){
   const topology=area.topology||[],builder=mapManagerState.builder||{},mode=builder.mode==='install'?'install':'map';
   const lineCandidates=area.line_candidates||[];
   const occupied=new Set([...(area.active||[]),...mapManagerState.staged].map(row=>`${row.xbox}:${String(row.code).replaceAll('-','').toUpperCase()}`));
-  const freeFor=(box,hubName,lineName)=>[1,2,3,4,5].filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
+  const maxSplitter=Number(area.max_splitter)||5;
+  const freeFor=(box,hubName,lineName)=>Array.from({length:maxSplitter},(_,index)=>index+1).filter(n=>!occupied.has(`${box}:H${Number(String(hubName).slice(1))}L${Number(String(lineName).slice(1))}S${n}`));
   const missing=mode==='install'?mapManagerMissingBoxes(area):[];
   const firstMissing=missing[0];
   const choicesXboxes=mode==='install'?[...new Set(missing.map(row=>row.xbox))]:topology.map(row=>row.xbox);

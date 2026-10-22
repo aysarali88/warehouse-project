@@ -2105,6 +2105,16 @@ def validate_serial_count(product: Product, quantity: float, serial_numbers: lis
         raise HTTPException(status_code=400, detail=f"{product.sku} has duplicate serial numbers in the request")
 
 
+def normalize_rollout_cable_material_type(value) -> str:
+    material = str(value or "").strip()
+    match = re.fullmatch(r"(Single-Core Distribution Cable[_ ]?)(\d+)(?:\.(\d+))?m", material, flags=re.I)
+    if not match:
+        return material
+    fraction = (match.group(3) or "").rstrip("0")
+    length = match.group(2) + (f".{fraction}" if fraction else "")
+    return f"{match.group(1)}{length}m"
+
+
 def row_to_record(row: RolloutRecord) -> dict:
     return {
         "ID": row.record_id,
@@ -2115,7 +2125,7 @@ def row_to_record(row: RolloutRecord) -> dict:
         "city": row.city,
         "Activity": row.activity,
         "item": row.item,
-        "material type": row.material_type,
+        "material type": normalize_rollout_cable_material_type(row.material_type),
         "mount type": row.mount_type,
         "item serial": row.item_serial,
         "planed quantity": row.planned_quantity,
@@ -2719,7 +2729,9 @@ def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAUL
             return
         seen.add(key)
         box_type = str(first_value(row, "Box type", "box type", default="") or "").strip()
-        material = material_override or str(first_value(row, "Material type", "material type", "Item", "item", default="") or "").strip()
+        material = normalize_rollout_cable_material_type(
+            material_override or first_value(row, "Material type", "material type", "Item", "item", default="")
+        )
         rows.append(
             {
                 "city": city,
@@ -3498,6 +3510,10 @@ def fiber_map_manager_line_key(value) -> str:
     return f"L{int(match.group(1))}" if match else ""
 
 
+def fiber_map_manager_splitter_limit(area: str) -> int:
+    return 4 if fiber_map_manager_area_key(area) == "rasammar" else 5
+
+
 FIBER_MAP_MANAGER_LINE_CANDIDATES = {
     "rasammar": {
         "X1": {"H13": {"L4"}},
@@ -3688,6 +3704,7 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
         areas.append({
             "name": info["name"],
             "city": info["city"],
+            "max_splitter": fiber_map_manager_splitter_limit(info["name"]),
             "revision": snapshot["revision"],
             "active": [public_option(k, v) for k, v in sorted(active.items())],
             "available": [public_option(k, v) for k, v in sorted(candidates.items()) if k not in active],
@@ -4039,6 +4056,9 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
             hub = f"H{int(code_match.group(1))}"
             line = f"L{int(code_match.group(2))}"
             splitter = int(code_match.group(3))
+            max_splitter = fiber_map_manager_splitter_limit(area_name)
+            if splitter > max_splitter:
+                raise HTTPException(status_code=400, detail=f"This area supports splitters S1 to S{max_splitter}")
             if line not in topology.get(key[0], {}).get(hub, set()):
                 raise HTTPException(status_code=400, detail="Selected XBOX, hub, and line do not exist in this area's map")
             box_type_key = rollout_norm(selection.box_type)
@@ -4078,7 +4098,7 @@ def fiber_map_manager_change(data: FiberMapChangeIn, request: Request, db: Sessi
                 "Box type": "SUB BOX" if box_type_key == "subbox" else "END BOX",
                 "Real length m": "",
                 "Cable length m": length,
-                "Material type": f"Single-Core Distribution Cable_{length}m",
+                "Material type": normalize_rollout_cable_material_type(f"Single-Core Distribution Cable_{length}m"),
                 "dB": "",
             })
             area_boxes.append(added)
@@ -4395,7 +4415,9 @@ def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, Rol
     row.city = str(first_value(data, "city", "City", default="") or "")
     row.activity = str(first_value(data, "Activity", "activity", default="") or "")
     row.item = str(first_value(data, "item", "Item", default="") or "")
-    row.material_type = str(first_value(data, "material type", "Material Type", "material_type", default="") or "")
+    row.material_type = normalize_rollout_cable_material_type(
+        first_value(data, "material type", "Material Type", "material_type", default="")
+    )
     row.mount_type = str(first_value(data, "mount type", "Mount Type", "mount_type", default="") or "")
     row.item_serial = str(first_value(data, "item serial", "Item Serial", "item_serial", default="") or "")
     row.planned_quantity = safe_float(first_value(data, "planed quantity", "planned quantity", "planned_quantity", default=0))
@@ -5960,7 +5982,9 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     activity = str(first_value(data, "Activity", "activity", default=row.activity) or "").strip()
     xbox = str(first_value(data, "Related to XBOX", "related_to_xbox", default=row.related_to_xbox) or "").strip()
     item = str(first_value(data, "item", "Item", default=row.item) or "").strip()
-    material_type = str(first_value(data, "material type", "Material Type", "material_type", default=row.material_type) or "").strip()
+    material_type = normalize_rollout_cable_material_type(
+        first_value(data, "material type", "Material Type", "material_type", default=row.material_type)
+    )
     mount_type = str(first_value(data, "mount type", "Mount Type", "mount_type", default=row.mount_type) or "").strip()
     item_serial = str(first_value(data, "item serial", "Item Serial", "item_serial", default=row.item_serial) or "").strip()
     planned_quantity = safe_float(first_value(data, "planed quantity", "planned quantity", "planned_quantity", default=row.planned_quantity))
