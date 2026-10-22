@@ -208,6 +208,49 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual(box_types["H12-L1-S4"], "END BOX")
         self.assertEqual(sum(value == "END BOX" for value in box_types.values()), 4)
 
+    def test_area_builder_accepts_sub_end_box_header_for_interactive_map(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append([
+            "X-Box", "Hub", "From", "To Hub", "QLC actual (m)", "QLC precon (m)",
+            "Lines", "SUB/END boxes", "Hub output (dBm)", "Best cumulative loss (dB)",
+            "Worst cumulative loss (dB)",
+        ])
+        hub_index.append(["X1", "X1-H1", "X1", "X1-H2", 306.774, 500, 1, 4, -1.56, 21.0, 26.1])
+        hub_index.append(["X1", "X1-H2", "X1-H1", None, 131.978, 150, 1, 1, -2.30, 21.7, 26.8])
+        workbook.create_sheet("X1 H1-H2")
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append([
+            "Cable FID", "SUB/END box", "Hub", "X-Box", "Line", "Sequence",
+            "Actual length (m)", "Precon length (m)", "Splitter", "Cumulative loss (dB)",
+        ])
+        for sequence in range(1, 5):
+            cable_data.append([
+                400 + sequence, f"X1-H1-L1-S{sequence}", "X1-H1", "X1", "L1", sequence,
+                30 + sequence, 50, "1:8" if sequence == 4 else "1:9", 20 + sequence,
+            ])
+        cable_data.append([405, "X1-H2-L1-S1", "X1-H2", "X1", "L1", 1, 25, 100, "1:8", 22])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Ras Ali", "Misurata")
+        box_types = {row["Box code"]: row["Box type"] for row in payload["boxes"]}
+
+        self.assertEqual(payload["summary"], {
+            "xboxes": 1,
+            "hubs": 2,
+            "sub_end_boxes": 5,
+            "distribution_meters": 300,
+            "core_meters": 650,
+            "total_cable_meters": 950,
+        })
+        self.assertEqual(box_types["H1-L1-S4"], "END BOX")
+        self.assertEqual(box_types["H2-L1-S1"], "END BOX")
+        self.assertEqual(sum(value == "END BOX" for value in box_types.values()), 2)
+        self.assertEqual({row["Route code"] for row in payload["routes"]}, {"X1-H1", "H1-H2"})
+
     @staticmethod
     def make_request(role, program="FTTH"):
         return Request({
