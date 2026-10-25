@@ -4545,6 +4545,31 @@ def product_part_number(sku: str = "", explicit: str = "") -> str:
     return PART_NUMBER_BY_SKU.get(str(sku or "").strip().upper(), "")
 
 
+def validate_material_requisition_part_numbers(
+    db: Session, items: list[MaterialRequisitionItemIn], program: str
+) -> dict[int, Product]:
+    products: dict[int, Product] = {}
+    for item in items:
+        if not item.product_id:
+            raise HTTPException(status_code=400, detail="Choose a material from the catalog for every MR line")
+        product = products.get(item.product_id)
+        if product is None:
+            product = require_product(db, item.product_id, program)
+            products[item.product_id] = product
+        expected = product_part_number(product.sku, product.part_number)
+        submitted = str(item.part_nbr or "").strip()
+        if submitted and submitted.casefold() != expected.casefold():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Part number does not match selected material "
+                    f"{product_display_name(product)} (SKU {product.sku}). "
+                    f"Expected {expected or 'blank'}; received {submitted}."
+                ),
+            )
+    return products
+
+
 sync_product_part_numbers()
 
 
@@ -9356,6 +9381,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    products_by_id = validate_material_requisition_part_numbers(db, data.items, program_key)
     validate_reservable_stock(db, data.warehouse_id, data.items, program_key)
 
     order_number = next_material_requisition_number(db, warehouse, program_key)
@@ -9392,7 +9418,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id, program_key) if item.product_id else None
+        product = products_by_id[item.product_id]
         item_vendor = item.vendor.strip()
         if program_key == SINGLE_RAN_PROGRAM:
             if product is None:
@@ -9408,7 +9434,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                part_nbr=product_part_number(product.sku, product.part_number),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
@@ -9476,6 +9502,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    products_by_id = validate_material_requisition_part_numbers(db, data.items, program_key)
     validate_reservable_stock(db, data.warehouse_id, data.items, program_key, exclude_requisition_id=row.id)
 
     row.creation_date = data.creation_date
@@ -9505,7 +9532,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
 
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id, program_key) if item.product_id else None
+        product = products_by_id[item.product_id]
         item_vendor = item.vendor.strip()
         if program_key == SINGLE_RAN_PROGRAM:
             if product is None:
@@ -9521,7 +9548,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                part_nbr=product_part_number(product.sku, product.part_number),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
