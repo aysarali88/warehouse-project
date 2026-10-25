@@ -251,6 +251,91 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertEqual(sum(value == "END BOX" for value in box_types.values()), 2)
         self.assertEqual({row["Route code"] for row in payload["routes"]}, {"X1-H1", "H1-H2"})
 
+    def test_area_builder_accepts_compact_cable_data_headers_and_preserves_optical_values(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append(["X-Box", "Hub", "From", "To Hub", "QLC actual (m)", "QLC precon (m)", "Sub boxes"])
+        hub_index.append(["X1", "X1-H1", "X1", None, 45, 50, 2])
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append([
+            "SUB/END", "X-Box", "HUB", "Line", "Sequence", "Type", "Actual (m)",
+            "Precon (m)", "Cumulative loss (dB)", "ATB output (dBm)",
+        ])
+        cable_data.append(["SUB", "X1", "X1-H1", "L1", 1, "1:8", 30, 50, 22.5, -5.1])
+        cable_data.append(["SUB", "X1", "X1-H1", "L1", 2, "1:9", 32, 80, 23.2, -5.7])
+        cable_data.append(["END", "X1", "X1-H1", "L1", 3, "1:8", 33, 100, 24.0, -6.2])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Test Area", "Misurata")
+
+        self.assertEqual([row["Box type"] for row in payload["boxes"]], ["SUB BOX", "SUB BOX", "END BOX"])
+        self.assertEqual([row["dB"] for row in payload["boxes"]], [22.5, 23.2, 24.0])
+        self.assertEqual([row["ATB output (dBm)"] for row in payload["boxes"]], [-5.1, -5.7, -6.2])
+        self.assertEqual(payload["summary"], {
+            "xboxes": 1,
+            "hubs": 1,
+            "sub_end_boxes": 3,
+            "distribution_meters": 230,
+            "core_meters": 50,
+            "total_cable_meters": 280,
+        })
+
+    def test_area_builder_imports_awlad_abushala_headers_summary_and_compact_parts(self):
+        workbook = main.Workbook()
+        hub_index = workbook.active
+        hub_index.title = "Hub Index"
+        hub_index.append(["Network Schematics"])
+        hub_index.append([])
+        hub_index.append(["Topology notes"])
+        hub_index.append([])
+        hub_index.append([
+            "X-Box", "HUB", "From", "To HUB", "QLC actual (m)", "QLC precon (m)",
+            "Lines", "SUB/END boxes", "HUB output (dBm)", "Loss to HUB (dB)", "HUB cascade order",
+        ])
+        hub_index.append(["X1", "X1-H1", "X1", "X1-H2", 45, 50, 1, 2, -2.1, 7.1, 1])
+        hub_index.append(["X1", "X1-H2", "X1-H1", None, 80, 80, 1, 1, -2.9, 7.9, 2])
+        hub_index.append([])
+        hub_index.append(["X-Boxes", "HUBs", "SUB boxes", "END boxes", "Distribution lines"])
+        hub_index.append([1, 2, 1, 2, 2])
+        workbook.create_sheet("X1-H1-H2")
+
+        cable_data = workbook.create_sheet("Cable Data")
+        cable_data.append(["Distribution Cable and SUB Power Data"])
+        cable_data.append([])
+        cable_data.append(["Actual and preconnected lengths; optical values are included."])
+        cable_data.append([])
+        cable_data.append([
+            "SUB/END", "X-Box", "HUB", "Line", "Sequence", "Type", "Actual (m)",
+            "Precon (m)", "Cumulative loss (dB)", "ATB output (dBm)",
+        ])
+        cable_data.append(["H1-L1-S1", "X1", "X1-H1", "X1-H1-L1", 1, "SUB", 12.5, 50, 23.4, -20.0])
+        cable_data.append(["H1-L1-S2", "X1", "X1-H1", "X1-H1-L1", 2, "END", 20, 50, 25.5, -22.0])
+        cable_data.append(["H2-L1-S1", "X1", "X1-H2", "X1-H2-L1", 1, "END", 25, 80, 23.0, -20.0])
+
+        contents = BytesIO()
+        workbook.save(contents)
+        payload = main.build_area_map_from_workbook(contents.getvalue(), "Awlad Abushala", "Misurata")
+
+        self.assertEqual(payload["summary"], {
+            "xboxes": 1,
+            "hubs": 2,
+            "sub_end_boxes": 3,
+            "distribution_meters": 180,
+            "core_meters": 130,
+            "total_cable_meters": 310,
+        })
+        self.assertEqual({row["Part"] for row in payload["boxes"]}, {"X1 H1-H2"})
+        self.assertEqual({row["Part"] for row in payload["routes"]}, {"X1 H1-H2"})
+        self.assertEqual(
+            {row["Box code"]: row["Box type"] for row in payload["boxes"]},
+            {"H1-L1-S1": "SUB BOX", "H1-L1-S2": "END BOX", "H2-L1-S1": "END BOX"},
+        )
+        self.assertEqual([row["dB"] for row in payload["boxes"]], [23.4, 25.5, 23.0])
+        self.assertEqual([row["ATB output (dBm)"] for row in payload["boxes"]], [-20.0, -22.0, -20.0])
+
     @staticmethod
     def make_request(role, program="FTTH"):
         return Request({
