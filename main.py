@@ -2941,8 +2941,17 @@ def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str
     header_map: dict[str, int] = {}
     for index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
         candidate = {area_builder_header_key(value): column for column, value in enumerate(row) if area_builder_header_key(value)}
-        if "subendbox" in candidate and "subbox" not in candidate:
-            candidate["subbox"] = candidate["subendbox"]
+        for source, target in (
+            ("subendbox", "subbox"),
+            ("subend", "subbox"),
+            ("subendboxes", "totalboxes"),
+            ("actualm", "actuallengthm"),
+            ("preconm", "preconlengthm"),
+            ("lines", "distributionlines"),
+            ("type", "splitter"),
+        ):
+            if source in candidate and target not in candidate:
+                candidate[target] = candidate[source]
         if required_headers.issubset(candidate):
             header_row = index
             header_map = candidate
@@ -2953,11 +2962,20 @@ def area_builder_sheet_rows(workbook, sheet_name: str, required_headers: set[str
         raise HTTPException(status_code=400, detail=f"Could not find the required columns in '{sheet_name}'")
 
     rows: list[dict] = []
+    summary_section = False
     for values in sheet.iter_rows(min_row=header_row + 1, values_only=True):
         item = {
             header: values[column] if column < len(values) else ""
             for header, column in header_map.items()
         }
+        if (
+            sheet_name == "Hub Index"
+            and area_builder_header_key(item.get("xbox")) == "xboxes"
+            and area_builder_header_key(item.get("hub")) == "hubs"
+        ):
+            summary_section = True
+        if summary_section:
+            continue
         if any(str(value or "").strip() for value in item.values()):
             rows.append(item)
     return rows
@@ -2982,6 +3000,15 @@ def area_builder_actual_length(value) -> int | float:
     return int(rounded) if rounded.is_integer() else rounded
 
 
+def area_builder_box_kind(value) -> str:
+    key = area_builder_header_key(value)
+    if key in {"end", "endbox", "endterminal"}:
+        return "end"
+    if key in {"sub", "subbox", "subterminal"}:
+        return "sub"
+    return ""
+
+
 def area_builder_end_box_codes(cable_rows: list[dict], hub_rows: list[dict]) -> set[str]:
     line_rows: dict[tuple[str, str, int], list[dict]] = {}
     box_counts: dict[tuple[str, str], int] = {}
@@ -2996,16 +3023,19 @@ def area_builder_end_box_codes(cable_rows: list[dict], hub_rows: list[dict]) -> 
         line_rows.setdefault((xbox, hub, line), []).append(row)
         box_counts[(xbox, hub)] = box_counts.get((xbox, hub), 0) + 1
         splitter = str(row.get("splitter") or "").replace(" ", "").lower()
-        if "1:8" in splitter or "1x8" in splitter:
+        box_kind = area_builder_box_kind(row.get("subbox")) or area_builder_box_kind(row.get("splitter"))
+        if box_kind == "end" or (not box_kind and ("1:8" in splitter or "1x8" in splitter)):
             end_codes.add((xbox, hub, f"{hub}-L{line}-S{sequence}"))
 
     for key, rows in line_rows.items():
-        has_explicit_end = any(
-            "1:8" in str(row.get("splitter") or "").replace(" ", "").lower()
+        has_explicit_classification = any(
+            area_builder_box_kind(row.get("subbox"))
+            or area_builder_box_kind(row.get("splitter"))
+            or "1:8" in str(row.get("splitter") or "").replace(" ", "").lower()
             or "1x8" in str(row.get("splitter") or "").replace(" ", "").lower()
             for row in rows
         )
-        if has_explicit_end:
+        if has_explicit_classification:
             continue
         final_row = max(rows, key=lambda row: area_builder_number(row.get("sequence")))
         sequence = area_builder_number(final_row.get("sequence"))
@@ -3038,7 +3068,7 @@ def area_builder_sheet_parts(workbook) -> dict[tuple[str, str], str]:
     """Use optional schematic tab names as the explicit visual grouping."""
     parts: dict[tuple[str, str], str] = {}
     for sheet_name in workbook.sheetnames:
-        match = re.match(r"^\s*X\s*-?\s*(\d+)\s+H\s*(\d+)(?:\s*-\s*H\s*(\d+))?\s*$", sheet_name, flags=re.I)
+        match = re.match(r"^\s*X\s*-?\s*(\d+)\s*-?\s*H\s*(\d+)(?:\s*-\s*H\s*(\d+))?\s*$", sheet_name, flags=re.I)
         if not match:
             continue
         xbox = f"X{int(match.group(1))}"
@@ -3052,7 +3082,7 @@ def area_builder_sheet_parts(workbook) -> dict[tuple[str, str], str]:
 
 
 def area_builder_schematic_xbox(sheet_name: str) -> str:
-    match = re.match(r"^\s*X\s*-?\s*(\d+)\s+H\s*\d+(?:\s*-\s*H\s*\d+)?\s*$", sheet_name, flags=re.I)
+    match = re.match(r"^\s*X\s*-?\s*(\d+)\s*-?\s*H\s*\d+(?:\s*-\s*H\s*\d+)?\s*$", sheet_name, flags=re.I)
     return f"X{int(match.group(1))}" if match else ""
 
 
@@ -3361,7 +3391,10 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         if box_key in seen_boxes:
             raise HTTPException(status_code=400, detail=f"Cable Data contains the code {code} more than once for {xbox}")
         seen_boxes.add(box_key)
-        is_end = code in end_box_codes or "1:8" in splitter.lower() or "1x8" in splitter.lower()
+        box_kind = area_builder_box_kind(row.get("subbox")) or area_builder_box_kind(row.get("splitter"))
+        is_end = box_kind == "end" if box_kind else (
+            code in end_box_codes or "1:8" in splitter.lower() or "1x8" in splitter.lower()
+        )
         boxes.append(
             {
                 "Area": area,
@@ -3378,6 +3411,8 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
                 "Real length m": actual,
                 "Cable length m": planned,
                 "Material type": f"Single-Core Distribution Cable_{planned}m",
+                "dB": row.get("cumulativelossdb") or "",
+                "ATB output (dBm)": row.get("atboutputdbm") or "",
             }
         )
         hubs.add((xbox, hub))
@@ -3425,6 +3460,27 @@ def build_area_map_from_workbook(contents: bytes, area: str, city: str) -> dict:
         )
         xboxes.add(xbox)
         core_meters += planned
+
+    boxes_by_hub: dict[tuple[str, str], list[dict]] = {}
+    for box in boxes:
+        key = (area_builder_xbox_code(box.get("XBOX")), area_builder_hub_code(box.get("Hub")))
+        boxes_by_hub.setdefault(key, []).append(box)
+    for row in hub_rows:
+        key = (area_builder_xbox_code(row.get("xbox")), area_builder_hub_code(row.get("hub")))
+        hub_boxes = boxes_by_hub.get(key, [])
+        expected_boxes = row.get("totalboxes")
+        if expected_boxes not in (None, "") and len(hub_boxes) != area_builder_number(expected_boxes):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cable Data box total does not match Hub Index for {key[0]}/{key[1]}",
+            )
+        expected_lines = row.get("distributionlines")
+        actual_lines = {area_builder_line_number(box.get("Line")) for box in hub_boxes}
+        if expected_lines not in (None, "") and len(actual_lines) != area_builder_number(expected_lines):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cable Data line count does not match Hub Index for {key[0]}/{key[1]}",
+            )
 
     if not boxes or not routes:
         raise HTTPException(status_code=400, detail="The workbook must contain both Cable Data and Hub Index records")
