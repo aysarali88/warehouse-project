@@ -158,6 +158,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_file_data BYTEA",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS area_builder_access BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS entry_time VARCHAR DEFAULT ''",
@@ -213,6 +214,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE receive_orders ADD COLUMN invoice_file_data BLOB",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN area_builder_access BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN entry_time VARCHAR DEFAULT ''",
@@ -1685,6 +1687,7 @@ def session_user_payload(user: AppUser, program: str) -> dict:
         "name": user.name or user.username,
         "role": user.role,
         "warehouse_name": user.warehouse_name or "",
+        "area_builder_access": bool(user.area_builder_access) or is_admin_role(user.role),
     }
 
 
@@ -1715,6 +1718,17 @@ def require_roles(request: Request, *roles: str) -> AppUser:
     user = current_user(request)
     if user.role.strip().lower() not in {role.strip().lower() for role in roles}:
         raise HTTPException(status_code=403, detail="You do not have permission for this action")
+    return user
+
+
+def can_access_area_builder(user: AppUser, program: str = DEFAULT_PROGRAM) -> bool:
+    return not is_single_ran(program) and (is_admin_role(user.role) or bool(user.area_builder_access))
+
+
+def require_area_builder_access(request: Request) -> AppUser:
+    user = current_user(request)
+    if not can_access_area_builder(user, getattr(request.state, "session_program", DEFAULT_PROGRAM)):
+        raise HTTPException(status_code=403, detail="You do not have permission to use Area Builder")
     return user
 
 
@@ -4260,7 +4274,7 @@ async def preview_area_builder(
     target_users: int = Form(0),
     workbook: UploadFile = File(...),
 ):
-    require_roles(request, "Admin")
+    require_area_builder_access(request)
     if is_single_ran(getattr(request.state, "program", DEFAULT_PROGRAM)):
         raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
     area_name, city_name, start, end, users = area_builder_metadata(area, city, start_date, end_date, target_users)
@@ -4289,7 +4303,7 @@ async def publish_area_builder(
     workbook: UploadFile = File(...),
     db: Session = Depends(db_session),
 ):
-    require_roles(request, "Admin")
+    require_area_builder_access(request)
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
     if is_single_ran(program_key):
         raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
