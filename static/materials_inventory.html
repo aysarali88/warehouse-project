@@ -986,6 +986,7 @@ body.sr-program .login-logo img{
 .sr-excel-tools{align-items:center;margin-bottom:10px;padding:10px;border:1px solid #c9e1ea;border-radius:7px;background:#f7fbfd}
 .sr-excel-status{font-size:12px;color:var(--muted);font-weight:800;line-height:1.5}
 .sr-excel-status.error{color:var(--red)}
+.sr-excel-status.has-issues{display:block;flex-basis:100%;max-height:240px;overflow:auto;padding:8px 10px;border:1px solid #f1caca;border-radius:7px;background:#fffafa;white-space:pre-line}
 .city-ops-subtitle{margin:-6px 0 12px;color:var(--muted);font-size:11px;font-weight:700}
 .city-ops-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .city-ops-card{min-width:0;border:1px solid #dce8ef;border-radius:8px;background:#fff;padding:11px}
@@ -2906,7 +2907,8 @@ function setSrExcelStatus(kind,message,isError=false){
   const status=document.getElementById(kind==='transfer'?'transferExcelStatus':'mrExcelStatus');
   if(!status)return;
   status.textContent=message;
-  status.classList.toggle('error',isError)
+  status.classList.toggle('error',isError);
+  status.classList.toggle('has-issues',isError&&message.includes('\n'))
 }
 async function uploadSrRequestItems(kind,input){
   const file=input?.files?.[0];
@@ -2930,8 +2932,9 @@ async function uploadSrRequestItems(kind,input){
     setSrExcelStatus(kind,summary);
     toast(summary+' — review before Submit')
   }catch(error){
-    setSrExcelStatus(kind,error.message||'Excel upload failed',true);
-    toast(error.message||'Excel upload failed')
+    const message=error.message||'Excel upload failed';
+    setSrExcelStatus(kind,message,true);
+    toast(message.split('\n')[0])
   }finally{input.value=''}
 }
 function initTransferDefaults(){const d=document.getElementById('trDate');if(d&&!d.value)d.value=today();if(document.getElementById('trRequesterName')&&!trRequesterName.value&&activeUser)trRequesterName.value=activeUser;if(document.getElementById('trApproverName')&&!trApproverName.value)trApproverName.value='Mustafa';const box=document.getElementById('transferLines');if(box&&!box.children.length)addTransferLine()}

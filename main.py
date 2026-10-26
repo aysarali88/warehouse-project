@@ -8594,11 +8594,17 @@ def sr_request_upload_quantity(value, row_number: int) -> float:
     return quantity
 
 
+def sr_request_upload_error_summary(errors: list[str]) -> str:
+    lines = [f"{index}. {error}" for index, error in enumerate(errors, start=1)]
+    return f"Excel validation found {len(errors)} issue(s):\n" + "\n".join(lines)
+
+
 def parse_sr_request_upload(
     db: Session,
     contents: bytes,
     warehouse_id: int,
     filename: str = "materials.xlsx",
+    request_kind: str = "mr",
 ) -> dict:
     if not contents:
         raise ValueError("Choose an Excel file first")
@@ -8646,7 +8652,9 @@ def parse_sr_request_upload(
                 product_lookup[key] = None
 
     aggregated: dict[int, dict] = {}
+    source_rows: dict[int, list[int]] = {}
     errors: list[str] = []
+    request_kind = str(request_kind or "mr").strip().lower()
     populated_rows = 0
     blank_rows = 0
     for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
@@ -8704,20 +8712,24 @@ def parse_sr_request_upload(
             }
             aggregated[product.id] = current
         current["quantity"] += quantity
+        source_rows.setdefault(product.id, []).append(row_number)
         if remark and remark not in current["remark"].split("; "):
             current["remark"] = "; ".join(filter(None, [current["remark"], remark]))
 
-    if errors:
+    if errors and request_kind != "mr":
         summary = "; ".join(errors[:8])
         if len(errors) > 8:
             summary += f"; and {len(errors) - 8} more error(s)"
         raise ValueError(summary)
     if not aggregated:
+        if errors and request_kind == "mr":
+            raise ValueError(sr_request_upload_error_summary(errors))
         raise ValueError("No valid material rows were found")
 
     require_warehouse(db, warehouse_id, SINGLE_RAN_PROGRAM)
     items = list(aggregated.values())
-    validate_reservable_stock(db, warehouse_id, [MaterialRequisitionItemIn(**item) for item in items], SINGLE_RAN_PROGRAM)
+    if request_kind != "mr":
+        validate_reservable_stock(db, warehouse_id, [MaterialRequisitionItemIn(**item) for item in items], SINGLE_RAN_PROGRAM)
     reserved = reserved_stock_quantities(db, SINGLE_RAN_PROGRAM)
     balances = {
         row.product_id: float(row.quantity or 0)
@@ -8729,7 +8741,20 @@ def parse_sr_request_upload(
     }
     for item in items:
         held = float(reserved.get((warehouse_id, item["product_id"]), 0) or 0)
-        item["available_quantity"] = max(balances.get(item["product_id"], 0) - held, 0)
+        stock = balances.get(item["product_id"], 0)
+        available = max(stock - held, 0)
+        item["available_quantity"] = available
+        if request_kind == "mr" and item["quantity"] > available + 1e-9:
+            rows = source_rows.get(item["product_id"], [])
+            row_label = "Row" if len(rows) == 1 else "Rows"
+            row_numbers = ", ".join(str(row) for row in rows)
+            errors.append(
+                f"{row_label} {row_numbers}: Insufficient available stock for Part # {item['part_nbr']} "
+                f"({item['description']}). Requested {item['quantity']:g}, stock {stock:g}, "
+                f"reserved {held:g}, available {available:g}."
+            )
+    if errors and request_kind == "mr":
+        raise ValueError(sr_request_upload_error_summary(errors))
     return {
         "sheet": sheet.title,
         "items": items,
@@ -9012,6 +9037,7 @@ async def preview_sr_request_items_excel(
             contents,
             warehouse_id,
             workbook.filename or "materials.xlsx",
+            request_kind=kind,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
