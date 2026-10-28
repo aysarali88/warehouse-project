@@ -2311,14 +2311,25 @@ def rollout_norm(value) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
+def canonical_site_area_name(value: str) -> str:
+    text_value = str(value or "").strip()
+    if rollout_norm(text_value) in {"awladaboshaalah", "awladabushala"}:
+        return "Awlad Abushala"
+    return text_value
+
+
 def rollout_area_key(value) -> str:
     key = rollout_norm(value)
+    if key in {"awladaboshaalah", "awladabushala"}:
+        return "awladabushala"
     if key in {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}:
         return "hayalandaluszone1"
     return "hayalandaluszone2" if key in {"hayalandalus", "hayandaluszone2", "hayalandaluszone2"} else key
 
 
 def rollout_area_label(value) -> str:
+    if rollout_area_key(value) == "awladabushala":
+        return "Awlad Abushala"
     if rollout_area_key(value) == "hayalandaluszone1":
         return "Hay Al Andalus Z1"
     return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
@@ -3524,7 +3535,7 @@ def area_builder_metadata(area: str, city: str, start_date: str, end_date: str, 
         raise HTTPException(status_code=400, detail="Enter valid start and end dates") from exc
     if end < start:
         raise HTTPException(status_code=400, detail="End date cannot be before start date")
-    return area_name, city_name, start.isoformat(), end.isoformat(), max(0, int(target_users or 0))
+    return canonical_site_area_name(area_name), city_name, start.isoformat(), end.isoformat(), max(0, int(target_users or 0))
 
 
 @app.get("/api/warehouse/fiber-map-reference")
@@ -3564,6 +3575,8 @@ def fiber_map_manager_area_label(value: str) -> str:
         return "Bera W Taleem"
     if key == "awladbaeoo":
         return "Awlad Baeoo"
+    if key == "awladabushala":
+        return "Awlad Abushala"
     if key == "hayalandaluszone1":
         return "Hay Al Andalus Z1"
     return str(value or "").strip()
@@ -4329,7 +4342,10 @@ async def publish_area_builder(
         created_by=actor,
     )
     db.add(saved)
-    if not db.query(Site).filter(Site.program == program_key, func.lower(Site.name) == area_name.lower()).first():
+    if not any(
+        canonical_site_area_name(site.name).casefold() == area_name.casefold()
+        for site in db.query(Site).filter(Site.program == program_key).all()
+    ):
         db.add(Site(program=program_key, name=area_name))
     log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, **payload["summary"]})
     db.commit()
@@ -5100,7 +5116,7 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
 
 
 def canonical_area_name(value: str) -> str:
-    text_value = str(value or "").strip()
+    text_value = canonical_site_area_name(value)
     key = normalize_usage_key(text_value)
     if key in {"haydamascus", "haydemascus", "haydemashq"}:
         return "Hay Demascus"
@@ -5290,7 +5306,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "return_number": row.return_number,
         "return_date": row.return_date,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -6332,16 +6348,33 @@ def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_ses
 def list_sites(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     rows = db.query(Site).filter(Site.program == program_key).order_by(Site.name).all()
-    return {"success": True, "sites": [{"id": r.id, "program": program_key, "name": r.name} for r in rows]}
+    sites_by_name = {}
+    for row in rows:
+        name = canonical_site_area_name(row.name)
+        key = "awladabushala" if name == "Awlad Abushala" else f"site:{row.id}"
+        sites_by_name.setdefault(key, {"id": row.id, "program": program_key, "name": name})
+    sites = sorted(sites_by_name.values(), key=lambda site: site["name"].casefold())
+    return {"success": True, "sites": sites}
 
 
 @app.post("/api/warehouse/sites")
 def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
     program_key = normalize_program(data.program)
-    name = data.name.strip()
+    name = canonical_site_area_name(data.name)
     if not name:
         raise HTTPException(status_code=400, detail="Site ID is required")
+    if name == "Awlad Abushala":
+        existing = next(
+            (
+                row
+                for row in db.query(Site).filter(Site.program == program_key).all()
+                if canonical_site_area_name(row.name).casefold() == name.casefold()
+            ),
+            None,
+        )
+        if existing:
+            return {"success": True, "site": {"id": existing.id, "program": program_key, "name": name}}
     row = Site(program=program_key, name=name)
     db.add(row)
     try:
@@ -10104,7 +10137,7 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
         program=program_key,
         return_number=next_number(db, MaterialReturn, "RET"),
         return_date=data.return_date or local_today(),
-        site_id=data.site_id.strip(),
+        site_id=canonical_site_area_name(data.site_id),
         site_address=data.site_address.strip(),
         warehouse_id=data.warehouse_id,
         returned_by=data.returned_by.strip(),
