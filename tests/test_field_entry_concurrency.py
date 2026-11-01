@@ -23,7 +23,7 @@ os.environ["SESSION_SECRET"] = "isolated-test-session-secret-at-least-thirty-two
 class FieldEntryConcurrencyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, StockMovement, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem
+        global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, StockMovement, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem, Site
         import main
         from database import SessionLocal
         from models import (
@@ -33,6 +33,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             MaterialTransferItem,
             Product,
             RolloutRecord,
+            Site,
             StockBalance,
             StockMovement,
             Warehouse,
@@ -236,6 +237,24 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(main.canonical_mr_history_area("Hay Al Andalus Z2"), "Hay Al Andalus Z2")
         self.assertEqual(main.canonical_rollout_usage_area("Bera W Taleem"), "Bera W Taleem")
         self.assertEqual(main.canonical_rollout_usage_area("Albera"), "Bera W Taleem")
+
+    def test_awlad_abushala_site_aliases_collapse_across_programs(self):
+        aliases = ("Awlad Abo Sha'alah", "Awlad Abushala")
+        self.assertEqual({main.canonical_mr_history_area(value) for value in aliases}, {"Awlad Abushala"})
+        self.assertEqual(main.rollout_area_key(aliases[0]), main.rollout_area_key(aliases[1]))
+        self.assertEqual({main.rollout_area_label(value) for value in aliases}, {"Awlad Abushala"})
+
+        db = SessionLocal()
+        try:
+            for program in (main.DEFAULT_PROGRAM, main.SINGLE_RAN_PROGRAM):
+                db.add_all(Site(program=program, name=name) for name in aliases)
+            db.commit()
+            for program in (main.DEFAULT_PROGRAM, main.SINGLE_RAN_PROGRAM):
+                sites = main.list_sites(program=program, db=db)["sites"]
+                matching = [site for site in sites if site["name"] == "Awlad Abushala"]
+                self.assertEqual(len(matching), 1)
+        finally:
+            db.close()
 
     def test_rollout_usage_matches_albera_mr_with_bera_w_taleem_field_entries(self):
         db = SessionLocal()

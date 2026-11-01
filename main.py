@@ -158,6 +158,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE receive_orders ADD COLUMN IF NOT EXISTS invoice_file_data BYTEA",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS area_builder_access BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS entry_time VARCHAR DEFAULT ''",
@@ -213,6 +214,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE receive_orders ADD COLUMN invoice_file_data BLOB",
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
+            "ALTER TABLE app_users ADD COLUMN area_builder_access BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN entry_time VARCHAR DEFAULT ''",
@@ -1685,6 +1687,7 @@ def session_user_payload(user: AppUser, program: str) -> dict:
         "name": user.name or user.username,
         "role": user.role,
         "warehouse_name": user.warehouse_name or "",
+        "area_builder_access": bool(user.area_builder_access) or is_admin_role(user.role),
     }
 
 
@@ -1715,6 +1718,17 @@ def require_roles(request: Request, *roles: str) -> AppUser:
     user = current_user(request)
     if user.role.strip().lower() not in {role.strip().lower() for role in roles}:
         raise HTTPException(status_code=403, detail="You do not have permission for this action")
+    return user
+
+
+def can_access_area_builder(user: AppUser, program: str = DEFAULT_PROGRAM) -> bool:
+    return not is_single_ran(program) and (is_admin_role(user.role) or bool(user.area_builder_access))
+
+
+def require_area_builder_access(request: Request) -> AppUser:
+    user = current_user(request)
+    if not can_access_area_builder(user, getattr(request.state, "session_program", DEFAULT_PROGRAM)):
+        raise HTTPException(status_code=403, detail="You do not have permission to use Area Builder")
     return user
 
 
@@ -2297,14 +2311,25 @@ def rollout_norm(value) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
+def canonical_site_area_name(value: str) -> str:
+    text_value = str(value or "").strip()
+    if rollout_norm(text_value) in {"awladaboshaalah", "awladabushala"}:
+        return "Awlad Abushala"
+    return text_value
+
+
 def rollout_area_key(value) -> str:
     key = rollout_norm(value)
+    if key in {"awladaboshaalah", "awladabushala"}:
+        return "awladabushala"
     if key in {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}:
         return "hayalandaluszone1"
     return "hayalandaluszone2" if key in {"hayalandalus", "hayandaluszone2", "hayalandaluszone2"} else key
 
 
 def rollout_area_label(value) -> str:
+    if rollout_area_key(value) == "awladabushala":
+        return "Awlad Abushala"
     if rollout_area_key(value) == "hayalandaluszone1":
         return "Hay Al Andalus Z1"
     return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
@@ -3510,7 +3535,7 @@ def area_builder_metadata(area: str, city: str, start_date: str, end_date: str, 
         raise HTTPException(status_code=400, detail="Enter valid start and end dates") from exc
     if end < start:
         raise HTTPException(status_code=400, detail="End date cannot be before start date")
-    return area_name, city_name, start.isoformat(), end.isoformat(), max(0, int(target_users or 0))
+    return canonical_site_area_name(area_name), city_name, start.isoformat(), end.isoformat(), max(0, int(target_users or 0))
 
 
 @app.get("/api/warehouse/fiber-map-reference")
@@ -3550,6 +3575,8 @@ def fiber_map_manager_area_label(value: str) -> str:
         return "Bera W Taleem"
     if key == "awladbaeoo":
         return "Awlad Baeoo"
+    if key == "awladabushala":
+        return "Awlad Abushala"
     if key == "hayalandaluszone1":
         return "Hay Al Andalus Z1"
     return str(value or "").strip()
@@ -4260,7 +4287,7 @@ async def preview_area_builder(
     target_users: int = Form(0),
     workbook: UploadFile = File(...),
 ):
-    require_roles(request, "Admin")
+    require_area_builder_access(request)
     if is_single_ran(getattr(request.state, "program", DEFAULT_PROGRAM)):
         raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
     area_name, city_name, start, end, users = area_builder_metadata(area, city, start_date, end_date, target_users)
@@ -4289,7 +4316,7 @@ async def publish_area_builder(
     workbook: UploadFile = File(...),
     db: Session = Depends(db_session),
 ):
-    require_roles(request, "Admin")
+    require_area_builder_access(request)
     program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
     if is_single_ran(program_key):
         raise HTTPException(status_code=400, detail="Area Builder is available for FTTH only")
@@ -4315,7 +4342,10 @@ async def publish_area_builder(
         created_by=actor,
     )
     db.add(saved)
-    if not db.query(Site).filter(Site.program == program_key, func.lower(Site.name) == area_name.lower()).first():
+    if not any(
+        canonical_site_area_name(site.name).casefold() == area_name.casefold()
+        for site in db.query(Site).filter(Site.program == program_key).all()
+    ):
         db.add(Site(program=program_key, name=area_name))
     log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, **payload["summary"]})
     db.commit()
@@ -4543,6 +4573,31 @@ def product_part_number(sku: str = "", explicit: str = "") -> str:
     if explicit_value:
         return explicit_value
     return PART_NUMBER_BY_SKU.get(str(sku or "").strip().upper(), "")
+
+
+def validate_material_requisition_part_numbers(
+    db: Session, items: list[MaterialRequisitionItemIn], program: str
+) -> dict[int, Product]:
+    products: dict[int, Product] = {}
+    for item in items:
+        if not item.product_id:
+            raise HTTPException(status_code=400, detail="Choose a material from the catalog for every MR line")
+        product = products.get(item.product_id)
+        if product is None:
+            product = require_product(db, item.product_id, program)
+            products[item.product_id] = product
+        expected = product_part_number(product.sku, product.part_number)
+        submitted = str(item.part_nbr or "").strip()
+        if submitted and submitted.casefold() != expected.casefold():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Part number does not match selected material "
+                    f"{product_display_name(product)} (SKU {product.sku}). "
+                    f"Expected {expected or 'blank'}; received {submitted}."
+                ),
+            )
+    return products
 
 
 sync_product_part_numbers()
@@ -5061,7 +5116,7 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
 
 
 def canonical_area_name(value: str) -> str:
-    text_value = str(value or "").strip()
+    text_value = canonical_site_area_name(value)
     key = normalize_usage_key(text_value)
     if key in {"haydamascus", "haydemascus", "haydemashq"}:
         return "Hay Demascus"
@@ -5251,7 +5306,7 @@ def material_return_to_dict(row: MaterialReturn, include_items: bool = True) -> 
         "program": normalize_program(getattr(row, "program", DEFAULT_PROGRAM)),
         "return_number": row.return_number,
         "return_date": row.return_date,
-        "site_id": row.site_id,
+        "site_id": canonical_mr_history_area(row.site_id),
         "site_address": row.site_address,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -6293,16 +6348,33 @@ def list_warehouses(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_ses
 def list_sites(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     rows = db.query(Site).filter(Site.program == program_key).order_by(Site.name).all()
-    return {"success": True, "sites": [{"id": r.id, "program": program_key, "name": r.name} for r in rows]}
+    sites_by_name = {}
+    for row in rows:
+        name = canonical_site_area_name(row.name)
+        key = "awladabushala" if name == "Awlad Abushala" else f"site:{row.id}"
+        sites_by_name.setdefault(key, {"id": row.id, "program": program_key, "name": name})
+    sites = sorted(sites_by_name.values(), key=lambda site: site["name"].casefold())
+    return {"success": True, "sites": sites}
 
 
 @app.post("/api/warehouse/sites")
 def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
     program_key = normalize_program(data.program)
-    name = data.name.strip()
+    name = canonical_site_area_name(data.name)
     if not name:
         raise HTTPException(status_code=400, detail="Site ID is required")
+    if name == "Awlad Abushala":
+        existing = next(
+            (
+                row
+                for row in db.query(Site).filter(Site.program == program_key).all()
+                if canonical_site_area_name(row.name).casefold() == name.casefold()
+            ),
+            None,
+        )
+        if existing:
+            return {"success": True, "site": {"id": existing.id, "program": program_key, "name": name}}
     row = Site(program=program_key, name=name)
     db.add(row)
     try:
@@ -8555,11 +8627,17 @@ def sr_request_upload_quantity(value, row_number: int) -> float:
     return quantity
 
 
+def sr_request_upload_error_summary(errors: list[str]) -> str:
+    lines = [f"{index}. {error}" for index, error in enumerate(errors, start=1)]
+    return f"Excel validation found {len(errors)} issue(s):\n" + "\n".join(lines)
+
+
 def parse_sr_request_upload(
     db: Session,
     contents: bytes,
     warehouse_id: int,
     filename: str = "materials.xlsx",
+    request_kind: str = "mr",
 ) -> dict:
     if not contents:
         raise ValueError("Choose an Excel file first")
@@ -8607,7 +8685,9 @@ def parse_sr_request_upload(
                 product_lookup[key] = None
 
     aggregated: dict[int, dict] = {}
+    source_rows: dict[int, list[int]] = {}
     errors: list[str] = []
+    request_kind = str(request_kind or "mr").strip().lower()
     populated_rows = 0
     blank_rows = 0
     for row_number, values in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
@@ -8665,20 +8745,24 @@ def parse_sr_request_upload(
             }
             aggregated[product.id] = current
         current["quantity"] += quantity
+        source_rows.setdefault(product.id, []).append(row_number)
         if remark and remark not in current["remark"].split("; "):
             current["remark"] = "; ".join(filter(None, [current["remark"], remark]))
 
-    if errors:
+    if errors and request_kind != "mr":
         summary = "; ".join(errors[:8])
         if len(errors) > 8:
             summary += f"; and {len(errors) - 8} more error(s)"
         raise ValueError(summary)
     if not aggregated:
+        if errors and request_kind == "mr":
+            raise ValueError(sr_request_upload_error_summary(errors))
         raise ValueError("No valid material rows were found")
 
     require_warehouse(db, warehouse_id, SINGLE_RAN_PROGRAM)
     items = list(aggregated.values())
-    validate_reservable_stock(db, warehouse_id, [MaterialRequisitionItemIn(**item) for item in items], SINGLE_RAN_PROGRAM)
+    if request_kind != "mr":
+        validate_reservable_stock(db, warehouse_id, [MaterialRequisitionItemIn(**item) for item in items], SINGLE_RAN_PROGRAM)
     reserved = reserved_stock_quantities(db, SINGLE_RAN_PROGRAM)
     balances = {
         row.product_id: float(row.quantity or 0)
@@ -8690,7 +8774,20 @@ def parse_sr_request_upload(
     }
     for item in items:
         held = float(reserved.get((warehouse_id, item["product_id"]), 0) or 0)
-        item["available_quantity"] = max(balances.get(item["product_id"], 0) - held, 0)
+        stock = balances.get(item["product_id"], 0)
+        available = max(stock - held, 0)
+        item["available_quantity"] = available
+        if request_kind == "mr" and item["quantity"] > available + 1e-9:
+            rows = source_rows.get(item["product_id"], [])
+            row_label = "Row" if len(rows) == 1 else "Rows"
+            row_numbers = ", ".join(str(row) for row in rows)
+            errors.append(
+                f"{row_label} {row_numbers}: Insufficient available stock for Part # {item['part_nbr']} "
+                f"({item['description']}). Requested {item['quantity']:g}, stock {stock:g}, "
+                f"reserved {held:g}, available {available:g}."
+            )
+    if errors and request_kind == "mr":
+        raise ValueError(sr_request_upload_error_summary(errors))
     return {
         "sheet": sheet.title,
         "items": items,
@@ -8973,6 +9070,7 @@ async def preview_sr_request_items_excel(
             contents,
             warehouse_id,
             workbook.filename or "materials.xlsx",
+            request_kind=kind,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -9356,6 +9454,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     data.requester_name = data.created_by
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    products_by_id = validate_material_requisition_part_numbers(db, data.items, program_key)
     validate_reservable_stock(db, data.warehouse_id, data.items, program_key)
 
     order_number = next_material_requisition_number(db, warehouse, program_key)
@@ -9392,7 +9491,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
     db.flush()
 
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id, program_key) if item.product_id else None
+        product = products_by_id[item.product_id]
         item_vendor = item.vendor.strip()
         if program_key == SINGLE_RAN_PROGRAM:
             if product is None:
@@ -9408,7 +9507,7 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                part_nbr=product_part_number(product.sku, product.part_number),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
@@ -9476,6 +9575,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
     require_warehouse(db, data.warehouse_id, program_key)
     if not data.items:
         raise HTTPException(status_code=400, detail="At least one item is required")
+    products_by_id = validate_material_requisition_part_numbers(db, data.items, program_key)
     validate_reservable_stock(db, data.warehouse_id, data.items, program_key, exclude_requisition_id=row.id)
 
     row.creation_date = data.creation_date
@@ -9505,7 +9605,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
 
     db.query(MaterialRequisitionItem).filter(MaterialRequisitionItem.requisition_id == row.id).delete()
     for index, item in enumerate(data.items, start=1):
-        product = require_product(db, item.product_id, program_key) if item.product_id else None
+        product = products_by_id[item.product_id]
         item_vendor = item.vendor.strip()
         if program_key == SINGLE_RAN_PROGRAM:
             if product is None:
@@ -9521,7 +9621,7 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
                 requisition_id=row.id,
                 line_no=index,
                 product_id=item.product_id,
-                part_nbr=item.part_nbr or product_part_number(product.sku if product else ""),
+                part_nbr=product_part_number(product.sku, product.part_number),
                 model=item.model or (product.sku if product else ""),
                 description=material_display_name(item.description or product_display_name(product), product.sku if product else ""),
                 vendor=item_vendor if program_key == SINGLE_RAN_PROGRAM else "",
@@ -10037,7 +10137,7 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
         program=program_key,
         return_number=next_number(db, MaterialReturn, "RET"),
         return_date=data.return_date or local_today(),
-        site_id=data.site_id.strip(),
+        site_id=canonical_site_area_name(data.site_id),
         site_address=data.site_address.strip(),
         warehouse_id=data.warehouse_id,
         returned_by=data.returned_by.strip(),
