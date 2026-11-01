@@ -3786,7 +3786,7 @@ function applyFiberMapReference(data){
     if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
     if(!ROLLOUT_DASHBOARD_AREAS[city].some(value=>wfmMapAreaKey(value)===wfmMapAreaKey(area)))ROLLOUT_DASHBOARD_AREAS[city].push(area);
     const index=ROLLOUT_DASHBOARD_PLAN.findIndex(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area));
-    if(index>=0){const previous=ROLLOUT_DASHBOARD_PLAN[index],merged={...previous,...plan,city,area};if(!plan.targetUsers)merged.targetUsers=previous.targetUsers;if(!plan.start)merged.start=previous.start;if(!plan.end)merged.end=previous.end;ROLLOUT_DASHBOARD_PLAN.splice(index,1,merged)}else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
+    if(index>=0){const previous=ROLLOUT_DASHBOARD_PLAN[index],merged={...previous,...plan,city,area};if(!plan.targetUsers)merged.targetUsers=previous.targetUsers;if(!plan.start)merged.start=previous.start;if(!plan.end)merged.end=previous.end;if(plan.dynamic)for(const key of ['dashboardCableTargetOverride','dashboardSubEndTargetOverride','dashboardHubTargetOverride','dashboardXboxTargetOverride','dashboardSingleCoreTargetOverride','dashboardUsersTargetOverride'])delete merged[key];ROLLOUT_DASHBOARD_PLAN.splice(index,1,merged)}else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
     if(HIDDEN_DYNAMIC_MAP_AREAS.has(wfmMapAreaKey(area)))return;
     const xboxes=[...new Set((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)).map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
     xboxes.forEach(xbox=>{const id=`${wfmMapAreaKey(area).replace(/[^a-z0-9]+/g,'-')}-${xbox.toLowerCase()}`;if(!WFM_MAP_SCOPES.some(scope=>scope.id===id))WFM_MAP_SCOPES.push({id,title:`${area} - X-BOX${xbox.replace(/^X/,'')}`,area,xbox})});
