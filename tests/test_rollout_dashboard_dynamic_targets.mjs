@@ -8,14 +8,14 @@ const helper = html.match(/function applyFiberMapReference\(data\)\{[\s\S]*?\n\}
 
 assert.ok(helper, 'fiber-map dashboard reference merger should be present');
 
-function mergedPlan(dynamic) {
+function mergedPlan(dynamic, { city = 'Tripoli', area = 'Mansoura', cableTargetOverride = 39925, fixedCableTarget = false } = {}) {
   const context = vm.createContext({
     warehouseFiberReference: null,
     warehouseFiberReferenceRevision: '',
-    ROLLOUT_DASHBOARD_AREAS: { Tripoli: ['Mansoura'] },
+    ROLLOUT_DASHBOARD_AREAS: { [city]: [area] },
     ROLLOUT_DASHBOARD_PLAN: [{
-      city: 'Tripoli',
-      area: 'Mansoura',
+      city,
+      area,
       start: '2026-11-01',
       end: '2026-11-21',
       targetCableMeters: 39925,
@@ -23,7 +23,8 @@ function mergedPlan(dynamic) {
       targetHubBox: 31,
       targetXbox: 2,
       targetUsers: 2704,
-      dashboardCableTargetOverride: 39925,
+      dashboardCableTargetOverride: cableTargetOverride,
+      ...(fixedCableTarget ? { dashboardCableTargetOverrideFixed: true } : {}),
       dashboardSubEndTargetOverride: 415,
       dashboardHubTargetOverride: 31,
       dashboardXboxTargetOverride: 2,
@@ -44,7 +45,7 @@ function mergedPlan(dynamic) {
     boxes: [],
     routes: [],
     area_plans: [{
-      city: 'Tripoli', area: 'Mansoura', dynamic: ${dynamic},
+      city: '${city}', area: '${area}', dynamic: ${dynamic},
       start: '2026-11-01', end: '2026-11-21', targetCableMeters: 40125,
       targetSubEndBox: 417, targetHubBox: 32, targetXbox: 2, targetUsers: 2704
     }]
@@ -73,4 +74,15 @@ test('non-dynamic map references keep intentionally configured dashboard targets
   assert.equal(plan.targetCableMeters, 40125);
   assert.equal(plan.dashboardCableTargetOverride, 39925);
   assert.equal(plan.dashboardSubEndTargetOverride, 415);
+});
+
+test('a fixed completed-area cable target survives dynamic map refresh', () => {
+  const plan = mergedPlan(true, { city: 'Misurata', area: 'Ras Ali', cableTargetOverride: 22520, fixedCableTarget: true });
+
+  assert.equal(plan.dashboardCableTargetOverride, 22520);
+  assert.equal(plan.dashboardCableTargetOverrideFixed, true);
+  assert.equal(plan.targetSubEndBox, 417);
+  assert.equal(plan.targetHubBox, 32);
+  assert.equal(plan.targetXbox, 2);
+  assert.equal(plan.targetUsers, 2704);
 });

@@ -1897,6 +1897,7 @@ const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Al-Dhel Street',start:'2026-11-01',end:'2026-12-08',targetSubEndBox:809,targetHubBox:61,targetXbox:5,targetCableMeters:76560,targetUsers:5328,dashboardCableTargetOverride:76560,dashboardSubEndTargetOverride:809,dashboardHubTargetOverride:61,dashboardXboxTargetOverride:5,dashboardSingleCoreTargetOverride:809,dashboardUsersTargetOverride:5328},
   {city:'Tripoli',area:'Mansoura',start:'2026-11-01',end:'2026-11-21',targetSubEndBox:415,targetHubBox:31,targetXbox:2,targetCableMeters:39925,targetUsers:2704,dashboardCableTargetOverride:39925,dashboardSubEndTargetOverride:415,dashboardHubTargetOverride:31,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:415,dashboardUsersTargetOverride:2704},
   {city:'Misurata',area:'Bera W Taleem',targetSubEndBox:213,targetHubBox:17,targetXbox:2,targetCableMeters:27780,targetUsers:1704,dashboardCableTargetOverride:27780,dashboardSubEndTargetOverride:213,dashboardHubTargetOverride:17,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:213,dashboardUsersTargetOverride:1704,dashboardCableMetersOverride:27780,dashboardSubEndOverride:213,dashboardSingleCoreOverride:213,note:'Completed: 27,780 m cable, 213 SUB / END boxes, 17 HUB boxes, 2 XBOXes, and 213 single-core cables (1,704 users).'},
+  {city:'Misurata',area:'Ras Ali',dashboardCableTargetOverride:22520,dashboardCableTargetOverrideFixed:true},
   {city:'Misurata',area:'Maqawba',start:'2026-07-01',end:'2026-08-08',targetSubEndBox:408,targetHubBox:30,targetXbox:3,targetCableMeters:37765,targetUsers:3200,dashboardCableMetersOverride:37765,dashboardSubEndOverride:408,dashboardSingleCoreOverride:400,note:'Maqawba completed: 37,765m cable, 408 SUB / END boxes, and 400 Single-Core Distribution cables.'},
   {city:'Misurata',area:'Awlad Baeoo',start:'2026-09-03',end:'2026-09-24',targetSubEndBox:262,targetHubBox:20,targetXbox:2,targetCableMeters:30805,targetUsers:2096,note:'Dashboard targets use the complete active Awlad Baeoo fiber-map design.'},
   {city:'Misurata',area:'Ras A Tota',start:'2026-08-15',end:'2026-09-01',targetSubEndBox:194,targetHubBox:16,targetXbox:2,targetCableMeters:21995,targetUsers:1552,note:'Project completed. Total installed cable: 21,995 m. Design updates: X2-H6 moved END from L4-S2 (100m) to L1-S4 (50m). X2-H2 replaced L3-S4 (150m) with L4-S1 SUB (100m) and L4-S2 END (80m). X2-H5-L1-S3 (80m) and X2-H6-L3-S3 (80m) were removed; X1-H5-L1-S3 SUB (100m), X1-H5-L1-S4 END (80m), and X2-H6-L2-S4 END (100m) were added. Removed X1-H1-L2-S4 END (50m) and added X1-H9-L4-S3 END (80m). Latest update: removed X1-H3-L3-S4 END (80m). Cable target includes 18,830m Single-Core Distribution plus 4,020m 4-core. Net total after latest update: +70m cable and SUB / END box total unchanged.'}
@@ -3786,7 +3787,19 @@ function applyFiberMapReference(data){
     if(!ROLLOUT_DASHBOARD_AREAS[city])ROLLOUT_DASHBOARD_AREAS[city]=[];
     if(!ROLLOUT_DASHBOARD_AREAS[city].some(value=>wfmMapAreaKey(value)===wfmMapAreaKey(area)))ROLLOUT_DASHBOARD_AREAS[city].push(area);
     const index=ROLLOUT_DASHBOARD_PLAN.findIndex(row=>wfmMapAreaKey(row.area)===wfmMapAreaKey(area));
-    if(index>=0){const previous=ROLLOUT_DASHBOARD_PLAN[index],merged={...previous,...plan,city,area};if(!plan.targetUsers)merged.targetUsers=previous.targetUsers;if(!plan.start)merged.start=previous.start;if(!plan.end)merged.end=previous.end;if(plan.dynamic)for(const key of ['dashboardCableTargetOverride','dashboardSubEndTargetOverride','dashboardHubTargetOverride','dashboardXboxTargetOverride','dashboardSingleCoreTargetOverride','dashboardUsersTargetOverride'])delete merged[key];ROLLOUT_DASHBOARD_PLAN.splice(index,1,merged)}else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
+    if(index>=0){
+      const previous=ROLLOUT_DASHBOARD_PLAN[index],merged={...previous,...plan,city,area};
+      if(!plan.targetUsers)merged.targetUsers=previous.targetUsers;
+      if(!plan.start)merged.start=previous.start;
+      if(!plan.end)merged.end=previous.end;
+      if(plan.dynamic){
+        for(const key of ['dashboardCableTargetOverride','dashboardSubEndTargetOverride','dashboardHubTargetOverride','dashboardXboxTargetOverride','dashboardSingleCoreTargetOverride','dashboardUsersTargetOverride']){
+          if(key==='dashboardCableTargetOverride'&&previous.dashboardCableTargetOverrideFixed===true)continue;
+          delete merged[key];
+        }
+      }
+      ROLLOUT_DASHBOARD_PLAN.splice(index,1,merged);
+    }else ROLLOUT_DASHBOARD_PLAN.push({...plan,city,area});
     if(HIDDEN_DYNAMIC_MAP_AREAS.has(wfmMapAreaKey(area)))return;
     const xboxes=[...new Set((warehouseFiberReference.boxes||[]).filter(row=>wfmAreaMatches(row,area)).map(row=>wfmXboxKey(wfmValue(row,['Related to XBOX','XBOX']))).filter(Boolean))];
     xboxes.forEach(xbox=>{const id=`${wfmMapAreaKey(area).replace(/[^a-z0-9]+/g,'-')}-${xbox.toLowerCase()}`;if(!WFM_MAP_SCOPES.some(scope=>scope.id===id))WFM_MAP_SCOPES.push({id,title:`${area} - X-BOX${xbox.replace(/^X/,'')}`,area,xbox})});
