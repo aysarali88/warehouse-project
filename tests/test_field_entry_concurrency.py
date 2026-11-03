@@ -984,7 +984,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def test_warehouse_bootstrap_excludes_rollout_payloads(self):
         """Warehouse startup must not transfer the Rollout record dataset."""
         db = SessionLocal()
-        main.WAREHOUSE_CACHE.clear()
+        main.clear_warehouse_cache()
         request = SimpleNamespace(
             state=SimpleNamespace(
                 current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""),

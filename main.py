@@ -1,6 +1,7 @@
 ﻿import csv
 import hashlib
 import base64
+from collections import OrderedDict
 import io
 import json
 import hmac
@@ -10,6 +11,7 @@ import os
 import re
 import secrets
 import smtplib
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -32,7 +34,7 @@ from email.message import EmailMessage
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, func, or_, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload, undefer
 
 from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker, sr_engine
 from models import (
@@ -68,8 +70,13 @@ from models import (
 )
 from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
 
-WAREHOUSE_CACHE: dict[str, tuple[float, dict]] = {}
+WAREHOUSE_CACHE: OrderedDict[str, tuple[float, dict, int]] = OrderedDict()
 WAREHOUSE_CACHE_TTL = 25
+WAREHOUSE_CACHE_MAX_ENTRIES = 4
+WAREHOUSE_CACHE_MAX_BYTES = 16 * 1024 * 1024
+WAREHOUSE_CACHE_LOCK = Lock()
+WAREHOUSE_CACHE_ESTIMATED_BYTES = 0
+WAREHOUSE_CACHE_STATS = {"hits": 0, "misses": 0, "expired": 0, "evictions": 0, "skipped": 0}
 VIRTUAL_DAMAGE_WAREHOUSE_STATUS = "virtual_damage"
 ROLLOUT_CSV_CACHE: tuple[float, list[dict], str] | None = None
 ROLLOUT_CSV_CACHE_TTL = 60
@@ -1927,7 +1934,125 @@ def next_number(db: Session, model, prefix: str) -> str:
 
 
 def clear_warehouse_cache():
-    WAREHOUSE_CACHE.clear()
+    global WAREHOUSE_CACHE_ESTIMATED_BYTES
+    with WAREHOUSE_CACHE_LOCK:
+        WAREHOUSE_CACHE.clear()
+        WAREHOUSE_CACHE_ESTIMATED_BYTES = 0
+
+
+def _estimated_cache_payload_size(payload: object) -> int:
+    pending = [iter((payload,))]
+    seen: set[int] = set()
+    total = 0
+    while pending:
+        try:
+            value = next(pending[-1])
+        except StopIteration:
+            pending.pop()
+            continue
+        identity = id(value)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if len(seen) > 100_000:
+            return WAREHOUSE_CACHE_MAX_BYTES + 1
+        total += sys.getsizeof(value)
+        if total > WAREHOUSE_CACHE_MAX_BYTES:
+            return total
+        if isinstance(value, dict):
+            pending.append(iter(value.keys()))
+            pending.append(iter(value.values()))
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            pending.append(iter(value))
+    return total
+
+
+def _prune_warehouse_cache_locked(now: float) -> None:
+    global WAREHOUSE_CACHE_ESTIMATED_BYTES
+    expired_keys = [
+        key
+        for key, (created_at, _, _) in WAREHOUSE_CACHE.items()
+        if now - created_at >= WAREHOUSE_CACHE_TTL
+    ]
+    for key in expired_keys:
+        _, _, estimated_bytes = WAREHOUSE_CACHE.pop(key)
+        WAREHOUSE_CACHE_ESTIMATED_BYTES = max(0, WAREHOUSE_CACHE_ESTIMATED_BYTES - estimated_bytes)
+        WAREHOUSE_CACHE_STATS["expired"] += 1
+
+
+def _warehouse_cache_metrics_locked() -> dict:
+    return {
+        "entries": len(WAREHOUSE_CACHE),
+        "estimated_bytes": WAREHOUSE_CACHE_ESTIMATED_BYTES,
+        **WAREHOUSE_CACHE_STATS,
+    }
+
+
+def warehouse_cache_metrics() -> dict:
+    """Return aggregate cache metrics only; cache keys and payloads are never exposed."""
+    with WAREHOUSE_CACHE_LOCK:
+        return _warehouse_cache_metrics_locked()
+
+
+def _warehouse_cache_get(cache_key: str) -> dict | None:
+    now = time.monotonic()
+    metrics_to_log = None
+    with WAREHOUSE_CACHE_LOCK:
+        _prune_warehouse_cache_locked(now)
+        entry = WAREHOUSE_CACHE.get(cache_key)
+        if entry is None:
+            WAREHOUSE_CACHE_STATS["misses"] += 1
+            result = None
+        else:
+            WAREHOUSE_CACHE.move_to_end(cache_key)
+            WAREHOUSE_CACHE_STATS["hits"] += 1
+            result = entry[1]
+        if (WAREHOUSE_CACHE_STATS["hits"] + WAREHOUSE_CACHE_STATS["misses"]) % 100 == 0:
+            metrics_to_log = _warehouse_cache_metrics_locked()
+    if metrics_to_log:
+        logger.info(
+            "warehouse_cache metrics entries=%d estimated_bytes=%d hits=%d misses=%d expired=%d evictions=%d",
+            metrics_to_log["entries"],
+            metrics_to_log["estimated_bytes"],
+            metrics_to_log["hits"],
+            metrics_to_log["misses"],
+            metrics_to_log["expired"],
+            metrics_to_log["evictions"],
+        )
+    return result
+
+
+def _warehouse_cache_set(cache_key: str, payload: dict) -> None:
+    global WAREHOUSE_CACHE_ESTIMATED_BYTES
+    estimated_bytes = _estimated_cache_payload_size(payload)
+    now = time.monotonic()
+    was_skipped = False
+    evicted = False
+    with WAREHOUSE_CACHE_LOCK:
+        _prune_warehouse_cache_locked(now)
+        previous = WAREHOUSE_CACHE.pop(cache_key, None)
+        if previous is not None:
+            WAREHOUSE_CACHE_ESTIMATED_BYTES = max(0, WAREHOUSE_CACHE_ESTIMATED_BYTES - previous[2])
+        if estimated_bytes > WAREHOUSE_CACHE_MAX_BYTES:
+            WAREHOUSE_CACHE_STATS["skipped"] += 1
+            was_skipped = True
+        else:
+            WAREHOUSE_CACHE[cache_key] = (now, payload, estimated_bytes)
+            WAREHOUSE_CACHE_ESTIMATED_BYTES += estimated_bytes
+            while (
+                len(WAREHOUSE_CACHE) > WAREHOUSE_CACHE_MAX_ENTRIES
+                or WAREHOUSE_CACHE_ESTIMATED_BYTES > WAREHOUSE_CACHE_MAX_BYTES
+            ):
+                _, (_, _, removed_bytes) = WAREHOUSE_CACHE.popitem(last=False)
+                WAREHOUSE_CACHE_ESTIMATED_BYTES = max(0, WAREHOUSE_CACHE_ESTIMATED_BYTES - removed_bytes)
+                WAREHOUSE_CACHE_STATS["evictions"] += 1
+                evicted = True
+    if was_skipped or evicted:
+        metrics = warehouse_cache_metrics()
+        logger.info(
+            "warehouse_cache bounded entries=%d estimated_bytes=%d skipped=%s evicted=%s",
+            metrics["entries"], metrics["estimated_bytes"], was_skipped, evicted,
+        )
 
 
 def clear_rollout_db_cache():
@@ -4724,7 +4849,7 @@ def receive_order_to_dict(row: ReceiveOrder) -> dict:
         "receipt_date": row.receipt_date,
         "invoice_number": row.invoice_number,
         "invoice_file_name": row.invoice_file_name,
-        "has_invoice_file": bool(row.invoice_file_data),
+        "has_invoice_file": bool(row.has_invoice_file),
         "supplier": row.supplier,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -4743,7 +4868,7 @@ def receive_order_header_to_dict(row: ReceiveOrder) -> dict:
         "receipt_date": row.receipt_date,
         "invoice_number": row.invoice_number,
         "invoice_file_name": row.invoice_file_name,
-        "has_invoice_file": bool(row.invoice_file_data),
+        "has_invoice_file": bool(row.has_invoice_file),
         "supplier": row.supplier,
         "warehouse_id": row.warehouse_id,
         "warehouse": row.warehouse.name if row.warehouse else "",
@@ -6281,9 +6406,9 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     viewer = request_scope_viewer(request)
     role = current_user(request).role
     cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
-    cached = WAREHOUSE_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < WAREHOUSE_CACHE_TTL:
-        return {**cached[1], "cached": True}
+    cached = _warehouse_cache_get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
 
     stock = list_stock_balances(request, program_key, db)
     usage = list_stock_usage(request, program_key, db)
@@ -6330,7 +6455,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
                 "audit": audit["logs"],
             }
         )
-    WAREHOUSE_CACHE[cache_key] = (time.monotonic(), payload)
+    _warehouse_cache_set(cache_key, payload)
     return payload
 
 
@@ -9376,6 +9501,7 @@ def download_receive_order_invoice(order_id: int, request: Request, program: str
     program_key = normalize_program(program)
     row = (
         db.query(ReceiveOrder)
+        .options(undefer(ReceiveOrder.invoice_file_data))
         .filter(ReceiveOrder.id == order_id, ReceiveOrder.program == program_key)
         .first()
     )

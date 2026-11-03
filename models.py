@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, Column, DDL, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, event, func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import column_property, deferred, relationship
 
 from database import Base
 
@@ -260,7 +260,8 @@ class ReceiveOrder(Base):
     invoice_number = Column(String, default="")
     invoice_file_name = Column(String, default="")
     invoice_file_content_type = Column(String, default="")
-    invoice_file_data = Column(LargeBinary, nullable=True)
+    invoice_file_data = deferred(Column(LargeBinary, nullable=True))
+    has_invoice_file = column_property(func.length(invoice_file_data) > 0)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True)
     status = Column(String, default="confirmed")
     created_by = Column(String, default="system")
