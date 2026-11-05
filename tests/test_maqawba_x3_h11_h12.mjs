@@ -31,13 +31,14 @@ test('Maqawba X3 H11-H12 cascade is represented as structured map data', () => {
   assert.equal(new Set(boxes.map(row => row['Box code'])).size, 32);
 });
 
-test('Maqawba dashboard targets increase without changing completed metrics', () => {
+test('Maqawba dashboard preserves targets without freezing actual single-core count', () => {
   const line = html.split('\n').find(row => row.includes("area:'Maqawba'"));
   assert.ok(line);
   for (const expected of [
     'targetSubEndBox:440', 'targetHubBox:32', 'targetXbox:3', 'targetCableMeters:40915', 'targetUsers:3456',
     'dashboardCableTargetOverride:40915', 'dashboardSubEndTargetOverride:440', 'dashboardHubTargetOverride:32',
     'dashboardXboxTargetOverride:3', 'dashboardSingleCoreTargetOverride:440', 'dashboardUsersTargetOverride:3456',
-    'dashboardCableMetersOverride:37765', 'dashboardSubEndOverride:408', 'dashboardSingleCoreOverride:400',
+    'dashboardCableMetersOverride:37765', 'dashboardSubEndOverride:408',
   ]) assert.ok(line.includes(expected), `missing ${expected}`);
+  assert.ok(!line.includes('dashboardSingleCoreOverride:'), 'actual single-core count should be calculated from rollout records');
 });
