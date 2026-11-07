@@ -114,6 +114,12 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
         ):
             raise RuntimeError("Refusing PostgreSQL connection because Warehouse-Test identity failed")
 
+        cls.site_inventory_env = patch.dict(os.environ, {
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            "SITE_INVENTORY_MR_ENABLED": "true",
+        })
+        cls.site_inventory_env.start()
+
         cls.engine = create_database_engine(TEST_DATABASE_URL)
         cls.schema = f"mr_issue_test_{uuid4().hex[:18]}"
         cls.translated_engine = cls.engine.execution_options(schema_translate_map={None: cls.schema})
@@ -185,6 +191,7 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
                     connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{cls.schema}" CASCADE')
                 cls.schema_created = False
             cls.engine.dispose()
+            cls.site_inventory_env.stop()
             raise
 
     @classmethod
@@ -192,6 +199,7 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
         if not hasattr(cls, "engine"):
             return
         cls.engine.dispose()
+        cls.site_inventory_env.stop()
         if cls.schema_created:
             with cls.engine.begin() as connection:
                 connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{cls.schema}" CASCADE')

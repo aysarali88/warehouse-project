@@ -176,7 +176,7 @@ class SiteInventoryPostgreSQLValidation(TestCase):
         }
         self.assertFalse(outside_foundation)
 
-    def test_known_phase1_upgrade_preserves_legacy_movement_and_retry_hash(self):
+    def test_partial_unversioned_phase1_fails_closed_without_rewriting_history(self):
         schema = f"site_inv_legacy_{uuid4().hex[:18]}"
         self.allowed_schemas.add(schema)
         token = "legacy-phase1-retry-token-0001"
@@ -257,22 +257,17 @@ class SiteInventoryPostgreSQLValidation(TestCase):
                     {"site_id": site_id, "product_id": product_id, "token_hash": legacy_hash},
                 )
 
-            upgrade = migrate(self.engine, schema)
-            self.assertFalse(upgrade["already_applied"])
+            with self.assertRaisesRegex(RuntimeError, "Partial unversioned"):
+                migrate(self.engine, schema)
             with self.engine.connect() as connection:
                 row = connection.execute(text(
-                    f"SELECT event_type, uom, source_event_key, request_token_hash "
+                    f"SELECT request_token_hash "
                     f"FROM {q_schema}.site_material_movements WHERE document_id='MR-001'"
                 )).mappings().one()
                 balance = connection.execute(text(
                     f"SELECT on_hand_qty FROM {q_schema}.site_balances WHERE site_id=:site_id AND product_id=:product_id"
                 ), {"site_id": site_id, "product_id": product_id}).scalar_one()
-            self.assertEqual(row["event_type"], "incoming")
-            self.assertEqual(row["uom"], "M")
             self.assertEqual(row["request_token_hash"], legacy_hash)
-            self.assertEqual(row["source_event_key"], inventory.source_event_key(
-                "FTTH", "incoming", "legacy_mr", "MR-001", "1"
-            ))
             self.assertEqual(balance, Decimal("12.000000"))
         finally:
             try:

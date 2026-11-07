@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,19 +15,29 @@ import main
 import site_inventory_service as inventory
 from database import SessionLocal, engine
 from migrations.site_inventory_foundation import migrate
+from migrations.site_inventory_rollout_cutover import migrate as migrate_rollout_cutover
 from models import AuditLog, Product, RolloutRecord, Site, SiteBalance, SiteMaterialMovement
 
 
 class RolloutConsumptionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.site_inventory_env = patch.dict(os.environ, {
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            "SITE_INVENTORY_ROLLOUT_ENABLED": "true",
+            "SITE_INVENTORY_CUTOVER_AT": "2026-11-01T00:00:00+02:00",
+        })
+        cls.site_inventory_env.start()
         if os.getenv("APP_ENV") != "test" or engine.dialect.name != "sqlite":
             raise RuntimeError("Local rollout consumption tests require an isolated SQLite test database")
         migrate(engine, schema=None)
+        migrate_rollout_cutover(engine, schema=None)
+        cls.cutover_migration_repeat = migrate_rollout_cutover(engine, schema=None)
 
     @classmethod
     def tearDownClass(cls):
         engine.dispose(close=True)
+        cls.site_inventory_env.stop()
 
     def make_fixture(self, *, opening=50, area=None, record_area=None, unit="M", status="Done", actual=9):
         suffix = uuid4().hex[:12]
@@ -53,6 +64,7 @@ class RolloutConsumptionTests(unittest.TestCase):
                     record_id=f"RDP-CONSUME-{suffix}", date="2026-11-07", area=record_area or site_name,
                     city="Misurata", item="Cable", material_type="Single-Core Distribution Cable_50m",
                     actual=actual, status=status, related_to_xbox="X1",
+                    site_inventory_recorded_at=datetime.now(timezone.utc),
                 )
                 db.add(row)
                 db.flush()
@@ -111,6 +123,39 @@ class RolloutConsumptionTests(unittest.TestCase):
             self.assertEqual(result["record"]["staus"], "Done")
         self.assertEqual(self.site_quantity(fixture), Decimal("50.000000"))
         self.assertEqual(self.consumption_movements(fixture), [])
+
+    def test_disabled_rollout_integration_rejects_confirmation_without_posting(self):
+        fixture = self.make_fixture()
+        with patch.dict(os.environ, {
+            "SITE_INVENTORY_ROLLOUT_ENABLED": "false",
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "",
+        }):
+            with self.assertRaises(main.HTTPException) as error:
+                self.confirm(fixture)
+        self.assertEqual(error.exception.status_code, 503)
+        self.assertEqual(self.site_quantity(fixture), Decimal("50.000000"))
+        self.assertEqual(self.consumption_movements(fixture), [])
+
+    def test_pre_cutover_and_legacy_records_are_ineligible(self):
+        pre_cutover = self.make_fixture()
+        with SessionLocal() as db:
+            row = db.query(RolloutRecord).filter_by(record_id=pre_cutover["record_id"]).one()
+            row.date = "2026-10-31"
+            db.commit()
+        with self.assertRaises(main.HTTPException) as activity_error:
+            self.confirm(pre_cutover)
+        self.assertEqual(activity_error.exception.status_code, 409)
+        self.assertEqual(self.consumption_movements(pre_cutover), [])
+
+        legacy = self.make_fixture()
+        with SessionLocal() as db:
+            row = db.query(RolloutRecord).filter_by(record_id=legacy["record_id"]).one()
+            row.site_inventory_recorded_at = None
+            db.commit()
+        with self.assertRaises(main.HTTPException) as legacy_error:
+            self.confirm(legacy)
+        self.assertEqual(legacy_error.exception.status_code, 409)
+        self.assertEqual(self.consumption_movements(legacy), [])
 
     def test_explicit_confirmation_decreases_site_balance_and_records_event(self):
         fixture = self.make_fixture(actual=20)

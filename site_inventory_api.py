@@ -19,6 +19,7 @@ from site_inventory_service import (
     resolve_site_alias,
     reverse_site_movement,
 )
+from site_inventory_config import site_inventory_readiness
 
 
 class SiteAliasCreate(BaseModel):
@@ -81,6 +82,14 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
     def authorize(request: Request, *roles: str) -> str:
         require_roles_fn(request, *roles)
         return actor_fn(request)
+
+    @router.get("/api/warehouse/site-inventory/readiness")
+    def site_inventory_readiness_status(
+        request: Request,
+        program: str = "FTTH",
+    ):
+        authorize(request, "Admin")
+        return {"success": True, **site_inventory_readiness(program, normalize_program_fn)}
 
     @router.get("/api/warehouse/site-inventory/options")
     def site_inventory_options(

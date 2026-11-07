@@ -3,6 +3,7 @@
 import importlib.util
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from decimal import Decimal
 from threading import Barrier
 from types import SimpleNamespace
@@ -98,6 +99,13 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
         ):
             raise RuntimeError("Refusing PostgreSQL connection because Warehouse-Test identity failed")
 
+        cls.site_inventory_env = patch.dict(os.environ, {
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            "SITE_INVENTORY_ROLLOUT_ENABLED": "true",
+            "SITE_INVENTORY_CUTOVER_AT": "2026-11-01T00:00:00+02:00",
+        })
+        cls.site_inventory_env.start()
+
         cls.engine = create_database_engine(TEST_DATABASE_URL)
         cls.schema = f"rollout_consume_test_{uuid4().hex[:18]}"
         cls.translated_engine = cls.engine.execution_options(schema_translate_map={None: cls.schema})
@@ -124,6 +132,9 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
                 for table in (Site.__table__, Product.__table__, RolloutRecord.__table__, AuditLog.__table__):
                     table.create(bind=connection)
             cls.migration_result = migrate(cls.engine, cls.schema)
+            from migrations.site_inventory_rollout_cutover import migrate as migrate_rollout_cutover
+            cls.rollout_cutover_migration = migrate_rollout_cutover(cls.engine, cls.schema)
+            cls.rollout_cutover_migration_repeat = migrate_rollout_cutover(cls.engine, cls.schema)
 
             cls.database_originals = {
                 name: getattr(database, name)
@@ -160,6 +171,7 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
                     connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{cls.schema}" CASCADE')
                 cls.schema_created = False
             cls.engine.dispose()
+            cls.site_inventory_env.stop()
             raise
 
     @classmethod
@@ -180,6 +192,7 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
         if external_after != cls.external_tables_before:
             raise AssertionError("PostgreSQL objects outside the temporary schema changed")
         cls.engine.dispose()
+        cls.site_inventory_env.stop()
 
     @classmethod
     def _external_table_names(cls, connection):
@@ -212,7 +225,9 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
                 row = RolloutRecord(
                     record_id=f"RDP-PG-CONSUME-{suffix}", area=site_name, city="Misurata",
                     item="Cable", material_type="Single-Core Distribution Cable_50m",
+                    date="2026-11-07", entry_time="2026-11-07 10:00:00",
                     actual=11, status=status, related_to_xbox="X1",
+                    site_inventory_recorded_at=datetime.now(timezone.utc),
                 )
                 db.add(row)
                 db.flush()
@@ -279,6 +294,8 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
                 record = RolloutRecord(
                     record_id=f"RDP-PG-CONSUME-SECOND-{fixture['suffix']}",
                     area=fixture["site_name"], city="Misurata", status="Done", actual=60,
+                    date="2026-11-07", entry_time="2026-11-07 10:00:00",
+                    site_inventory_recorded_at=datetime.now(timezone.utc),
                 )
                 db.add(record)
                 db.flush()

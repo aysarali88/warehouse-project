@@ -100,8 +100,9 @@ class SiteInventoryFoundationTests(unittest.TestCase):
             tables = set(engine.dialect.get_table_names(connection))
         self.assertTrue(self.foundation_tables.issubset(tables))
         self.assertTrue(self.second_migration["already_applied"])
+        self.assertEqual(_validate_schema("warehouse_app", "postgresql"), "warehouse_app")
         with self.assertRaises(ValueError):
-            _validate_schema("public", "postgresql")
+            _validate_schema("bad-schema", "postgresql")
 
     def test_alias_normalization_and_collision_rejection(self):
         with SessionLocal() as db:

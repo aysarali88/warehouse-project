@@ -29,6 +29,7 @@ class RolloutRecord(Base):
     labeling = Column(String, default="")
     related_to_xbox = Column(String, default="")
     entry_time = Column(String, default="")
+    site_inventory_recorded_at = Column(DateTime(timezone=True), nullable=True)
     cable_code = Column(String, default="")
     box_code = Column(String, default="")
     olt = Column(String, default="")

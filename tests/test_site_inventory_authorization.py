@@ -132,6 +132,20 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
                 self.assertEqual(error.exception.status_code, 401 if role is None else 403)
                 reverse.assert_not_called()
 
+    def test_cutover_readiness_is_admin_only_and_read_only(self):
+        endpoint = self.endpoints["/api/warehouse/site-inventory/readiness"]
+        for role in (None, "Requester", "Technician", "Warehouse Manager", "Management", "Approval"):
+            with self.subTest(role=role):
+                with self.assertRaises(HTTPException) as error:
+                    endpoint(self.make_request(role), program="FTTH")
+                self.assertEqual(error.exception.status_code, 401 if role is None else 403)
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = endpoint(self.make_request("Admin"), program="FTTH")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["configuration_ready"])
+        self.assertTrue(all(not item["enabled"] for item in result["integrations"].values()))
+
 
 if __name__ == "__main__":
     unittest.main()

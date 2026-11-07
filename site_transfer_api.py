@@ -1,6 +1,5 @@
 """Admin-only API for Site-to-Site transfers; hidden until explicit cutover enablement."""
 
-import os
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import SiteMaterialMovement
+from site_inventory_config import integration_enabled
 from site_transfer_service import (
     approve_transfer,
     create_transfer,
@@ -22,15 +22,7 @@ from site_transfer_service import (
 
 
 def site_transfer_enabled(program: str, normalize_program_fn) -> bool:
-    flag = os.getenv("SITE_INVENTORY_TRANSFER_ENABLED", "").strip().lower()
-    if flag not in {"1", "true", "yes", "on"}:
-        return False
-    enabled_programs = {
-        normalize_program_fn(value)
-        for value in os.getenv("SITE_INVENTORY_CUTOVER_PROGRAMS", "").split(",")
-        if value.strip()
-    }
-    return normalize_program_fn(program) in enabled_programs
+    return integration_enabled("SITE_INVENTORY_TRANSFER_ENABLED", program, normalize_program_fn)
 
 
 class TransferLineCreate(BaseModel):

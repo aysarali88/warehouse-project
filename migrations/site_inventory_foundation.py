@@ -1,7 +1,7 @@
 """Versioned, additive Site Inventory Foundation migration.
 
-The command-line runner intentionally supports only the isolated test target.
-Production schema changes require a separately reviewed migration process.
+The migration function targets a verified explicit schema, or the active
+PostgreSQL schema when omitted. Its command-line runner remains test-only.
 """
 
 import argparse
@@ -9,6 +9,16 @@ import re
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect, text
+
+from migrations.site_inventory_migration_utils import (
+    ensure_version_table as ensure_postgres_version_table,
+    qualified,
+    record_version as record_postgres_version,
+    require_table_columns,
+    resolve_postgres_schema,
+    validate_model_table,
+    version_applied as postgres_version_applied,
+)
 
 VERSION = "site-inventory-foundation-v1"
 FOUNDATION_TABLES = (
@@ -26,11 +36,9 @@ def _validate_schema(schema: str, dialect: str) -> str | None:
             return None
         raise ValueError("SQLite Foundation migrations use the default isolated database schema")
     value = str(schema or "").strip()
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", value):
-        raise ValueError("An explicit valid PostgreSQL schema name is required")
-    if value.casefold() == "public":
-        raise ValueError("Site Inventory Foundation migrations cannot target the public schema")
-    return value
+    if value and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", value):
+        raise ValueError("Invalid PostgreSQL schema identifier")
+    return value or None
 
 
 def _table_exists(connection, schema: str | None, name: str) -> bool:
@@ -38,8 +46,7 @@ def _table_exists(connection, schema: str | None, name: str) -> bool:
 
 
 def _qualified(connection, schema: str, table: str) -> str:
-    preparer = connection.dialect.identifier_preparer
-    return f"{preparer.quote_schema(schema)}.{preparer.quote(table)}"
+    return qualified(connection, schema, table)
 
 
 def _ensure_version_table(connection, schema: str | None) -> None:
@@ -80,129 +87,37 @@ def _record_version(connection, schema: str | None) -> None:
         )
 
 
-def _upgrade_known_phase1(connection, schema: str, translated_connection) -> None:
-    from models import SiteAlias, SiteBalance, SiteMaterialMovement, SiteOpeningBalanceRequest
-    from site_inventory_service import source_event_key
-
-    q_movements = _qualified(connection, schema, "site_material_movements")
-    q_openings = _qualified(connection, schema, "site_opening_balance_requests")
-    q_products = _qualified(connection, schema, "products")
-
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ADD COLUMN IF NOT EXISTS event_type VARCHAR(64)")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ADD COLUMN IF NOT EXISTS uom VARCHAR(24)")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ADD COLUMN IF NOT EXISTS source_event_key VARCHAR(64)")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ADD COLUMN IF NOT EXISTS reverses_movement_id INTEGER")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ADD COLUMN IF NOT EXISTS effective_date VARCHAR(10) NOT NULL DEFAULT ''")
-    connection.exec_driver_sql(f"ALTER TABLE {q_openings} ADD COLUMN IF NOT EXISTS uom VARCHAR(24)")
-
-    legacy_rows = connection.execute(text(
-        f"SELECT id, program, site_id, product_id, movement_type, document_type, document_id, "
-        f"document_line_id, effective_date, uom, event_type FROM {q_movements} ORDER BY id"
-    )).mappings().all()
-    for row in legacy_rows:
-        event_type = str(row["event_type"] or row["movement_type"] or "legacy_movement").strip().lower()
-        document_type = str(row["document_type"] or "legacy_site_movement").strip().lower()
-        document_id = str(row["document_id"] or f"legacy-movement-{row['id']}").strip()
-        line_id = str(row["document_line_id"] or "1").strip()
-        product_unit = connection.execute(
-            text(f"SELECT COALESCE(NULLIF(unit, ''), 'PCS') FROM {q_products} WHERE id = :id"),
-            {"id": row["product_id"]},
-        ).scalar()
-        if not product_unit:
-            raise RuntimeError(f"Legacy movement {row['id']} has no resolvable product unit; migration stopped")
-        key = source_event_key(row["program"], event_type, document_type, document_id, line_id)
-        connection.execute(text(
-            f"UPDATE {q_movements} SET event_type=:event_type, document_type=:document_type, "
-            "document_id=:document_id, document_line_id=:line_id, uom=:uom, source_event_key=:event_key "
-            "WHERE id=:id"
-        ), {
-            "event_type": event_type,
-            "document_type": document_type,
-            "document_id": document_id,
-            "line_id": line_id,
-            "uom": row["uom"] or str(product_unit).strip().upper(),
-            "event_key": key,
-            "id": row["id"],
-        })
-
-    opening_rows = connection.execute(text(
-        f"SELECT id, product_id, uom FROM {q_openings} ORDER BY id"
-    )).mappings().all()
-    for row in opening_rows:
-        if row["uom"]:
-            continue
-        product_unit = connection.execute(
-            text(f"SELECT COALESCE(NULLIF(unit, ''), 'PCS') FROM {q_products} WHERE id = :id"),
-            {"id": row["product_id"]},
-        ).scalar()
-        if not product_unit:
-            raise RuntimeError(f"Legacy opening request {row['id']} has no resolvable product unit; migration stopped")
-        connection.execute(text(f"UPDATE {q_openings} SET uom=:uom WHERE id=:id"), {
-            "uom": str(product_unit).strip().upper(), "id": row["id"]
-        })
-
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ALTER COLUMN event_type SET NOT NULL")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ALTER COLUMN uom SET NOT NULL")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} ALTER COLUMN source_event_key SET NOT NULL")
-    connection.exec_driver_sql(f"ALTER TABLE {q_openings} ALTER COLUMN uom SET NOT NULL")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} DROP CONSTRAINT IF EXISTS uq_site_movement_request_token_hash")
-    connection.exec_driver_sql(f"ALTER TABLE {q_movements} DROP CONSTRAINT IF EXISTS uq_site_movement_idempotency_key")
-    connection.exec_driver_sql(f"ALTER TABLE {q_openings} DROP CONSTRAINT IF EXISTS uq_site_opening_request_token_hash")
-
-    for table in (SiteAlias.__table__,):
-        table.create(bind=translated_connection, checkfirst=True)
-
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_movement_program_source_event "
-        f"ON {q_movements} (program, source_event_key)"
-    )
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_movement_program_idempotency "
-        f"ON {q_movements} (program, idempotency_key)"
-    )
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_movement_program_request_token "
-        f"ON {q_movements} (program, request_token_hash) WHERE request_token_hash IS NOT NULL"
-    )
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_opening_program_request_token "
-        f"ON {q_openings} (program, request_token_hash)"
-    )
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_movement_single_reversal "
-        f"ON {q_movements} (reverses_movement_id) WHERE reverses_movement_id IS NOT NULL"
-    )
-    connection.exec_driver_sql(
-        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_site_opening_balance_once "
-        f"ON {q_movements} (program, site_id, product_id) WHERE movement_type = 'opening_balance'"
-    )
-
-    fk_name = "fk_site_movement_reverses_movement"
-    has_reversal_fk = connection.execute(text(
-        "SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid "
-        "JOIN pg_namespace n ON n.oid=t.relnamespace "
-        "WHERE n.nspname=:schema AND t.relname='site_material_movements' AND c.conname=:name"
-    ), {"schema": schema, "name": fk_name}).first()
-    if not has_reversal_fk:
-        connection.exec_driver_sql(
-            f"ALTER TABLE {q_movements} ADD CONSTRAINT {fk_name} FOREIGN KEY (reverses_movement_id) "
-            f"REFERENCES {q_movements}(id) ON DELETE RESTRICT"
-        )
-
-
 def _install_postgres_guards(connection, schema: str) -> None:
     q_movements = _qualified(connection, schema, "site_material_movements")
     q_function = _qualified(connection, schema, "reject_site_movement_mutation")
     q_trigger = connection.dialect.identifier_preparer.quote("tr_site_movement_append_only")
-    connection.exec_driver_sql(
-        f"CREATE OR REPLACE FUNCTION {q_function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
-        "BEGIN RAISE EXCEPTION 'site_material_movements are append-only; post a reversal instead'; END; $$"
-    )
-    connection.exec_driver_sql(f"DROP TRIGGER IF EXISTS {q_trigger} ON {q_movements}")
-    connection.exec_driver_sql(
-        f"CREATE TRIGGER {q_trigger} BEFORE UPDATE OR DELETE ON {q_movements} "
-        f"FOR EACH ROW EXECUTE FUNCTION {q_function}()"
-    )
+    function_row = connection.execute(text(
+        "SELECT pg_get_functiondef(p.oid) FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid=p.pronamespace "
+        "WHERE n.nspname=:schema AND p.proname='reject_site_movement_mutation' AND p.pronargs=0"
+    ), {"schema": schema}).first()
+    if function_row:
+        if "site_material_movements are append-only" not in function_row[0]:
+            raise RuntimeError("Unexpected append-only guard function; migration stopped")
+    else:
+        connection.exec_driver_sql(
+            f"CREATE FUNCTION {q_function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+            "BEGIN RAISE EXCEPTION 'site_material_movements are append-only; post a reversal instead'; END; $$"
+        )
+    trigger_row = connection.execute(text(
+        "SELECT t.tgtype, p.proname FROM pg_trigger t "
+        "JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "JOIN pg_proc p ON p.oid=t.tgfoid "
+        "WHERE n.nspname=:schema AND c.relname='site_material_movements' AND t.tgname='tr_site_movement_append_only' AND NOT t.tgisinternal"
+    ), {"schema": schema}).first()
+    if trigger_row:
+        if trigger_row[1] != "reject_site_movement_mutation" or int(trigger_row[0]) != 27:
+            raise RuntimeError("Unexpected append-only movement trigger; migration stopped")
+    else:
+        connection.exec_driver_sql(
+            f"CREATE TRIGGER {q_trigger} BEFORE UPDATE OR DELETE ON {q_movements} "
+            f"FOR EACH ROW EXECUTE FUNCTION {q_function}()"
+        )
     for table in FOUNDATION_TABLES:
         qualified = _qualified(connection, schema, table)
         connection.exec_driver_sql(f"ALTER TABLE {qualified} ENABLE ROW LEVEL SECURITY")
@@ -228,9 +143,9 @@ def _install_sqlite_guards(connection) -> None:
     )
 
 
-def migrate(bind, schema: str) -> dict:
-    """Apply the Foundation migration to one explicitly named schema."""
-    from models import SiteAlias, SiteBalance, SiteMaterialMovement, SiteOpeningBalanceRequest
+def migrate(bind, schema: str | None = None) -> dict:
+    """Apply Foundation DDL to an explicit schema or the active PostgreSQL schema."""
+    from models import AuditLog, Product, Site, SiteAlias, SiteBalance, SiteMaterialMovement, SiteOpeningBalanceRequest
 
     dialect = bind.dialect.name
     schema_name = _validate_schema(schema, dialect)
@@ -240,30 +155,34 @@ def migrate(bind, schema: str) -> dict:
         transaction = connection.begin()
         try:
             if dialect == "postgresql":
-                connection.exec_driver_sql(f"CREATE SCHEMA IF NOT EXISTS {connection.dialect.identifier_preparer.quote_schema(schema_name)}")
+                schema_name = resolve_postgres_schema(connection, schema_name)
                 translated = connection.execution_options(schema_translate_map={None: schema_name})
-                for table_name in PREREQUISITE_TABLES:
-                    if not _table_exists(connection, schema_name, table_name):
-                        raise RuntimeError(f"Required pre-existing table {schema_name}.{table_name} is missing")
-                _ensure_version_table(connection, schema_name)
-                if _version_applied(connection, schema_name):
+                require_table_columns(connection, schema_name, {
+                    "sites": {"id", "program", "name"},
+                    "products": {"id", "program", "unit"},
+                    "audit_logs": {"id", "action", "entity_type", "entity_id", "actor", "details", "created_at"},
+                })
+                ensure_postgres_version_table(connection, schema_name)
+                managed_tables = (SiteAlias.__table__, SiteBalance.__table__, SiteMaterialMovement.__table__, SiteOpeningBalanceRequest.__table__)
+                if postgres_version_applied(connection, schema_name, VERSION):
+                    for table in managed_tables:
+                        validate_model_table(connection, schema_name, table)
+                    _install_postgres_guards(connection, schema_name)
                     transaction.commit()
                     return {"version": VERSION, "schema": schema_name, "already_applied": True, "tables": list(FOUNDATION_TABLES)}
                 existing = {name for name in FOUNDATION_TABLES if _table_exists(connection, schema_name, name)}
-                known_phase1 = {
-                    "site_balances",
-                    "site_material_movements",
-                    "site_opening_balance_requests",
-                }
-                if existing and existing != known_phase1 and existing != set(FOUNDATION_TABLES):
-                    raise RuntimeError("Partial unversioned Site Inventory schema found; migration stopped without guessing")
                 if existing:
-                    _upgrade_known_phase1(connection, schema_name, translated)
+                    if existing != set(FOUNDATION_TABLES):
+                        raise RuntimeError("Partial unversioned Site Inventory schema found; migration stopped without guessing")
+                    for table in managed_tables:
+                        validate_model_table(connection, schema_name, table)
                 else:
-                    for table in (SiteAlias.__table__, SiteBalance.__table__, SiteMaterialMovement.__table__, SiteOpeningBalanceRequest.__table__):
+                    for table in managed_tables:
                         table.create(bind=translated, checkfirst=False)
+                for table in managed_tables:
+                    validate_model_table(connection, schema_name, table)
                 _install_postgres_guards(connection, schema_name)
-                _record_version(connection, schema_name)
+                record_postgres_version(connection, schema_name, VERSION)
             else:
                 for table_name in PREREQUISITE_TABLES:
                     if not _table_exists(connection, None, table_name):
@@ -297,7 +216,7 @@ def main() -> None:
     parser.add_argument("--schema", required=True)
     args = parser.parse_args()
     identity = test_database_identity(TEST_DATABASE_URL)
-    if APP_ENV != "test" or not identity["safe"] or args.schema == "public":
+    if APP_ENV != "test" or not identity["safe"] or args.schema.casefold() == "public":
         raise SystemExit("Migration requires verified Warehouse-Test credentials and a non-public schema")
     test_engine = create_database_engine(TEST_DATABASE_URL)
     try:

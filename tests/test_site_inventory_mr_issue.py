@@ -36,6 +36,11 @@ from models import (
 class MaterialRequisitionSiteIssueTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.site_inventory_env = patch.dict(os.environ, {
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            "SITE_INVENTORY_MR_ENABLED": "true",
+        })
+        cls.site_inventory_env.start()
         if os.getenv("APP_ENV") != "test" or engine.dialect.name != "sqlite":
             raise RuntimeError("Local MR issue tests require an isolated SQLite test database")
         migrate(engine, schema=None)
@@ -43,6 +48,7 @@ class MaterialRequisitionSiteIssueTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         engine.dispose(close=True)
+        cls.site_inventory_env.stop()
 
     def make_mr(self, *, status="approved", site_label=None, stock=100, lines=None, ambiguous=False):
         suffix = uuid4().hex[:10]
@@ -179,6 +185,20 @@ class MaterialRequisitionSiteIssueTests(unittest.TestCase):
         self.assertEqual(result["stock"]["main"], 100)
         self.assertEqual(result["site_movements"], 0)
         self.assertEqual(result["site_balance"]["main"], Decimal("0"))
+
+    def test_disabled_integration_keeps_legacy_issue_without_site_mapping(self):
+        fixture = self.make_mr(site_label="Unmapped but valid legacy location", lines=[("M", "M", 4, "main")])
+        with patch.dict(os.environ, {
+            "SITE_INVENTORY_MR_ENABLED": "false",
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "",
+        }):
+            self.issue(fixture)
+        result = self.values(fixture)
+        self.assertEqual(result["status"], "issued")
+        self.assertEqual(result["stock"]["main"], 96)
+        self.assertEqual(result["technician_balance"]["main"], 4)
+        self.assertEqual(result["stock_movements"], 1)
+        self.assertEqual(result["site_movements"], 0)
 
     def test_issue_immediately_flushes_pending_approval_before_row_lock(self):
         fixture = self.make_mr(status="draft", lines=[("M", "M", 4, "main")])

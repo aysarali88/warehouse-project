@@ -33,6 +33,11 @@ from models import (
 class MaterialReturnSiteInventoryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.site_inventory_env = patch.dict(os.environ, {
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            "SITE_INVENTORY_RETURN_ENABLED": "true",
+        })
+        cls.site_inventory_env.start()
         if os.getenv("APP_ENV") != "test" or engine.dialect.name != "sqlite":
             raise RuntimeError("Local material return tests require an isolated SQLite test database")
         migrate(engine, schema=None)
@@ -40,6 +45,7 @@ class MaterialReturnSiteInventoryTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         engine.dispose(close=True)
+        cls.site_inventory_env.stop()
 
     def make_fixture(self, *, opening=50, products=None):
         suffix = uuid4().hex[:10]
@@ -133,6 +139,31 @@ class MaterialReturnSiteInventoryTests(unittest.TestCase):
             self.assertEqual(db.query(StockBalance).filter_by(
                 warehouse_id=fixture["warehouse_id"], product_id=product_id,
             ).one().quantity, 10)
+
+    def test_disabled_integration_preserves_legacy_confirmed_return_behavior(self):
+        fixture = self.make_fixture()
+        product_id = fixture["products"]["main"]
+        with patch.dict(os.environ, {
+            "SITE_INVENTORY_RETURN_ENABLED": "false",
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "",
+        }):
+            with SessionLocal() as db:
+                result = main.create_material_return(
+                    main.MaterialReturnIn(
+                        program="FTTH", site_id=fixture["site_name"],
+                        warehouse_id=fixture["warehouse_id"], returned_by="Field team",
+                        items=[main.MaterialReturnItemIn(product_id=product_id, quantity=5)],
+                    ),
+                    self.request("Admin"), db,
+                )
+                self.assertEqual(result["return"]["status"], "confirmed")
+                self.assertEqual(self.site_qty(db, fixture, product_id), Decimal("50.000000"))
+                self.assertEqual(db.query(StockBalance).filter_by(
+                    warehouse_id=fixture["warehouse_id"], product_id=product_id,
+                ).one().quantity, 15)
+                self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                    document_type="material_return", document_id=str(result["return"]["id"]),
+                ).count(), 0)
 
     def test_confirmed_return_decreases_site_and_increases_warehouse_atomically(self):
         fixture = self.make_fixture(products={"a": "PCS", "b": "M"})
