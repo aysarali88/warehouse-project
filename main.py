@@ -61,6 +61,7 @@ from models import (
     RolloutEntryCounter,
     RolloutRecord,
     Site,
+    SiteMaterialMovement,
     SrMaterialRequisitionSignedCopy,
     SrMaterialReturnStatus,
     StockBalance,
@@ -72,6 +73,10 @@ from models import (
 )
 from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
 from site_inventory_api import build_site_inventory_router
+from site_inventory_service import (
+    post_material_requisition_site_movement,
+    prepare_material_requisition_issue,
+)
 
 WAREHOUSE_CACHE: OrderedDict[str, tuple[float, dict, int]] = OrderedDict()
 WAREHOUSE_CACHE_TTL = 25
@@ -5096,21 +5101,44 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
 
 def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "") -> str:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    db.flush()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == row.id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status == "issued":
         raise HTTPException(status_code=400, detail="Material requisition is already issued")
     if row.status not in {"approved", "signed"}:
         raise HTTPException(status_code=400, detail="MR must be approved before warehouse issue")
-    if not row.receiver_name.strip():
+    if not (row.receiver_name or "").strip():
         raise HTTPException(status_code=400, detail="Approver Name is required before warehouse issue")
 
-    technician_name = (row.team_leader or row.requester_name or row.receiver_name).strip()
+    items = (
+        db.query(MaterialRequisitionItem)
+        .filter(MaterialRequisitionItem.requisition_id == row.id)
+        .order_by(MaterialRequisitionItem.id.asc())
+        .with_for_update()
+        .all()
+    )
+    site, prepared_items = (None, [])
+    if items:
+        site, prepared_items = prepare_material_requisition_issue(
+            db, program_key, row.site_id, items
+        )
+
+    technician_name = (row.team_leader or row.requester_name or row.receiver_name or "").strip()
     technician = db.query(Technician).filter(Technician.name == technician_name, Technician.program == program_key).first()
     if technician is None:
         technician = Technician(program=program_key, name=technician_name, phone=row.receiver_tel)
         db.add(technician)
         db.flush()
 
-    issued_by = actor.strip() or row.created_by
+    issued_by = actor.strip() or row.created_by or "warehouse"
     issue = IssueOrder(
         program=program_key,
         order_number=next_number(db, IssueOrder, "MR-ISS"),
@@ -5122,10 +5150,7 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
     db.add(issue)
     db.flush()
 
-    for item in row.items:
-        if not item.product_id:
-            raise HTTPException(status_code=400, detail=f"MR line {item.line_no} is not linked to a product")
-        product = require_product(db, item.product_id, program_key)
+    for item, product, quantity, unit in prepared_items:
         balance = locked_stock_balance(db, row.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
@@ -5153,14 +5178,56 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
                 created_by=issued_by,
             )
         )
+        post_material_requisition_site_movement(
+            db,
+            program=program_key,
+            site_id=site.id,
+            requisition_id=row.id,
+            order_number=row.order_number,
+            line_id=item.id,
+            product_id=product.id,
+            quantity=quantity,
+            uom=unit,
+            actor=issued_by,
+            effective_date=local_today(),
+        )
 
     row.status = "issued"
     log_audit(db, "issue_material_requisition", "material_requisition", row.order_number, issued_by, {"issue_order": issue.order_number})
     return issue.order_number
 
 
+def material_requisition_has_issue_history(db: Session, row: MaterialRequisition) -> bool:
+    program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    has_site_issue = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.document_id == str(row.id),
+    ).first() is not None
+    has_warehouse_issue = db.query(StockMovement.id).filter(
+        StockMovement.program == program_key,
+        StockMovement.reference == row.order_number,
+        StockMovement.movement_type == "issue_to_technician",
+    ).first() is not None
+    has_issue_audit = db.query(AuditLog.id).filter(
+        AuditLog.action == "issue_material_requisition",
+        AuditLog.entity_type == "material_requisition",
+        AuditLog.entity_id == row.order_number,
+    ).first() is not None
+    return has_site_issue or has_warehouse_issue or has_issue_audit
+
+
 def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    if str(row.status or "").strip().lower() == "issued" or material_requisition_has_issue_history(db, row):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An issued or inventory-posted material requisition cannot be hard-deleted. "
+                "Use a controlled reversal/void workflow; inventory history must be preserved."
+            ),
+        )
+
     if program_key == SINGLE_RAN_PROGRAM:
         db.query(SrMaterialRequisitionSignedCopy).filter(
             SrMaterialRequisitionSignedCopy.requisition_id == row.id
@@ -7059,6 +7126,48 @@ def purge_product(product_id: int, data: ProductPurgeIn, request: Request, db: S
     program_key = normalize_program(data.program)
     if product is None or normalize_program(getattr(product, "program", DEFAULT_PROGRAM)) != program_key:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    related_mrs = db.query(
+        MaterialRequisition.id,
+        MaterialRequisition.order_number,
+        MaterialRequisition.status,
+    ).filter(
+        MaterialRequisition.program == program_key,
+        MaterialRequisition.id.in_(
+            db.query(MaterialRequisitionItem.requisition_id).filter(
+                MaterialRequisitionItem.product_id == product.id
+            )
+        ),
+    ).with_for_update().all()
+    requisition_order_numbers = [row.order_number for row in related_mrs]
+    has_issued_mr_line = any(str(row.status or "").strip().lower() == "issued" for row in related_mrs)
+    has_site_issue = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.product_id == product.id,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.event_type == "mr_issue",
+    ).first() is not None
+    has_warehouse_issue = db.query(StockMovement.id).filter(
+        StockMovement.program == program_key,
+        StockMovement.product_id == product.id,
+        StockMovement.movement_type == "issue_to_technician",
+        StockMovement.reference.in_(
+            db.query(MaterialRequisition.order_number).filter(MaterialRequisition.program == program_key)
+        ),
+    ).first() is not None
+    has_issue_audit = db.query(AuditLog.id).filter(
+        AuditLog.action == "issue_material_requisition",
+        AuditLog.entity_type == "material_requisition",
+        AuditLog.entity_id.in_(requisition_order_numbers),
+    ).first() is not None
+    if has_issued_mr_line or has_site_issue or has_warehouse_issue or has_issue_audit:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This product is referenced by an issued material requisition. "
+                "Its requisition and inventory history cannot be purged; use a controlled reversal/void workflow."
+            ),
+        )
 
     receive_order_ids = [row[0] for row in db.query(ReceiveOrderItem.receive_order_id).filter(ReceiveOrderItem.product_id == product.id).distinct().all()]
     issue_order_ids = [row[0] for row in db.query(IssueOrderItem.issue_order_id).filter(IssueOrderItem.product_id == product.id).distinct().all()]
@@ -9984,6 +10093,14 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if user.role.strip().lower() != "admin" and normalize_usage_key(row.created_by) != normalize_usage_key(request_actor(request)):
         raise HTTPException(status_code=403, detail="You can only resubmit your own requisitions")
+    if str(row.status or "").strip().lower() == "issued" or material_requisition_has_issue_history(db, row):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An issued material requisition cannot be edited or have its lines replaced. "
+                "Use a controlled reversal/void workflow; inventory history must be preserved."
+            ),
+        )
     if row.status != "returned_for_edit":
         raise HTTPException(status_code=400, detail=f"MR cannot be edited from status {row.status}")
     require_warehouse(db, data.warehouse_id, program_key)
@@ -10932,6 +11049,7 @@ def delete_material_requisition(requisition_id: int, request: Request, data: Mat
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items), joinedload(MaterialRequisition.warehouse))
         .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == normalize_program(data.program))
+        .with_for_update(of=MaterialRequisition)
         .first()
     )
     if row is None:

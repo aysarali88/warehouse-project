@@ -585,6 +585,85 @@ def resolve_site_alias(db, program: str, value: str) -> Site | None:
     return matches[0] if matches else None
 
 
+def prepare_material_requisition_issue(db, program: str, site_label: str, items: list):
+    """Resolve and validate every MR line before the caller changes warehouse stock."""
+    program_key = normalize_program(program)
+    label = str(site_label or "").strip()
+    if not label:
+        raise HTTPException(
+            status_code=409,
+            detail="MR site is blank; map the requisition to a Site before warehouse issue",
+        )
+
+    try:
+        site = resolve_site_alias(db, program_key, label)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(
+                status_code=409,
+                detail=f"MR site '{label}' is ambiguous: {exc.detail}",
+            ) from exc
+        raise
+    if site is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"MR site '{label}' is not mapped to a unique Site in {program_key}; add an explicit Site alias",
+        )
+
+    prepared = []
+    for item in items:
+        line_label = str(getattr(item, "line_no", None) or getattr(item, "id", "?"))
+        product_id = getattr(item, "product_id", None)
+        if not product_id:
+            raise HTTPException(status_code=400, detail=f"MR line {line_label} is missing product_id")
+        product = db.query(Product).filter_by(id=product_id, program=program_key).first()
+        if product is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"MR line {line_label} product_id {product_id} is not available in {program_key}",
+            )
+        quantity = _decimal(getattr(item, "quantity", None))
+        if quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"MR line {line_label} quantity must be greater than zero")
+        unit = _validate_uom(product, getattr(item, "uom", ""))
+        prepared.append((item, product, quantity, unit))
+    return site, prepared
+
+
+def post_material_requisition_site_movement(
+    db,
+    *,
+    program: str,
+    site_id: int,
+    requisition_id: int,
+    order_number: str,
+    line_id: int,
+    product_id: int,
+    quantity,
+    uom: str,
+    actor: str,
+    effective_date: str,
+) -> SiteMaterialMovement:
+    return post_site_movement(
+        db,
+        program=program,
+        site_id=site_id,
+        product_id=product_id,
+        movement_type="incoming",
+        event_type="mr_issue",
+        quantity_delta=quantity,
+        uom=uom,
+        document_type="material_requisition",
+        document_id=str(requisition_id),
+        document_line_id=str(line_id),
+        reference=str(order_number or requisition_id),
+        note=f"Actual warehouse issue from MR {order_number or requisition_id}",
+        created_by=actor,
+        approved_by=actor,
+        effective_date=effective_date,
+    )
+
+
 def reconciliation_rows(db, program: str, site_id: int | None = None, product_id: int | None = None) -> list[dict]:
     program_key = normalize_program(program)
     ledger_query = db.query(
