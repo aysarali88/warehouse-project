@@ -75,6 +75,8 @@ from site_survey_readonly import apply_tripoli_installed_override, installed_pol
 from site_inventory_api import build_site_inventory_router
 from site_inventory_service import (
     post_material_requisition_site_movement,
+    post_material_return_site_movement,
+    prepare_material_return_receipt,
     prepare_material_requisition_issue,
 )
 
@@ -10707,21 +10709,8 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
             continue
         prepared_items.append((item, product, damaged, item.quantity, "", None))
 
+    return_lines = []
     for index, (item, product, damaged, item_quantity, serial_number, serial_row) in enumerate(prepared_items, start=1):
-        if requester_submission:
-            if damaged:
-                damaged_quantity_pending += item_quantity
-        elif damaged:
-            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
-            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item_quantity
-            damaged_quantity_quarantined += item_quantity
-            if serial_row is not None:
-                serial_row.status = "damaged"
-                serial_row.warehouse_id = virtual_warehouse.id
-                serial_row.technician_id = None
-        else:
-            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item_quantity
-            stock_added_quantity += item_quantity
         return_item = MaterialReturnItem(
             return_id=row.id,
             line_no=index,
@@ -10735,24 +10724,64 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
         )
         db.add(return_item)
         db.flush()
-        if not requester_submission:
-            db.add(
-                StockMovement(
-                    program=program_key,
-                    movement_type="damage_in" if damaged else "return_in",
-                    product_id=item.product_id,
-                    warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
-                    quantity=item_quantity,
-                    serial_number=serial_number,
-                    reference=row.return_number,
-                    source_item_id=return_item.id,
-                    note=(
-                        f"Damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}"
-                        if damaged else f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}"
-                    ),
-                    created_by=row.created_by,
-                )
+        return_lines.append((return_item, item, product, damaged, item_quantity, serial_number, serial_row))
+
+    site_receipt = None
+    site_lines_by_id = {}
+    if not requester_submission:
+        site_receipt, validated_lines = prepare_material_return_receipt(
+            db, program_key, row.site_id, [entry[0] for entry in return_lines]
+        )
+        site_lines_by_id = {entry[0].id: entry[1:] for entry in validated_lines}
+
+    for return_item, item, product, damaged, item_quantity, serial_number, serial_row in return_lines:
+        if requester_submission:
+            if damaged:
+                damaged_quantity_pending += item_quantity
+            continue
+
+        site_product, site_quantity, site_uom = site_lines_by_id[return_item.id]
+        if damaged:
+            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
+            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item_quantity
+            damaged_quantity_quarantined += item_quantity
+            if serial_row is not None:
+                serial_row.status = "damaged"
+                serial_row.warehouse_id = virtual_warehouse.id
+                serial_row.technician_id = None
+        else:
+            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item_quantity
+            stock_added_quantity += item_quantity
+        post_material_return_site_movement(
+            db,
+            program=program_key,
+            site_id=site_receipt.id,
+            return_id=row.id,
+            return_number=row.return_number,
+            line_id=return_item.id,
+            product_id=site_product.id,
+            quantity=site_quantity,
+            uom=site_uom,
+            actor=row.created_by,
+            effective_date=local_today(),
+        )
+        db.add(
+            StockMovement(
+                program=program_key,
+                movement_type="damage_in" if damaged else "return_in",
+                product_id=item.product_id,
+                warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
+                quantity=item_quantity,
+                serial_number=serial_number,
+                reference=row.return_number,
+                source_item_id=return_item.id,
+                note=(
+                    f"Damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}"
+                    if damaged else f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}"
+                ),
+                created_by=row.created_by,
             )
+        )
 
     log_audit(
         db,
@@ -10797,8 +10826,12 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     damaged_quantity_quarantined = 0
     source_warehouse = require_warehouse(db, row.warehouse_id, program_key)
     virtual_warehouse = None
+    site_receipt, validated_lines = prepare_material_return_receipt(
+        db, program_key, row.site_id, row.items
+    )
+    site_lines_by_id = {entry[0].id: entry[1:] for entry in validated_lines}
     for item in row.items:
-        require_product(db, item.product_id, program_key)
+        site_product, site_quantity, site_uom = site_lines_by_id[item.id]
         if return_condition_is_damaged(item.condition):
             serial_number, _display_remark = decode_sr_damage_remark(item.remark)
             serial_row = None
@@ -10829,6 +10862,19 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                     created_by=actor,
                 )
             )
+            post_material_return_site_movement(
+                db,
+                program=program_key,
+                site_id=site_receipt.id,
+                return_id=row.id,
+                return_number=row.return_number,
+                line_id=item.id,
+                product_id=site_product.id,
+                quantity=site_quantity,
+                uom=site_uom,
+                actor=actor,
+                effective_date=local_today(),
+            )
             continue
         locked_stock_balance(db, row.warehouse_id, item.product_id, program_key).quantity += item.quantity
         stock_added_quantity += item.quantity
@@ -10844,6 +10890,19 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                 note=f"Approved return from site {row.site_id or row.site_address}: {item.condition or 'Good'}",
                 created_by=actor,
             )
+        )
+        post_material_return_site_movement(
+            db,
+            program=program_key,
+            site_id=site_receipt.id,
+            return_id=row.id,
+            return_number=row.return_number,
+            line_id=item.id,
+            product_id=site_product.id,
+            quantity=site_quantity,
+            uom=site_uom,
+            actor=actor,
+            effective_date=local_today(),
         )
     row.received_by = actor
     row.status = "confirmed"
