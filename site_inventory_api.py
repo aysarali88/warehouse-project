@@ -311,7 +311,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize(request, "Admin", "Approval")
+        actor = authorize(request, "Admin")
         try:
             with db.begin():
                 movement = reverse_site_movement(

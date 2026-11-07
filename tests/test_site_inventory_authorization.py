@@ -112,25 +112,24 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
         self.assertEqual(result["mode"], "applied")
         rebuild.assert_called_once()
 
-    def test_reversal_permissions_are_unchanged_admin_and_approval(self):
+    def test_reversal_is_admin_only(self):
         endpoint = self.endpoints["/api/warehouse/site-inventory/movements/{movement_id}/reverse"]
         reversal = SimpleNamespace(id=13, reverses_movement_id=10)
         payload = site_inventory_api.SiteMovementReverse(
             program="FTTH", reference="REV-TEST", note="Synthetic reversal authorization test",
             request_token="reversal-authorization-test-001",
         )
-        for role in ("Admin", "Approval"):
-            with self.subTest(role=role), patch.object(
-                site_inventory_api, "reverse_site_movement", return_value=reversal
-            ) as reverse:
-                result = endpoint(10, payload, self.make_request(role), DummySession())
-                self.assertEqual(result["reverses_movement_id"], 10)
-                reverse.assert_called_once()
-        for role in ("Requester", "Technician", "Warehouse Manager", "Management"):
+        with patch.object(
+            site_inventory_api, "reverse_site_movement", return_value=reversal
+        ) as reverse:
+            result = endpoint(10, payload, self.make_request("Admin"), DummySession())
+            self.assertEqual(result["reverses_movement_id"], 10)
+            reverse.assert_called_once()
+        for role in (None, "Approval", "Management", "Warehouse Manager", "Technician", "Requester"):
             with self.subTest(role=role), patch.object(site_inventory_api, "reverse_site_movement") as reverse:
                 with self.assertRaises(HTTPException) as error:
                     endpoint(10, payload, self.make_request(role), DummySession())
-                self.assertEqual(error.exception.status_code, 403)
+                self.assertEqual(error.exception.status_code, 401 if role is None else 403)
                 reverse.assert_not_called()
 
 

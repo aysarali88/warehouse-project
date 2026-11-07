@@ -19,6 +19,7 @@ import urllib.request
 import ssl
 import posixpath
 import zipfile
+from decimal import Decimal
 from xml.etree import ElementTree
 from threading import Lock
 import bcrypt
@@ -76,6 +77,8 @@ from site_inventory_api import build_site_inventory_router
 from site_inventory_service import (
     post_material_requisition_site_movement,
     post_material_return_site_movement,
+    post_rollout_consumption_site_movement,
+    prepare_rollout_consumption,
     prepare_material_return_receipt,
     prepare_material_requisition_issue,
 )
@@ -1683,6 +1686,17 @@ class MaterialReturnIn(BaseModel):
     material_status: str = "New"
     created_by: str = "manager"
     items: list[MaterialReturnItemIn]
+
+
+class RolloutConsumptionConfirmationIn(BaseModel):
+    product_id: int = Field(gt=0)
+    confirmed_consumed_quantity: Decimal = Field(gt=0)
+    uom: str = Field(min_length=1, max_length=24)
+    effective_date: str = Field(
+        default_factory=lambda: datetime.now(TRIPOLI_TZ).date().isoformat(),
+        min_length=10,
+        max_length=10,
+    )
 
 
 def db_session(request: Request):
@@ -4762,10 +4776,35 @@ def rollout_duplicate_details(row: RolloutRecord) -> dict:
     }
 
 
+def rollout_consumption_movement(db: Session, row: RolloutRecord):
+    return (
+        db.query(SiteMaterialMovement)
+        .filter(
+            SiteMaterialMovement.document_type == "rollout_record",
+            SiteMaterialMovement.document_id == str(row.id),
+            SiteMaterialMovement.event_type == "rollout_consumption_confirmed",
+        )
+        .first()
+    )
+
+
+def reject_confirmed_rollout_edit(db: Session, row: RolloutRecord) -> None:
+    if rollout_consumption_movement(db, row) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This Field Entry has confirmed consumption history; use a controlled Site Inventory reversal instead of editing or deleting it",
+        )
+
+
 def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, RolloutRecord] | None = None) -> tuple[RolloutRecord, bool]:
     record_id = stable_rollout_record_id(data)
     row = existing_by_id.get(record_id) if existing_by_id is not None else db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
     created = row is None
+    if row is not None:
+        row = db.query(RolloutRecord).filter_by(id=row.id).with_for_update().populate_existing().one()
+        if existing_by_id is not None:
+            existing_by_id[record_id] = row
+        reject_confirmed_rollout_edit(db, row)
     if row is None:
         row = RolloutRecord(record_id=record_id)
         db.add(row)
@@ -6327,6 +6366,75 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
     }
 
 
+@app.post("/api/warehouse/rollout-field-entry/{record_id}/confirm-consumption")
+def confirm_rollout_field_entry_consumption(
+    record_id: str,
+    data: RolloutConsumptionConfirmationIn,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_roles(request, "Admin")
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+
+    with db.begin():
+        row = (
+            db.query(RolloutRecord)
+            .filter(RolloutRecord.record_id == str(record_id).strip())
+            .with_for_update()
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Field Entry record was not found")
+        if rollout_norm(row.status) != "done":
+            raise HTTPException(status_code=409, detail="Only a Done Field Entry can be explicitly confirmed as consumed")
+
+        site, _product, quantity, unit = prepare_rollout_consumption(
+            db,
+            program_key,
+            row.area,
+            data.product_id,
+            data.confirmed_consumed_quantity,
+            data.uom,
+        )
+        prior = db.query(SiteMaterialMovement).filter_by(
+            program=program_key,
+            document_type="rollout_record",
+            document_id=str(row.id),
+            document_line_id="consumption",
+            event_type="rollout_consumption_confirmed",
+        ).first()
+        if prior is not None and db.query(SiteMaterialMovement.id).filter_by(
+            reverses_movement_id=prior.id,
+        ).first() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This consumption was reversed; use the controlled correction workflow for any further posting",
+            )
+        movement = post_rollout_consumption_site_movement(
+            db,
+            program=program_key,
+            site_id=site.id,
+            rollout_record_pk=row.id,
+            rollout_record_id=row.record_id,
+            product_id=data.product_id,
+            quantity=quantity,
+            uom=unit,
+            actor=request_actor(request),
+            effective_date=data.effective_date,
+        )
+
+    return {
+        "success": True,
+        "consumption_confirmed": True,
+        "replayed": prior is not None,
+        "movement_id": movement.id,
+        "site_id": site.id,
+        "product_id": data.product_id,
+        "confirmed_consumed_quantity": str(quantity),
+        "uom": unit,
+    }
+
+
 @app.post("/api/warehouse/rollout-field-entry/hub-accessories")
 def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Requester", "Admin")
@@ -6424,9 +6532,15 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Requester", "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = (
+        db.query(RolloutRecord)
+        .filter(RolloutRecord.record_id == str(record_id).strip())
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
+    reject_confirmed_rollout_edit(db, row)
 
     date = str(first_value(data, "Date", "date", default=row.date) or "").strip()
     supervisor_name = str(first_value(data, "Supervisor Name", "supervisor_name", default=row.supervisor_name) or "").strip()
@@ -6557,9 +6671,15 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
 def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = (
+        db.query(RolloutRecord)
+        .filter(RolloutRecord.record_id == str(record_id).strip())
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
+    reject_confirmed_rollout_edit(db, row)
 
     deleted = row_to_record(row)
     log_audit(

@@ -712,6 +712,82 @@ def post_material_return_site_movement(
     )
 
 
+def prepare_rollout_consumption(db, program: str, site_label: str, product_id: int, quantity, uom: str):
+    """Resolve and validate explicit Field Entry consumption before posting inventory."""
+    program_key = normalize_program(program)
+    label = str(site_label or "").strip()
+    if not label:
+        raise HTTPException(
+            status_code=409,
+            detail="Field Entry Area is blank; map it to a Site before confirming consumption",
+        )
+    try:
+        site = resolve_site_alias(db, program_key, label)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Field Entry Area '{label}' is ambiguous: {exc.detail}",
+            ) from exc
+        raise
+    if site is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Field Entry Area '{label}' is not mapped to one Site in {program_key}; add an explicit Site alias",
+        )
+
+    if not product_id:
+        raise HTTPException(status_code=400, detail="A numeric product_id is required for consumption confirmation")
+    product = db.query(Product).filter_by(id=product_id, program=program_key).first()
+    if product is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"product_id {product_id} is not available in {program_key}",
+        )
+    amount = _decimal(quantity)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Confirmed consumed quantity must be greater than zero")
+    unit = _validate_uom(product, uom)
+    return site, product, amount, unit
+
+
+def post_rollout_consumption_site_movement(
+    db,
+    *,
+    program: str,
+    site_id: int,
+    rollout_record_pk: int,
+    rollout_record_id: str,
+    product_id: int,
+    quantity,
+    uom: str,
+    actor: str,
+    effective_date: str,
+) -> SiteMaterialMovement:
+    amount = _decimal(quantity)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Confirmed consumed quantity must be greater than zero")
+    reference = str(rollout_record_id or rollout_record_pk)
+    return post_site_movement(
+        db,
+        program=program,
+        site_id=site_id,
+        product_id=product_id,
+        movement_type="outgoing",
+        event_type="rollout_consumption_confirmed",
+        quantity_delta=-amount,
+        uom=uom,
+        document_type="rollout_record",
+        document_id=str(rollout_record_pk),
+        document_line_id="consumption",
+        reference=reference,
+        note=f"Confirmed consumed material for Field Entry {reference}",
+        created_by=actor,
+        approved_by=actor,
+        effective_date=effective_date,
+    )
+
+
 def post_material_requisition_site_movement(
     db,
     *,
