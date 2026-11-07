@@ -509,6 +509,11 @@ def reverse_site_movement(db, movement_id: int, program: str, actor: str, refere
     ).with_for_update().first()
     if original is None:
         raise HTTPException(status_code=404, detail="Movement to reverse was not found")
+    if original.event_type.startswith("site_transfer_"):
+        raise HTTPException(
+            status_code=409,
+            detail="Transfer movements must be corrected through the transfer correction workflow",
+        )
     return post_site_movement(
         db,
         program=program_key,

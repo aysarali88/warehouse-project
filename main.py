@@ -74,6 +74,7 @@ from models import (
 )
 from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
 from site_inventory_api import build_site_inventory_router
+from site_transfer_api import build_site_transfer_router
 from site_inventory_service import (
     post_material_requisition_site_movement,
     post_material_return_site_movement,
@@ -1771,6 +1772,7 @@ def request_actor(request: Request) -> str:
 
 
 app.include_router(build_site_inventory_router(db_session, normalize_program, require_roles, request_actor))
+app.include_router(build_site_transfer_router(db_session, normalize_program, require_roles, request_actor))
 
 
 def request_scope_viewer(request: Request) -> str:
