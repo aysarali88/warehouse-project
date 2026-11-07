@@ -65,11 +65,13 @@ from models import (
     SrMaterialReturnStatus,
     StockBalance,
     StockMovement,
+    SITE_INVENTORY_FOUNDATION_TABLES,
     Technician,
     TechnicianBalance,
     Warehouse,
 )
 from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
+from site_inventory_api import build_site_inventory_router
 
 WAREHOUSE_CACHE: OrderedDict[str, tuple[float, dict, int]] = OrderedDict()
 WAREHOUSE_CACHE_TTL = 25
@@ -123,7 +125,11 @@ for program_key, db_engine in all_engines():
     try:
         sr_only_tables = {SrMaterialRequisitionSignedCopy.__tablename__, SrMaterialReturnStatus.__tablename__}
         use_shared_database = sr_engine is None or sr_engine.url == db_engine.url
-        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables]
+        tables = [
+            table for table in Base.metadata.sorted_tables
+            if table.name not in SITE_INVENTORY_FOUNDATION_TABLES
+            and (program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables)
+        ]
         Base.metadata.create_all(bind=db_engine, tables=tables)
         if program_key == SINGLE_RAN_PROGRAM and db_engine.dialect.name == "postgresql":
             with db_engine.begin() as conn:
@@ -1741,6 +1747,9 @@ def require_area_builder_access(request: Request) -> AppUser:
 def request_actor(request: Request) -> str:
     user = current_user(request)
     return user.name or user.username
+
+
+app.include_router(build_site_inventory_router(db_session, normalize_program, require_roles, request_actor))
 
 
 def request_scope_viewer(request: Request) -> str:
