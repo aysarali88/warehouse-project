@@ -3817,6 +3817,9 @@ def fiber_map_manager_splitter_limit(area: str) -> int:
 
 
 FIBER_MAP_MANAGER_LINE_CANDIDATES = {
+    "mansoura": {
+        "X1": {"H12": {"L4"}, "H13": {"L4"}},
+    },
     "rasammar": {
         "X1": {"H13": {"L4"}},
     },
