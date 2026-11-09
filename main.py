@@ -5284,7 +5284,19 @@ def material_requisition_has_issue_history(db: Session, row: MaterialRequisition
 
 def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
-    if str(row.status or "").strip().lower() == "issued" or material_requisition_has_issue_history(db, row):
+    has_site_inventory_history = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.document_id == str(row.id),
+    ).first() is not None
+    site_inventory_mr_enabled = site_inventory_integration_enabled(
+        "SITE_INVENTORY_MR_ENABLED", program_key, normalize_program
+    )
+    has_legacy_issue = (
+        str(row.status or "").strip().lower() == "issued"
+        or material_requisition_has_issue_history(db, row)
+    )
+    if has_site_inventory_history or (site_inventory_mr_enabled and has_legacy_issue):
         raise HTTPException(
             status_code=409,
             detail=(

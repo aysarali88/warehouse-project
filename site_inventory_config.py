@@ -13,6 +13,10 @@ def feature_flag_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in _TRUE_VALUES
 
 
+def site_inventory_admin_write_enabled() -> bool:
+    return feature_flag_enabled("SITE_INVENTORY_ADMIN_WRITE_ENABLED")
+
+
 def cutover_programs(normalize_program_fn) -> set[str]:
     raw = os.getenv("SITE_INVENTORY_CUTOVER_PROGRAMS", "")
     known_programs = {"FTTH", "SINGLE_RAN", "SR", "SINGLERAN"}
@@ -116,6 +120,7 @@ def site_inventory_readiness(program: str, normalize_program_fn) -> dict:
     }
     return {
         "program": normalize_program_fn(program),
+        "admin_write_enabled": site_inventory_admin_write_enabled(),
         "cutover_program_enabled": program_enabled,
         "cutover_timestamp_status": cutoff_status,
         "configuration_ready": program_enabled and cutoff_at is not None,

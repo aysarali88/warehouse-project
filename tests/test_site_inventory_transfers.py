@@ -383,7 +383,8 @@ class SiteTransferTests(unittest.TestCase):
 
     def test_transfer_api_is_admin_only_and_cutover_gate_defaults_closed(self):
         router = site_transfer_api.build_site_transfer_router(
-            lambda: None, normalize_program, main.require_roles, main.request_actor
+            lambda: None, normalize_program, main.require_roles, main.request_actor,
+            enabled_fn=lambda _program: True,
         )
         endpoint = next(
             route.endpoint for route in router.routes
@@ -406,10 +407,11 @@ class SiteTransferTests(unittest.TestCase):
 
         admin_request = Request({"type": "http", "headers": [], "query_string": b""})
         admin_request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
-        with patch.object(site_transfer_api, "create_transfer") as create:
+        with patch.dict(os.environ, {}, clear=True), patch.object(site_transfer_api, "create_transfer") as create:
             with self.assertRaises(HTTPException) as error:
                 endpoint(payload, admin_request, SimpleNamespace(begin=nullcontext))
             self.assertEqual(error.exception.status_code, 503)
+            self.assertIn("administrative writes are disabled", error.exception.detail)
             create.assert_not_called()
         self.assertFalse(site_transfer_api.site_transfer_enabled("FTTH", normalize_program))
         with patch.dict(os.environ, {
@@ -418,6 +420,66 @@ class SiteTransferTests(unittest.TestCase):
         }):
             self.assertTrue(site_transfer_api.site_transfer_enabled("FTTH", normalize_program))
             self.assertFalse(site_transfer_api.site_transfer_enabled("SINGLE_RAN", normalize_program))
+
+    def test_admin_write_flag_blocks_every_transfer_mutation(self):
+        router = site_transfer_api.build_site_transfer_router(
+            lambda: None, normalize_program, main.require_roles, main.request_actor,
+            enabled_fn=lambda _program: True,
+        )
+        endpoints = {
+            (route.path, "POST"): route.endpoint
+            for route in router.routes
+            for method in route.methods
+            if method == "POST"
+        }
+        request = Request({"type": "http", "headers": [], "query_string": b""})
+        request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
+        create_data = site_transfer_api.SiteTransferCreate(
+            program="FTTH", from_site_id=1, to_site_id=2,
+            items=[site_transfer_api.TransferLineCreate(product_id=1, quantity=1, uom="M")],
+            request_token="admin-write-transfer-create-0001",
+        )
+        action_data = site_transfer_api.SiteTransferAction(program="FTTH")
+        dispatch_data = site_transfer_api.SiteTransferDispatchIn(
+            program="FTTH", request_token="admin-write-transfer-dispatch-001",
+        )
+        receipt_data = site_transfer_api.SiteTransferReceiptIn(
+            program="FTTH", request_token="admin-write-transfer-receipt-001",
+            items=[site_transfer_api.TransferReceiptLine(transfer_item_id=1, quantity=1, uom="M")],
+        )
+        correction_data = site_transfer_api.SiteTransferCorrectionIn(
+            program="FTTH", request_token="admin-write-transfer-correction-01", note="test correction",
+        )
+        cases = [
+            ("/api/warehouse/site-transfers", create_data, "create_transfer",
+             lambda endpoint, db, data: endpoint(data, request, db)),
+            ("/api/warehouse/site-transfers/{transfer_id}/approve", action_data, "approve_transfer",
+             lambda endpoint, db, data: endpoint(1, data, request, db)),
+            ("/api/warehouse/site-transfers/{transfer_id}/dispatch", dispatch_data, "dispatch_transfer",
+             lambda endpoint, db, data: endpoint(1, data, request, db)),
+            ("/api/warehouse/site-transfers/{transfer_id}/receipts", receipt_data, "receive_transfer",
+             lambda endpoint, db, data: endpoint(1, data, request, db)),
+            ("/api/warehouse/site-transfers/{transfer_id}/corrections/receipts/{receipt_item_id}/reverse",
+             correction_data, "reverse_transfer_receipt",
+             lambda endpoint, db, data: endpoint(1, 1, data, request, db)),
+            ("/api/warehouse/site-transfers/{transfer_id}/corrections/dispatch/reverse",
+             correction_data, "reverse_transfer_dispatch",
+             lambda endpoint, db, data: endpoint(1, data, request, db)),
+        ]
+        for path, data, service_name, invoke in cases:
+            begin_calls = []
+            db = SimpleNamespace(begin=lambda: begin_calls.append(True) or nullcontext())
+            endpoint = endpoints[(path, "POST")]
+            with self.subTest(path=path), patch.dict(os.environ, {
+                "SITE_INVENTORY_TRANSFER_ENABLED": "true",
+                "SITE_INVENTORY_CUTOVER_PROGRAMS": "FTTH",
+            }, clear=True), patch.object(site_transfer_api, service_name) as service:
+                with self.assertRaises(HTTPException) as error:
+                    invoke(endpoint, db, data)
+                self.assertEqual(error.exception.status_code, 503)
+                self.assertIn("administrative writes are disabled", error.exception.detail)
+                service.assert_not_called()
+                self.assertEqual(begin_calls, [])
 
 
 if __name__ == "__main__":

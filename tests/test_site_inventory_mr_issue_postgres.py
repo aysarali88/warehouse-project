@@ -520,6 +520,60 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
         with self.Session() as db:
             self.assertIsNotNone(db.get(MaterialRequisition, fixture["mr_id"]))
 
+    def test_site_inventory_history_blocks_delete_even_after_mr_integration_is_disabled(self):
+        fixture = self.make_mr(lines=[("M", "M", 4, "main")])
+        self.issue(fixture)
+        before = self.values(fixture)
+        self.assertEqual(before["site_movements"], 1)
+        with patch.dict(os.environ, {
+            "SITE_INVENTORY_MR_ENABLED": "false",
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "",
+        }):
+            with self.Session() as db:
+                row = db.get(MaterialRequisition, fixture["mr_id"])
+                with self.assertRaises(HTTPException) as error:
+                    self.main_module.delete_material_requisition_row(db, row, fixture["actor"])
+                self.assertEqual(error.exception.status_code, 409)
+                db.rollback()
+        self.assertEqual(self.values(fixture), before)
+
+    def test_issued_mr_without_site_history_is_protected_when_mr_integration_is_enabled(self):
+        fixture = self.make_mr(status="issued", lines=[("M", "M", 4, "main")])
+        with self.Session() as db:
+            row = db.get(MaterialRequisition, fixture["mr_id"])
+            self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                program="FTTH", document_type="material_requisition", document_id=str(fixture["mr_id"])
+            ).count(), 0)
+            with self.assertRaises(HTTPException) as error:
+                self.main_module.delete_material_requisition_row(db, row, fixture["actor"])
+            self.assertEqual(error.exception.status_code, 409)
+            db.rollback()
+        with self.Session() as db:
+            self.assertIsNotNone(db.get(MaterialRequisition, fixture["mr_id"]))
+
+    def test_issued_mr_delete_keeps_legacy_behavior_when_mr_integration_is_dormant(self):
+        fixture = self.make_mr(lines=[("M", "M", 4, "main")])
+        with patch.dict(os.environ, {
+            "SITE_INVENTORY_MR_ENABLED": "false",
+            "SITE_INVENTORY_CUTOVER_PROGRAMS": "",
+        }):
+            self.issue(fixture)
+            with self.Session() as db:
+                self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                    program="FTTH", document_type="material_requisition", document_id=str(fixture["mr_id"])
+                ).count(), 0)
+                row = db.get(MaterialRequisition, fixture["mr_id"])
+                result = self.main_module.delete_material_requisition_row(db, row, fixture["actor"])
+                db.commit()
+                self.assertEqual(result["restored_quantity"], 4)
+                self.assertIsNone(db.get(MaterialRequisition, fixture["mr_id"]))
+                self.assertEqual(db.query(StockBalance).filter_by(
+                    warehouse_id=fixture["warehouse_id"], product_id=fixture["product_ids"]["main"]
+                ).one().quantity, 100)
+                self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                    program="FTTH", document_type="material_requisition", document_id=str(fixture["mr_id"])
+                ).count(), 0)
+
     def test_product_purge_cannot_remove_an_issued_mr_line_or_its_history(self):
         fixture = self.make_mr(lines=[("M", "M", 4, "main")])
         self.issue(fixture)

@@ -19,7 +19,7 @@ from site_inventory_service import (
     resolve_site_alias,
     reverse_site_movement,
 )
-from site_inventory_config import site_inventory_readiness
+from site_inventory_config import site_inventory_admin_write_enabled, site_inventory_readiness
 
 
 class SiteAliasCreate(BaseModel):
@@ -82,6 +82,13 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
     def authorize(request: Request, *roles: str) -> str:
         require_roles_fn(request, *roles)
         return actor_fn(request)
+
+    def require_admin_writes_enabled() -> None:
+        if not site_inventory_admin_write_enabled():
+            raise HTTPException(
+                status_code=503,
+                detail="Site Inventory administrative writes are disabled",
+            )
 
     @router.get("/api/warehouse/site-inventory/readiness")
     def site_inventory_readiness_status(
@@ -161,6 +168,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin")
+        require_admin_writes_enabled()
         try:
             with db.begin():
                 row = create_site_alias(
@@ -234,6 +242,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin")
+        require_admin_writes_enabled()
         try:
             with db.begin():
                 row = create_opening_balance_request(
@@ -258,6 +267,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin", "Approval")
+        require_admin_writes_enabled()
         try:
             with db.begin():
                 movement = approve_opening_balance(db, request_id, program, actor)
@@ -273,6 +283,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin", "Approval")
+        require_admin_writes_enabled()
         try:
             with db.begin():
                 row = reject_opening_balance(db, request_id, data.program, actor, data.note)
@@ -287,6 +298,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin")
+        require_admin_writes_enabled()
         quantity = data.quantity if data.movement_type == "incoming" or data.direction == "increase" else -data.quantity
         try:
             with db.begin():
@@ -321,6 +333,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin")
+        require_admin_writes_enabled()
         try:
             with db.begin():
                 movement = reverse_site_movement(
@@ -337,6 +350,8 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         db: Session = Depends(db_dependency),
     ):
         actor = authorize(request, "Admin") if data.apply else authorize(request, "Admin", "Management", "Approval")
+        if data.apply:
+            require_admin_writes_enabled()
         try:
             if data.apply:
                 with db.begin():

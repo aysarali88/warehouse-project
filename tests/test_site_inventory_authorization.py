@@ -15,7 +15,11 @@ import site_inventory_api
 
 
 class DummySession:
+    def __init__(self):
+        self.begin_calls = 0
+
     def begin(self):
+        self.begin_calls += 1
         return nullcontext()
 
     def query(self, _model):
@@ -23,6 +27,9 @@ class DummySession:
 
 
 class EmptyQuery:
+    def filter_by(self, *_args, **_kwargs):
+        return self
+
     def filter(self, *_args, **_kwargs):
         return self
 
@@ -32,6 +39,18 @@ class EmptyQuery:
     def all(self):
         return []
 
+    def first(self):
+        return None
+
+    def count(self):
+        return 0
+
+    def offset(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
 
 class SiteInventoryAuthorizationTests(unittest.TestCase):
     @classmethod
@@ -40,6 +59,9 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
             lambda: None, main.normalize_program, main.require_roles, main.request_actor
         )
         cls.endpoints = {route.path: route.endpoint for route in router.routes}
+        cls.get_endpoints = {
+            route.path: route.endpoint for route in router.routes if "GET" in route.methods
+        }
 
     def make_request(self, role=None):
         request = Request({"type": "http", "headers": [], "query_string": b""})
@@ -67,7 +89,9 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
                     post.assert_not_called()
 
         movement = SimpleNamespace(id=11, source_event_key="synthetic-event-key")
-        with patch.object(site_inventory_api, "post_site_movement", return_value=movement) as post:
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}), patch.object(
+            site_inventory_api, "post_site_movement", return_value=movement
+        ) as post:
             result = endpoint(self.movement_payload(), self.make_request("Admin"), DummySession())
         self.assertTrue(result["success"])
         self.assertEqual(result["movement_id"], 11)
@@ -85,7 +109,9 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
         endpoint = self.endpoints["/api/warehouse/site-inventory/opening-balances/{request_id}/approve"]
         movement = SimpleNamespace(id=12)
         for role in ("Admin", "Approval"):
-            with self.subTest(role=role), patch.object(
+            with self.subTest(role=role), patch.dict(
+                os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}
+            ), patch.object(
                 site_inventory_api, "approve_opening_balance", return_value=movement
             ) as approve:
                 result = endpoint(3, self.make_request(role), db=DummySession())
@@ -105,9 +131,11 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
                 self.assertEqual(error.exception.status_code, 401 if role is None else 403)
                 rebuild.assert_not_called()
 
-        with patch.object(site_inventory_api, "rebuild_site_balances", return_value={
-            "mode": "applied", "items": [],
-        }) as rebuild:
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}), patch.object(
+            site_inventory_api, "rebuild_site_balances", return_value={
+                "mode": "applied", "items": [],
+            }
+        ) as rebuild:
             result = endpoint(payload, self.make_request("Admin"), DummySession())
         self.assertEqual(result["mode"], "applied")
         rebuild.assert_called_once()
@@ -119,7 +147,7 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
             program="FTTH", reference="REV-TEST", note="Synthetic reversal authorization test",
             request_token="reversal-authorization-test-001",
         )
-        with patch.object(
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}), patch.object(
             site_inventory_api, "reverse_site_movement", return_value=reversal
         ) as reverse:
             result = endpoint(10, payload, self.make_request("Admin"), DummySession())
@@ -144,7 +172,98 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
             result = endpoint(self.make_request("Admin"), program="FTTH")
         self.assertTrue(result["success"])
         self.assertFalse(result["configuration_ready"])
+        self.assertFalse(result["admin_write_enabled"])
         self.assertTrue(all(not item["enabled"] for item in result["integrations"].values()))
+
+    def test_all_admin_write_endpoints_fail_closed_before_database_mutation(self):
+        admin = self.make_request("Admin")
+        cases = [
+            (
+                "/api/warehouse/site-inventory/aliases",
+                site_inventory_api.SiteAliasCreate(program="FTTH", site_id=1, display_alias="Synthetic alias"),
+                "create_site_alias",
+                lambda db, endpoint, payload: endpoint(payload, admin, db),
+            ),
+            (
+                "/api/warehouse/site-inventory/opening-balances",
+                site_inventory_api.OpeningBalanceCreate(
+                    program="FTTH", site_id=1, product_id=1, quantity="10", uom="M",
+                    effective_date="2026-11-09", reference="OPEN-TEST", note="test",
+                    request_token="admin-write-opening-token-0001",
+                ),
+                "create_opening_balance_request",
+                lambda db, endpoint, payload: endpoint(payload, admin, db),
+            ),
+            (
+                "/api/warehouse/site-inventory/opening-balances/{request_id}/approve",
+                10, "approve_opening_balance",
+                lambda db, endpoint, payload: endpoint(payload, admin, db=db),
+            ),
+            (
+                "/api/warehouse/site-inventory/opening-balances/{request_id}/reject",
+                site_inventory_api.OpeningBalanceReject(program="FTTH", note="Reject synthetic request"),
+                "reject_opening_balance",
+                lambda db, endpoint, payload: endpoint(10, payload, admin, db=db),
+            ),
+            (
+                "/api/warehouse/site-inventory/movements", self.movement_payload(),
+                "post_site_movement",
+                lambda db, endpoint, payload: endpoint(payload, admin, db),
+            ),
+            (
+                "/api/warehouse/site-inventory/movements/{movement_id}/reverse",
+                site_inventory_api.SiteMovementReverse(
+                    program="FTTH", reference="REV-TEST", note="Synthetic reversal",
+                    request_token="admin-write-reversal-token-0001",
+                ),
+                "reverse_site_movement",
+                lambda db, endpoint, payload: endpoint(10, payload, admin, db=db),
+            ),
+            (
+                "/api/warehouse/site-inventory/rebuild",
+                site_inventory_api.ProjectionRebuildRequest(
+                    program="FTTH", apply=True, expected_digest="preview-digest"
+                ),
+                "rebuild_site_balances",
+                lambda db, endpoint, payload: endpoint(payload, admin, db),
+            ),
+        ]
+        for path, payload, mutation_name, invoke in cases:
+            db = DummySession()
+            with self.subTest(path=path), patch.dict(os.environ, {}, clear=True), patch.object(
+                site_inventory_api, mutation_name
+            ) as mutation:
+                with self.assertRaises(HTTPException) as error:
+                    invoke(db, self.endpoints[path], payload)
+                self.assertEqual(error.exception.status_code, 503)
+                mutation.assert_not_called()
+                self.assertEqual(db.begin_calls, 0)
+
+    def test_read_only_endpoints_remain_available_when_admin_writes_are_off(self):
+        db = DummySession()
+        admin = self.make_request("Admin")
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            site_inventory_api, "resolve_site_alias",
+            return_value=SimpleNamespace(id=1, name="Synthetic site", program="FTTH"),
+        ), patch.object(site_inventory_api, "reconciliation_rows", return_value=[]), patch.object(
+            site_inventory_api, "rebuild_site_balances", return_value={"mode": "preview", "items": []},
+        ):
+            self.assertTrue(self.endpoints["/api/warehouse/site-inventory/readiness"](admin)["success"])
+            self.assertEqual(self.endpoints["/api/warehouse/site-inventory"](admin, db=db)["items"], [])
+            self.assertEqual(self.get_endpoints["/api/warehouse/site-inventory/aliases"](admin, db=db)["items"], [])
+            self.assertEqual(self.endpoints["/api/warehouse/site-inventory/aliases/resolve"](
+                admin, alias="Synthetic", db=db
+            )["site_id"], 1)
+            self.assertEqual(self.endpoints["/api/warehouse/site-inventory/ledger"](
+                admin, site_id=1, product_id=1, page=1, page_size=100, db=db
+            )["items"], [])
+            self.assertEqual(self.endpoints["/api/warehouse/site-inventory/reconciliation"](
+                admin, db=db
+            )["items"], [])
+            self.assertEqual(self.endpoints["/api/warehouse/site-inventory/rebuild"](
+                site_inventory_api.ProjectionRebuildRequest(program="FTTH", apply=False), admin, db
+            )["mode"], "preview")
+        self.assertEqual(db.begin_calls, 0)
 
 
 if __name__ == "__main__":

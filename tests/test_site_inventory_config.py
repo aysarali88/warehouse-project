@@ -21,6 +21,7 @@ def normalize_program(value):
 class SiteInventoryConfigurationTests(unittest.TestCase):
     def test_all_integrations_are_disabled_by_default(self):
         with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(feature_flag_enabled("SITE_INVENTORY_ADMIN_WRITE_ENABLED"))
             self.assertFalse(feature_flag_enabled("SITE_INVENTORY_MR_ENABLED"))
             self.assertFalse(feature_flag_enabled("SITE_INVENTORY_RETURN_ENABLED"))
             self.assertFalse(feature_flag_enabled("SITE_INVENTORY_ROLLOUT_ENABLED"))
@@ -28,6 +29,7 @@ class SiteInventoryConfigurationTests(unittest.TestCase):
             self.assertFalse(integration_enabled("SITE_INVENTORY_MR_ENABLED", "FTTH", normalize_program))
             status = site_inventory_readiness("FTTH", normalize_program)
         self.assertFalse(status["configuration_ready"])
+        self.assertFalse(status["admin_write_enabled"])
         self.assertFalse(status["cutover_program_enabled"])
         self.assertEqual(cutover_programs(normalize_program), set())
         self.assertIsNone(parse_cutover_timestamp())
@@ -45,6 +47,7 @@ class SiteInventoryConfigurationTests(unittest.TestCase):
         }
         with patch.dict(os.environ, env, clear=True):
             status = site_inventory_readiness("FTTH", normalize_program)
+            self.assertFalse(feature_flag_enabled("SITE_INVENTORY_ADMIN_WRITE_ENABLED"))
             self.assertTrue(integration_enabled("SITE_INVENTORY_MR_ENABLED", "FTTH", normalize_program))
             self.assertFalse(integration_enabled("SITE_INVENTORY_MR_ENABLED", "SINGLE_RAN", normalize_program))
         self.assertTrue(status["configuration_ready"])
