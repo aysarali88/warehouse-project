@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DDL, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, event, func
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, event, func, text
 from sqlalchemy.orm import column_property, deferred, relationship
 
 from database import Base
@@ -29,6 +29,7 @@ class RolloutRecord(Base):
     labeling = Column(String, default="")
     related_to_xbox = Column(String, default="")
     entry_time = Column(String, default="")
+    site_inventory_recorded_at = Column(DateTime(timezone=True), nullable=True)
     cable_code = Column(String, default="")
     box_code = Column(String, default="")
     olt = Column(String, default="")
@@ -112,6 +113,279 @@ class Site(Base):
     program = Column(String, default="FTTH", nullable=False, index=True)
     name = Column(String, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SiteAlias(Base):
+    __tablename__ = "site_aliases"
+    __table_args__ = (
+        UniqueConstraint("program", "normalized_alias", name="uq_site_alias_program_normalized"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    normalized_alias = Column(String(160), nullable=False)
+    display_alias = Column(String(200), nullable=False)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    created_by = Column(String(160), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_by = Column(String(160), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    site = relationship("Site")
+
+
+class SiteBalance(Base):
+    __tablename__ = "site_balances"
+    __table_args__ = (
+        UniqueConstraint("program", "site_id", "product_id", name="uq_site_balance_program_site_product"),
+        CheckConstraint("on_hand_qty >= 0", name="ck_site_balance_nonnegative"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    on_hand_qty = Column(Numeric(18, 6), nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    site = relationship("Site")
+    product = relationship("Product")
+
+
+class SiteMaterialMovement(Base):
+    __tablename__ = "site_material_movements"
+    __table_args__ = (
+        UniqueConstraint("program", "source_event_key", name="uq_site_movement_program_source_event"),
+        UniqueConstraint("program", "idempotency_key", name="uq_site_movement_program_idempotency"),
+        UniqueConstraint("program", "request_token_hash", name="uq_site_movement_program_request_token"),
+        UniqueConstraint("reverses_movement_id", name="uq_site_movement_single_reversal"),
+        CheckConstraint("movement_type IN ('opening_balance', 'incoming', 'outgoing', 'adjustment', 'reversal')", name="ck_site_movement_type"),
+        CheckConstraint("status = 'approved'", name="ck_site_movement_approved_only"),
+        CheckConstraint("length(trim(uom)) > 0", name="ck_site_movement_uom_required"),
+        CheckConstraint("quantity_delta <> 0 OR movement_type = 'opening_balance'", name="ck_site_movement_nonzero"),
+        Index(
+            "uq_site_opening_balance_once",
+            "program", "site_id", "product_id",
+            unique=True,
+            sqlite_where=text("movement_type = 'opening_balance'"),
+            postgresql_where=text("movement_type = 'opening_balance'"),
+        ),
+        Index("ix_site_movement_program_site_product_created", "program", "site_id", "product_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    movement_type = Column(String(32), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False)
+    quantity_delta = Column(Numeric(18, 6), nullable=False)
+    uom = Column(String(24), nullable=False)
+    document_type = Column(String(80), nullable=False)
+    document_id = Column(String(120), nullable=False)
+    document_line_id = Column(String(120), nullable=False)
+    source_event_key = Column(String(64), nullable=False)
+    reference = Column(String(200), nullable=False)
+    note = Column(Text, nullable=False)
+    reverses_movement_id = Column(Integer, ForeignKey("site_material_movements.id", ondelete="RESTRICT"), nullable=True)
+    created_by = Column(String(160), nullable=False)
+    approved_by = Column(String(160), nullable=False)
+    effective_date = Column(String(10), nullable=False)
+    status = Column(String(16), nullable=False, default="approved", server_default="approved")
+    idempotency_key = Column(String(64), nullable=False)
+    request_token_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    site = relationship("Site")
+    product = relationship("Product")
+
+
+class SiteOpeningBalanceRequest(Base):
+    __tablename__ = "site_opening_balance_requests"
+    __table_args__ = (
+        UniqueConstraint("program", "request_token_hash", name="uq_site_opening_program_request_token"),
+        CheckConstraint("quantity >= 0", name="ck_site_opening_quantity_nonnegative"),
+        Index(
+            "uq_site_opening_pending_once",
+            "program", "site_id", "product_id",
+            unique=True,
+            sqlite_where=text("status = 'pending_approval'"),
+            postgresql_where=text("status = 'pending_approval'"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    uom = Column(String(24), nullable=False)
+    effective_date = Column(String(10), nullable=False)
+    reference = Column(String(200), nullable=False)
+    note = Column(Text, nullable=False)
+    status = Column(String(24), nullable=False, default="pending_approval", server_default="pending_approval", index=True)
+    entered_by = Column(String(160), nullable=False)
+    approved_by = Column(String(160), nullable=False, default="", server_default="")
+    request_token_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejected_by = Column(String(160), nullable=False, default="", server_default="")
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_note = Column(Text, nullable=False, default="", server_default="")
+
+    site = relationship("Site")
+    product = relationship("Product")
+
+
+SITE_INVENTORY_FOUNDATION_TABLES = frozenset({
+    "site_aliases",
+    "site_balances",
+    "site_material_movements",
+    "site_opening_balance_requests",
+    "site_inventory_schema_versions",
+    "site_transfers",
+    "site_transfer_items",
+    "site_transfer_dispatches",
+    "site_transfer_receipts",
+    "site_transfer_receipt_items",
+    "site_transfer_corrections",
+})
+
+
+class SiteTransfer(Base):
+    __tablename__ = "site_transfers"
+    __table_args__ = (
+        UniqueConstraint("program", "request_token_hash", name="uq_site_transfer_program_request"),
+        CheckConstraint("from_site_id <> to_site_id", name="ck_site_transfer_different_sites"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'in_transit', 'partially_received', 'received', 'cancelled')",
+            name="ck_site_transfer_status",
+        ),
+        Index("ix_site_transfer_program_status_created", "program", "status", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    from_site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    to_site_id = Column(Integer, ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="draft", server_default="draft")
+    reference = Column(String(200), nullable=False, default="", server_default="")
+    notes = Column(Text, nullable=False, default="", server_default="")
+    created_by = Column(String(160), nullable=False)
+    request_token_hash = Column(String(64), nullable=False)
+    approved_by = Column(String(160), nullable=False, default="", server_default="")
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    from_site = relationship("Site", foreign_keys=[from_site_id])
+    to_site = relationship("Site", foreign_keys=[to_site_id])
+    items = relationship("SiteTransferItem", back_populates="transfer", order_by="SiteTransferItem.id")
+
+
+class SiteTransferItem(Base):
+    __tablename__ = "site_transfer_items"
+    __table_args__ = (
+        UniqueConstraint("transfer_id", "product_id", name="uq_site_transfer_item_product"),
+        CheckConstraint("requested_qty > 0", name="ck_site_transfer_item_positive_quantity"),
+        CheckConstraint("length(trim(uom)) > 0", name="ck_site_transfer_item_uom"),
+        Index("ix_site_transfer_item_transfer", "transfer_id", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    transfer_id = Column(Integer, ForeignKey("site_transfers.id", ondelete="RESTRICT"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True)
+    requested_qty = Column(Numeric(18, 6), nullable=False)
+    uom = Column(String(24), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    transfer = relationship("SiteTransfer", back_populates="items")
+    product = relationship("Product")
+
+
+class SiteTransferDispatch(Base):
+    __tablename__ = "site_transfer_dispatches"
+    __table_args__ = (
+        UniqueConstraint("program", "transfer_id", name="uq_site_transfer_dispatch_once"),
+        UniqueConstraint("program", "request_token_hash", name="uq_site_transfer_dispatch_request"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    transfer_id = Column(Integer, ForeignKey("site_transfers.id", ondelete="RESTRICT"), nullable=False)
+    request_token_hash = Column(String(64), nullable=False)
+    reference = Column(String(200), nullable=False, default="", server_default="")
+    dispatched_by = Column(String(160), nullable=False)
+    dispatched_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    transfer = relationship("SiteTransfer")
+
+
+class SiteTransferReceipt(Base):
+    __tablename__ = "site_transfer_receipts"
+    __table_args__ = (
+        UniqueConstraint("program", "request_token_hash", name="uq_site_transfer_receipt_request"),
+        Index("ix_site_transfer_receipt_transfer", "transfer_id", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    transfer_id = Column(Integer, ForeignKey("site_transfers.id", ondelete="RESTRICT"), nullable=False)
+    request_token_hash = Column(String(64), nullable=False)
+    reference = Column(String(200), nullable=False, default="", server_default="")
+    notes = Column(Text, nullable=False, default="", server_default="")
+    received_by = Column(String(160), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    transfer = relationship("SiteTransfer")
+    items = relationship("SiteTransferReceiptItem", back_populates="receipt", order_by="SiteTransferReceiptItem.id")
+
+
+class SiteTransferReceiptItem(Base):
+    __tablename__ = "site_transfer_receipt_items"
+    __table_args__ = (
+        UniqueConstraint("receipt_id", "transfer_item_id", name="uq_site_transfer_receipt_item_once"),
+        UniqueConstraint("movement_id", name="uq_site_transfer_receipt_movement"),
+        CheckConstraint("received_qty > 0", name="ck_site_transfer_receipt_positive_quantity"),
+        CheckConstraint("length(trim(uom)) > 0", name="ck_site_transfer_receipt_uom"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    receipt_id = Column(Integer, ForeignKey("site_transfer_receipts.id", ondelete="RESTRICT"), nullable=False)
+    transfer_item_id = Column(Integer, ForeignKey("site_transfer_items.id", ondelete="RESTRICT"), nullable=False)
+    movement_id = Column(Integer, ForeignKey("site_material_movements.id", ondelete="RESTRICT"), nullable=False)
+    received_qty = Column(Numeric(18, 6), nullable=False)
+    uom = Column(String(24), nullable=False)
+
+    receipt = relationship("SiteTransferReceipt", back_populates="items")
+    transfer_item = relationship("SiteTransferItem")
+    movement = relationship("SiteMaterialMovement")
+
+
+class SiteTransferCorrection(Base):
+    __tablename__ = "site_transfer_corrections"
+    __table_args__ = (
+        UniqueConstraint("program", "request_token_hash", name="uq_site_transfer_correction_request"),
+        CheckConstraint("correction_type IN ('reverse_receipt', 'reverse_dispatch')", name="ck_site_transfer_correction_type"),
+        CheckConstraint(
+            "(correction_type = 'reverse_receipt' AND receipt_item_id IS NOT NULL) OR "
+            "(correction_type = 'reverse_dispatch' AND receipt_item_id IS NULL)",
+            name="ck_site_transfer_correction_target",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    transfer_id = Column(Integer, ForeignKey("site_transfers.id", ondelete="RESTRICT"), nullable=False)
+    receipt_item_id = Column(Integer, ForeignKey("site_transfer_receipt_items.id", ondelete="RESTRICT"), nullable=True)
+    correction_type = Column(String(32), nullable=False)
+    request_token_hash = Column(String(64), nullable=False)
+    note = Column(Text, nullable=False)
+    created_by = Column(String(160), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    transfer = relationship("SiteTransfer")
+    receipt_item = relationship("SiteTransferReceiptItem")
 
 
 class AppUser(Base):
@@ -514,14 +788,20 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
-def enable_rls_for_future_public_tables() -> None:
-    """Enable RLS automatically when SQLAlchemy creates new PostgreSQL public tables."""
+def _enable_rls_after_create(target, connection, **_kwargs) -> None:
+    if connection.dialect.name != "postgresql" or target.name in SITE_INVENTORY_FOUNDATION_TABLES:
+        return
+    preparer = connection.dialect.identifier_preparer
+    schema_map = connection.get_execution_options().get("schema_translate_map", {})
+    schema = target.schema or schema_map.get(None)
+    table_name = f"{preparer.quote_schema(schema)}.{preparer.quote(target.name)}" if schema else preparer.format_table(target)
+    connection.exec_driver_sql(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY")
+
+
+def enable_rls_for_future_tables() -> None:
+    """Preserve automatic RLS for app tables without assuming their schema name."""
     for table in Base.metadata.tables.values():
-        event.listen(
-            table,
-            "after_create",
-            DDL(f'ALTER TABLE public."{table.name}" ENABLE ROW LEVEL SECURITY').execute_if(dialect="postgresql"),
-        )
+        event.listen(table, "after_create", _enable_rls_after_create)
 
 
-enable_rls_for_future_public_tables()
+enable_rls_for_future_tables()

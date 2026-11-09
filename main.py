@@ -19,6 +19,7 @@ import urllib.request
 import ssl
 import posixpath
 import zipfile
+from decimal import Decimal
 from xml.etree import ElementTree
 from threading import Lock
 import bcrypt
@@ -61,15 +62,32 @@ from models import (
     RolloutEntryCounter,
     RolloutRecord,
     Site,
+    SiteMaterialMovement,
     SrMaterialRequisitionSignedCopy,
     SrMaterialReturnStatus,
     StockBalance,
     StockMovement,
+    SITE_INVENTORY_FOUNDATION_TABLES,
     Technician,
     TechnicianBalance,
     Warehouse,
 )
 from site_survey_readonly import apply_tripoli_installed_override, installed_pole_counts
+from site_inventory_api import build_site_inventory_router
+from site_transfer_api import build_site_transfer_router
+from site_inventory_config import (
+    integration_enabled as site_inventory_integration_enabled,
+    parse_cutover_timestamp,
+    validate_rollout_cutover_eligibility,
+)
+from site_inventory_service import (
+    post_material_requisition_site_movement,
+    post_material_return_site_movement,
+    post_rollout_consumption_site_movement,
+    prepare_rollout_consumption,
+    prepare_material_return_receipt,
+    prepare_material_requisition_issue,
+)
 
 WAREHOUSE_CACHE: OrderedDict[str, tuple[float, dict, int]] = OrderedDict()
 WAREHOUSE_CACHE_TTL = 25
@@ -123,7 +141,11 @@ for program_key, db_engine in all_engines():
     try:
         sr_only_tables = {SrMaterialRequisitionSignedCopy.__tablename__, SrMaterialReturnStatus.__tablename__}
         use_shared_database = sr_engine is None or sr_engine.url == db_engine.url
-        tables = [table for table in Base.metadata.sorted_tables if program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables]
+        tables = [
+            table for table in Base.metadata.sorted_tables
+            if table.name not in SITE_INVENTORY_FOUNDATION_TABLES
+            and (program_key == SINGLE_RAN_PROGRAM or use_shared_database or table.name not in sr_only_tables)
+        ]
         Base.metadata.create_all(bind=db_engine, tables=tables)
         if program_key == SINGLE_RAN_PROGRAM and db_engine.dialect.name == "postgresql":
             with db_engine.begin() as conn:
@@ -1672,6 +1694,17 @@ class MaterialReturnIn(BaseModel):
     items: list[MaterialReturnItemIn]
 
 
+class RolloutConsumptionConfirmationIn(BaseModel):
+    product_id: int = Field(gt=0)
+    confirmed_consumed_quantity: Decimal = Field(gt=0)
+    uom: str = Field(min_length=1, max_length=24)
+    effective_date: str = Field(
+        default_factory=lambda: datetime.now(TRIPOLI_TZ).date().isoformat(),
+        min_length=10,
+        max_length=10,
+    )
+
+
 def db_session(request: Request):
     program_key = normalize_program(getattr(request.state, "program", request.query_params.get("program", DEFAULT_PROGRAM)))
     db = get_sessionmaker(program_key)()
@@ -1741,6 +1774,10 @@ def require_area_builder_access(request: Request) -> AppUser:
 def request_actor(request: Request) -> str:
     user = current_user(request)
     return user.name or user.username
+
+
+app.include_router(build_site_inventory_router(db_session, normalize_program, require_roles, request_actor))
+app.include_router(build_site_transfer_router(db_session, normalize_program, require_roles, request_actor))
 
 
 def request_scope_viewer(request: Request) -> str:
@@ -4749,12 +4786,37 @@ def rollout_duplicate_details(row: RolloutRecord) -> dict:
     }
 
 
+def rollout_consumption_movement(db: Session, row: RolloutRecord):
+    return (
+        db.query(SiteMaterialMovement)
+        .filter(
+            SiteMaterialMovement.document_type == "rollout_record",
+            SiteMaterialMovement.document_id == str(row.id),
+            SiteMaterialMovement.event_type == "rollout_consumption_confirmed",
+        )
+        .first()
+    )
+
+
+def reject_confirmed_rollout_edit(db: Session, row: RolloutRecord) -> None:
+    if rollout_consumption_movement(db, row) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This Field Entry has confirmed consumption history; use a controlled Site Inventory reversal instead of editing or deleting it",
+        )
+
+
 def upsert_rollout_record(data: dict, db: Session, existing_by_id: dict[str, RolloutRecord] | None = None) -> tuple[RolloutRecord, bool]:
     record_id = stable_rollout_record_id(data)
     row = existing_by_id.get(record_id) if existing_by_id is not None else db.query(RolloutRecord).filter(RolloutRecord.record_id == record_id).first()
     created = row is None
+    if row is not None:
+        row = db.query(RolloutRecord).filter_by(id=row.id).with_for_update().populate_existing().one()
+        if existing_by_id is not None:
+            existing_by_id[record_id] = row
+        reject_confirmed_rollout_edit(db, row)
     if row is None:
-        row = RolloutRecord(record_id=record_id)
+        row = RolloutRecord(record_id=record_id, site_inventory_recorded_at=datetime.now(timezone.utc))
         db.add(row)
         if existing_by_id is not None:
             existing_by_id[record_id] = row
@@ -5090,21 +5152,57 @@ def requisition_to_dict(row: MaterialRequisition) -> dict:
 
 def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "") -> str:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    db.flush()
+    row = (
+        db.query(MaterialRequisition)
+        .filter(MaterialRequisition.id == row.id, MaterialRequisition.program == program_key)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Material requisition not found")
     if row.status == "issued":
         raise HTTPException(status_code=400, detail="Material requisition is already issued")
     if row.status not in {"approved", "signed"}:
         raise HTTPException(status_code=400, detail="MR must be approved before warehouse issue")
-    if not row.receiver_name.strip():
+    if not (row.receiver_name or "").strip():
         raise HTTPException(status_code=400, detail="Approver Name is required before warehouse issue")
 
-    technician_name = (row.team_leader or row.requester_name or row.receiver_name).strip()
+    site_inventory_enabled = site_inventory_integration_enabled(
+        "SITE_INVENTORY_MR_ENABLED", program_key, normalize_program
+    )
+
+    items = (
+        db.query(MaterialRequisitionItem)
+        .filter(MaterialRequisitionItem.requisition_id == row.id)
+        .order_by(MaterialRequisitionItem.id.asc())
+        .with_for_update()
+        .all()
+    )
+    site, prepared_items = (None, [])
+    if items and site_inventory_enabled:
+        site, prepared_items = prepare_material_requisition_issue(
+            db, program_key, row.site_id, items
+        )
+    elif items:
+        prepared_items = []
+        for item in items:
+            product = db.query(Product).filter(
+                Product.id == item.product_id, Product.program == program_key
+            ).first()
+            if product is None:
+                raise HTTPException(status_code=404, detail="A material requisition item has no valid product")
+            prepared_items.append((item, product, item.quantity, product.unit))
+
+    technician_name = (row.team_leader or row.requester_name or row.receiver_name or "").strip()
     technician = db.query(Technician).filter(Technician.name == technician_name, Technician.program == program_key).first()
     if technician is None:
         technician = Technician(program=program_key, name=technician_name, phone=row.receiver_tel)
         db.add(technician)
         db.flush()
 
-    issued_by = actor.strip() or row.created_by
+    issued_by = actor.strip() or row.created_by or "warehouse"
     issue = IssueOrder(
         program=program_key,
         order_number=next_number(db, IssueOrder, "MR-ISS"),
@@ -5116,10 +5214,7 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
     db.add(issue)
     db.flush()
 
-    for item in row.items:
-        if not item.product_id:
-            raise HTTPException(status_code=400, detail=f"MR line {item.line_no} is not linked to a product")
-        product = require_product(db, item.product_id, program_key)
+    for item, product, quantity, unit in prepared_items:
         balance = locked_stock_balance(db, row.warehouse_id, item.product_id, program_key)
         if balance.quantity < item.quantity:
             warehouse_name = row.warehouse.name if row.warehouse else str(row.warehouse_id)
@@ -5147,14 +5242,69 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
                 created_by=issued_by,
             )
         )
+        if site_inventory_enabled:
+            post_material_requisition_site_movement(
+                db,
+                program=program_key,
+                site_id=site.id,
+                requisition_id=row.id,
+                order_number=row.order_number,
+                line_id=item.id,
+                product_id=product.id,
+                quantity=quantity,
+                uom=unit,
+                actor=issued_by,
+                effective_date=local_today(),
+            )
 
     row.status = "issued"
     log_audit(db, "issue_material_requisition", "material_requisition", row.order_number, issued_by, {"issue_order": issue.order_number})
     return issue.order_number
 
 
+def material_requisition_has_issue_history(db: Session, row: MaterialRequisition) -> bool:
+    program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    has_site_issue = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.document_id == str(row.id),
+    ).first() is not None
+    has_warehouse_issue = db.query(StockMovement.id).filter(
+        StockMovement.program == program_key,
+        StockMovement.reference == row.order_number,
+        StockMovement.movement_type == "issue_to_technician",
+    ).first() is not None
+    has_issue_audit = db.query(AuditLog.id).filter(
+        AuditLog.action == "issue_material_requisition",
+        AuditLog.entity_type == "material_requisition",
+        AuditLog.entity_id == row.order_number,
+    ).first() is not None
+    return has_site_issue or has_warehouse_issue or has_issue_audit
+
+
 def delete_material_requisition_row(db: Session, row: MaterialRequisition, actor: str = "admin") -> dict:
     program_key = normalize_program(getattr(row, "program", DEFAULT_PROGRAM))
+    has_site_inventory_history = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.document_id == str(row.id),
+    ).first() is not None
+    site_inventory_mr_enabled = site_inventory_integration_enabled(
+        "SITE_INVENTORY_MR_ENABLED", program_key, normalize_program
+    )
+    has_legacy_issue = (
+        str(row.status or "").strip().lower() == "issued"
+        or material_requisition_has_issue_history(db, row)
+    )
+    if has_site_inventory_history or (site_inventory_mr_enabled and has_legacy_issue):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An issued or inventory-posted material requisition cannot be hard-deleted. "
+                "Use a controlled reversal/void workflow; inventory history must be preserved."
+            ),
+        )
+
     if program_key == SINGLE_RAN_PROGRAM:
         db.query(SrMaterialRequisitionSignedCopy).filter(
             SrMaterialRequisitionSignedCopy.requisition_id == row.id
@@ -6252,6 +6402,92 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
     }
 
 
+@app.post("/api/warehouse/rollout-field-entry/{record_id}/confirm-consumption")
+def confirm_rollout_field_entry_consumption(
+    record_id: str,
+    data: RolloutConsumptionConfirmationIn,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    require_roles(request, "Admin")
+    program_key = normalize_program(getattr(request.state, "program", DEFAULT_PROGRAM))
+    if not site_inventory_integration_enabled(
+        "SITE_INVENTORY_ROLLOUT_ENABLED", program_key, normalize_program
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Rollout consumption posting is disabled until Site Inventory cutover is enabled for this program",
+        )
+    try:
+        cutover_at = parse_cutover_timestamp()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if cutover_at is None:
+        raise HTTPException(status_code=503, detail="SITE_INVENTORY_CUTOVER_AT must be configured before rollout consumption is enabled")
+
+    with db.begin():
+        row = (
+            db.query(RolloutRecord)
+            .filter(RolloutRecord.record_id == str(record_id).strip())
+            .with_for_update()
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Field Entry record was not found")
+        if rollout_norm(row.status) != "done":
+            raise HTTPException(status_code=409, detail="Only a Done Field Entry can be explicitly confirmed as consumed")
+        try:
+            validate_rollout_cutover_eligibility(row, cutover_at)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        site, _product, quantity, unit = prepare_rollout_consumption(
+            db,
+            program_key,
+            row.area,
+            data.product_id,
+            data.confirmed_consumed_quantity,
+            data.uom,
+        )
+        prior = db.query(SiteMaterialMovement).filter_by(
+            program=program_key,
+            document_type="rollout_record",
+            document_id=str(row.id),
+            document_line_id="consumption",
+            event_type="rollout_consumption_confirmed",
+        ).first()
+        if prior is not None and db.query(SiteMaterialMovement.id).filter_by(
+            reverses_movement_id=prior.id,
+        ).first() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This consumption was reversed; use the controlled correction workflow for any further posting",
+            )
+        movement = post_rollout_consumption_site_movement(
+            db,
+            program=program_key,
+            site_id=site.id,
+            rollout_record_pk=row.id,
+            rollout_record_id=row.record_id,
+            product_id=data.product_id,
+            quantity=quantity,
+            uom=unit,
+            actor=request_actor(request),
+            effective_date=data.effective_date,
+        )
+
+    return {
+        "success": True,
+        "consumption_confirmed": True,
+        "replayed": prior is not None,
+        "movement_id": movement.id,
+        "site_id": site.id,
+        "product_id": data.product_id,
+        "confirmed_consumed_quantity": str(quantity),
+        "uom": unit,
+    }
+
+
 @app.post("/api/warehouse/rollout-field-entry/hub-accessories")
 def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Requester", "Admin")
@@ -6349,9 +6585,15 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
 def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Requester", "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = (
+        db.query(RolloutRecord)
+        .filter(RolloutRecord.record_id == str(record_id).strip())
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
+    reject_confirmed_rollout_edit(db, row)
 
     date = str(first_value(data, "Date", "date", default=row.date) or "").strip()
     supervisor_name = str(first_value(data, "Supervisor Name", "supervisor_name", default=row.supervisor_name) or "").strip()
@@ -6482,9 +6724,15 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
 def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db: Session = Depends(db_session)):
     require_roles(request, "Admin")
 
-    row = db.query(RolloutRecord).filter(RolloutRecord.record_id == str(record_id).strip()).first()
+    row = (
+        db.query(RolloutRecord)
+        .filter(RolloutRecord.record_id == str(record_id).strip())
+        .with_for_update()
+        .first()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Field Entry record was not found")
+    reject_confirmed_rollout_edit(db, row)
 
     deleted = row_to_record(row)
     log_audit(
@@ -7053,6 +7301,48 @@ def purge_product(product_id: int, data: ProductPurgeIn, request: Request, db: S
     program_key = normalize_program(data.program)
     if product is None or normalize_program(getattr(product, "program", DEFAULT_PROGRAM)) != program_key:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    related_mrs = db.query(
+        MaterialRequisition.id,
+        MaterialRequisition.order_number,
+        MaterialRequisition.status,
+    ).filter(
+        MaterialRequisition.program == program_key,
+        MaterialRequisition.id.in_(
+            db.query(MaterialRequisitionItem.requisition_id).filter(
+                MaterialRequisitionItem.product_id == product.id
+            )
+        ),
+    ).with_for_update().all()
+    requisition_order_numbers = [row.order_number for row in related_mrs]
+    has_issued_mr_line = any(str(row.status or "").strip().lower() == "issued" for row in related_mrs)
+    has_site_issue = db.query(SiteMaterialMovement.id).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.product_id == product.id,
+        SiteMaterialMovement.document_type == "material_requisition",
+        SiteMaterialMovement.event_type == "mr_issue",
+    ).first() is not None
+    has_warehouse_issue = db.query(StockMovement.id).filter(
+        StockMovement.program == program_key,
+        StockMovement.product_id == product.id,
+        StockMovement.movement_type == "issue_to_technician",
+        StockMovement.reference.in_(
+            db.query(MaterialRequisition.order_number).filter(MaterialRequisition.program == program_key)
+        ),
+    ).first() is not None
+    has_issue_audit = db.query(AuditLog.id).filter(
+        AuditLog.action == "issue_material_requisition",
+        AuditLog.entity_type == "material_requisition",
+        AuditLog.entity_id.in_(requisition_order_numbers),
+    ).first() is not None
+    if has_issued_mr_line or has_site_issue or has_warehouse_issue or has_issue_audit:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This product is referenced by an issued material requisition. "
+                "Its requisition and inventory history cannot be purged; use a controlled reversal/void workflow."
+            ),
+        )
 
     receive_order_ids = [row[0] for row in db.query(ReceiveOrderItem.receive_order_id).filter(ReceiveOrderItem.product_id == product.id).distinct().all()]
     issue_order_ids = [row[0] for row in db.query(IssueOrderItem.issue_order_id).filter(IssueOrderItem.product_id == product.id).distinct().all()]
@@ -9978,6 +10268,14 @@ def resubmit_material_requisition(requisition_id: int, data: MaterialRequisition
         raise HTTPException(status_code=404, detail="Material requisition not found")
     if user.role.strip().lower() != "admin" and normalize_usage_key(row.created_by) != normalize_usage_key(request_actor(request)):
         raise HTTPException(status_code=403, detail="You can only resubmit your own requisitions")
+    if str(row.status or "").strip().lower() == "issued" or material_requisition_has_issue_history(db, row):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An issued material requisition cannot be edited or have its lines replaced. "
+                "Use a controlled reversal/void workflow; inventory history must be preserved."
+            ),
+        )
     if row.status != "returned_for_edit":
         raise HTTPException(status_code=400, detail=f"MR cannot be edited from status {row.status}")
     require_warehouse(db, data.warehouse_id, program_key)
@@ -10527,6 +10825,9 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
     program_key = normalize_program(data.program)
     source_warehouse = require_warehouse(db, data.warehouse_id, program_key)
     requester_submission = user.role.strip().lower() == "requester"
+    site_inventory_enabled = site_inventory_integration_enabled(
+        "SITE_INVENTORY_RETURN_ENABLED", program_key, normalize_program
+    )
     material_status = str(data.material_status or "New").strip()
     if is_single_ran(program_key):
         allowed_material_statuses = {"dismantle": "Dismantle", "new": "New"}
@@ -10584,21 +10885,8 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
             continue
         prepared_items.append((item, product, damaged, item.quantity, "", None))
 
+    return_lines = []
     for index, (item, product, damaged, item_quantity, serial_number, serial_row) in enumerate(prepared_items, start=1):
-        if requester_submission:
-            if damaged:
-                damaged_quantity_pending += item_quantity
-        elif damaged:
-            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
-            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item_quantity
-            damaged_quantity_quarantined += item_quantity
-            if serial_row is not None:
-                serial_row.status = "damaged"
-                serial_row.warehouse_id = virtual_warehouse.id
-                serial_row.technician_id = None
-        else:
-            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item_quantity
-            stock_added_quantity += item_quantity
         return_item = MaterialReturnItem(
             return_id=row.id,
             line_no=index,
@@ -10612,24 +10900,66 @@ def create_material_return(data: MaterialReturnIn, request: Request, db: Session
         )
         db.add(return_item)
         db.flush()
-        if not requester_submission:
-            db.add(
-                StockMovement(
-                    program=program_key,
-                    movement_type="damage_in" if damaged else "return_in",
-                    product_id=item.product_id,
-                    warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
-                    quantity=item_quantity,
-                    serial_number=serial_number,
-                    reference=row.return_number,
-                    source_item_id=return_item.id,
-                    note=(
-                        f"Damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}"
-                        if damaged else f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}"
-                    ),
-                    created_by=row.created_by,
-                )
+        return_lines.append((return_item, item, product, damaged, item_quantity, serial_number, serial_row))
+
+    site_receipt = None
+    site_lines_by_id = {}
+    if not requester_submission and site_inventory_enabled:
+        site_receipt, validated_lines = prepare_material_return_receipt(
+            db, program_key, row.site_id, [entry[0] for entry in return_lines]
+        )
+        site_lines_by_id = {entry[0].id: entry[1:] for entry in validated_lines}
+
+    for return_item, item, product, damaged, item_quantity, serial_number, serial_row in return_lines:
+        if requester_submission:
+            if damaged:
+                damaged_quantity_pending += item_quantity
+            continue
+
+        if site_inventory_enabled:
+            site_product, site_quantity, site_uom = site_lines_by_id[return_item.id]
+        if damaged:
+            virtual_warehouse = virtual_warehouse or get_or_create_virtual_damage_warehouse(db, program_key, source_warehouse)
+            locked_stock_balance(db, virtual_warehouse.id, item.product_id, program_key).quantity += item_quantity
+            damaged_quantity_quarantined += item_quantity
+            if serial_row is not None:
+                serial_row.status = "damaged"
+                serial_row.warehouse_id = virtual_warehouse.id
+                serial_row.technician_id = None
+        else:
+            locked_stock_balance(db, data.warehouse_id, item.product_id, program_key).quantity += item_quantity
+            stock_added_quantity += item_quantity
+        if site_inventory_enabled:
+            post_material_return_site_movement(
+                db,
+                program=program_key,
+                site_id=site_receipt.id,
+                return_id=row.id,
+                return_number=row.return_number,
+                line_id=return_item.id,
+                product_id=site_product.id,
+                quantity=site_quantity,
+                uom=site_uom,
+                actor=row.created_by,
+                effective_date=local_today(),
             )
+        db.add(
+            StockMovement(
+                program=program_key,
+                movement_type="damage_in" if damaged else "return_in",
+                product_id=item.product_id,
+                warehouse_id=virtual_warehouse.id if damaged else data.warehouse_id,
+                quantity=item_quantity,
+                serial_number=serial_number,
+                reference=row.return_number,
+                source_item_id=return_item.id,
+                note=(
+                    f"Damaged return quarantined from {source_warehouse.name}; site {row.site_id or row.site_address}"
+                    if damaged else f"Returned from site {row.site_id or row.site_address}: {item.condition.strip() or 'Good'}"
+                ),
+                created_by=row.created_by,
+            )
+        )
 
     log_audit(
         db,
@@ -10670,12 +11000,23 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
     require_warehouse_access(request, db, row.warehouse_id, program_key)
 
     actor = request_actor(request)
+    site_inventory_enabled = site_inventory_integration_enabled(
+        "SITE_INVENTORY_RETURN_ENABLED", program_key, normalize_program
+    )
     stock_added_quantity = 0
     damaged_quantity_quarantined = 0
     source_warehouse = require_warehouse(db, row.warehouse_id, program_key)
     virtual_warehouse = None
+    site_receipt = None
+    site_lines_by_id = {}
+    if site_inventory_enabled:
+        site_receipt, validated_lines = prepare_material_return_receipt(
+            db, program_key, row.site_id, row.items
+        )
+        site_lines_by_id = {entry[0].id: entry[1:] for entry in validated_lines}
     for item in row.items:
-        require_product(db, item.product_id, program_key)
+        if site_inventory_enabled:
+            site_product, site_quantity, site_uom = site_lines_by_id[item.id]
         if return_condition_is_damaged(item.condition):
             serial_number, _display_remark = decode_sr_damage_remark(item.remark)
             serial_row = None
@@ -10706,6 +11047,20 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                     created_by=actor,
                 )
             )
+            if site_inventory_enabled:
+                post_material_return_site_movement(
+                    db,
+                    program=program_key,
+                    site_id=site_receipt.id,
+                    return_id=row.id,
+                    return_number=row.return_number,
+                    line_id=item.id,
+                    product_id=site_product.id,
+                    quantity=site_quantity,
+                    uom=site_uom,
+                    actor=actor,
+                    effective_date=local_today(),
+                )
             continue
         locked_stock_balance(db, row.warehouse_id, item.product_id, program_key).quantity += item.quantity
         stock_added_quantity += item.quantity
@@ -10722,6 +11077,20 @@ def approve_material_return(return_id: int, data: MaterialRequisitionActionIn, r
                 created_by=actor,
             )
         )
+        if site_inventory_enabled:
+            post_material_return_site_movement(
+                db,
+                program=program_key,
+                site_id=site_receipt.id,
+                return_id=row.id,
+                return_number=row.return_number,
+                line_id=item.id,
+                product_id=site_product.id,
+                quantity=site_quantity,
+                uom=site_uom,
+                actor=actor,
+                effective_date=local_today(),
+            )
     row.received_by = actor
     row.status = "confirmed"
     log_audit(db, "approve_material_return", "material_return", row.return_number, actor, data.model_dump())
@@ -10926,6 +11295,7 @@ def delete_material_requisition(requisition_id: int, request: Request, data: Mat
         db.query(MaterialRequisition)
         .options(selectinload(MaterialRequisition.items), joinedload(MaterialRequisition.warehouse))
         .filter(MaterialRequisition.id == requisition_id, MaterialRequisition.program == normalize_program(data.program))
+        .with_for_update(of=MaterialRequisition)
         .first()
     )
     if row is None:

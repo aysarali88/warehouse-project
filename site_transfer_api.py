@@ -1,0 +1,247 @@
+"""Admin-only API for Site-to-Site transfers; hidden until explicit cutover enablement."""
+
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from models import SiteMaterialMovement
+from site_inventory_config import feature_flag_enabled, integration_enabled
+from site_transfer_service import (
+    approve_transfer,
+    create_transfer,
+    dispatch_transfer,
+    get_transfer,
+    list_transfers,
+    receive_transfer,
+    reverse_transfer_dispatch,
+    reverse_transfer_receipt,
+)
+
+
+def site_transfer_enabled(program: str, normalize_program_fn) -> bool:
+    return integration_enabled("SITE_INVENTORY_TRANSFER_ENABLED", program, normalize_program_fn)
+
+
+class TransferLineCreate(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0)
+    uom: str = Field(min_length=1, max_length=24)
+
+
+class SiteTransferCreate(BaseModel):
+    program: str = "FTTH"
+    from_site_id: int = Field(gt=0)
+    to_site_id: int = Field(gt=0)
+    items: list[TransferLineCreate] = Field(min_length=1, max_length=100)
+    reference: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=4000)
+    request_token: str = Field(min_length=16, max_length=200)
+
+
+class SiteTransferAction(BaseModel):
+    program: str = "FTTH"
+
+
+class SiteTransferDispatchIn(SiteTransferAction):
+    request_token: str = Field(min_length=16, max_length=200)
+
+
+class TransferReceiptLine(BaseModel):
+    transfer_item_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0)
+    uom: str = Field(min_length=1, max_length=24)
+
+
+class SiteTransferReceiptIn(SiteTransferDispatchIn):
+    items: list[TransferReceiptLine] = Field(min_length=1, max_length=100)
+    reference: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=4000)
+
+
+class SiteTransferCorrectionIn(SiteTransferDispatchIn):
+    note: str = Field(min_length=1, max_length=1000)
+    confirm_physical_return: bool = False
+
+
+def build_site_transfer_router(db_dependency, normalize_program_fn, require_roles_fn, actor_fn,
+                               enabled_fn=None, admin_write_enabled_fn=None):
+    router = APIRouter()
+    gate = enabled_fn or (lambda program: site_transfer_enabled(program, normalize_program_fn))
+    admin_write_gate = admin_write_enabled_fn or feature_flag_enabled
+
+    def authorize_and_gate(request: Request, program: str) -> str:
+        require_roles_fn(request, "Admin")
+        program_key = normalize_program_fn(program)
+        if not gate(program_key):
+            raise HTTPException(
+                status_code=503,
+                detail="Site-to-Site transfers are disabled until Site Inventory cutover is explicitly enabled for this program",
+            )
+        return actor_fn(request)
+
+    def authorize_and_write_gate(request: Request, program: str) -> str:
+        actor = authorize_and_gate(request, program)
+        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
+            raise HTTPException(
+                status_code=503,
+                detail="Site Inventory administrative writes are disabled",
+            )
+        return actor
+
+    @router.post("/api/warehouse/site-transfers")
+    def site_transfer_create(data: SiteTransferCreate, request: Request, db: Session = Depends(db_dependency)):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                row = create_transfer(
+                    db,
+                    program=data.program,
+                    from_site_id=data.from_site_id,
+                    to_site_id=data.to_site_id,
+                    items=[item.dict() for item in data.items],
+                    reference=data.reference,
+                    notes=data.notes,
+                    actor=actor,
+                    request_token=data.request_token,
+                )
+            return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Transfer identity already exists; retry with the same request token") from exc
+
+    @router.get("/api/warehouse/site-transfers")
+    def site_transfer_list(
+        request: Request,
+        program: str = "FTTH",
+        status: str = "",
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=100),
+        db: Session = Depends(db_dependency),
+    ):
+        authorize_and_gate(request, program)
+        result = list_transfers(db, program, page=page, page_size=page_size, status=status)
+        return {"success": True, **result}
+
+    @router.get("/api/warehouse/site-transfers/{transfer_id}")
+    def site_transfer_detail(
+        transfer_id: int,
+        request: Request,
+        program: str = "FTTH",
+        db: Session = Depends(db_dependency),
+    ):
+        authorize_and_gate(request, program)
+        return {"success": True, "transfer": get_transfer(db, transfer_id, program)}
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/approve")
+    def site_transfer_approve(
+        transfer_id: int,
+        data: SiteTransferAction,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                row = approve_transfer(db, transfer_id, data.program, actor)
+            return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Transfer changed concurrently; reload and retry") from exc
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/dispatch")
+    def site_transfer_dispatch(
+        transfer_id: int,
+        data: SiteTransferDispatchIn,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                row = dispatch_transfer(db, transfer_id, data.program, actor, data.request_token)
+            return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Transfer dispatch conflicts with existing inventory history") from exc
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/receipts")
+    def site_transfer_receive(
+        transfer_id: int,
+        data: SiteTransferReceiptIn,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                receipt = receive_transfer(
+                    db,
+                    transfer_id,
+                    data.program,
+                    actor,
+                    items=[item.dict() for item in data.items],
+                    reference=data.reference,
+                    notes=data.notes,
+                    request_token=data.request_token,
+                )
+                transfer_id = receipt.transfer_id
+            return {"success": True, "transfer": get_transfer(db, transfer_id, data.program)}
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Transfer receipt conflicts with existing inventory history") from exc
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/corrections/receipts/{receipt_item_id}/reverse")
+    def site_transfer_receipt_reverse(
+        transfer_id: int,
+        receipt_item_id: int,
+        data: SiteTransferCorrectionIn,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                correction = reverse_transfer_receipt(
+                    db, transfer_id, data.program, receipt_item_id, actor, data.note, data.request_token
+                )
+                movement = db.query(SiteMaterialMovement).filter_by(
+                    program=correction.program,
+                    document_type="site_transfer_correction",
+                    document_id=str(correction.id),
+                ).order_by(SiteMaterialMovement.id.desc()).first()
+            return {
+                "success": True,
+                "correction_id": correction.id,
+                "reversal_movement_id": movement.id if movement else None,
+                "transfer": get_transfer(db, transfer_id, data.program),
+            }
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Receipt correction conflicts with existing inventory history") from exc
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/corrections/dispatch/reverse")
+    def site_transfer_dispatch_reverse(
+        transfer_id: int,
+        data: SiteTransferCorrectionIn,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize_and_write_gate(request, data.program)
+        try:
+            with db.begin():
+                correction = reverse_transfer_dispatch(
+                    db,
+                    transfer_id,
+                    data.program,
+                    actor,
+                    data.note,
+                    data.request_token,
+                    confirm_physical_return=data.confirm_physical_return,
+                )
+            return {
+                "success": True,
+                "correction_id": correction.id,
+                "transfer": get_transfer(db, transfer_id, data.program),
+            }
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Dispatch correction conflicts with existing inventory history") from exc
+
+    return router

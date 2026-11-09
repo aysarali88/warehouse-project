@@ -25,6 +25,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def setUpClass(cls):
         global main, SessionLocal, RolloutRecord, Warehouse, Product, StockBalance, StockMovement, MaterialRequisition, MaterialRequisitionItem, MaterialTransfer, MaterialTransferItem, Site
         import main
+        from migrations.site_inventory_foundation import migrate
         from database import SessionLocal
         from models import (
             MaterialRequisition,
@@ -38,8 +39,11 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             StockMovement,
             Warehouse,
         )
+        import site_inventory_service as site_inventory_service
         if main.engine.dialect.name != "sqlite":
             raise RuntimeError("Tests must use an isolated SQLite database, never the production database.")
+        migrate(main.engine, schema=None)
+        cls.site_inventory_service = site_inventory_service
 
     @classmethod
     def tearDownClass(cls):
@@ -50,6 +54,26 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             TEST_DB_PATH.unlink()
         except FileNotFoundError:
             pass
+
+    def seed_site_inventory(self, db, site, product, quantity):
+        self.site_inventory_service.post_site_movement(
+            db,
+            program=site.program,
+            site_id=site.id,
+            product_id=product.id,
+            movement_type="incoming",
+            event_type="test_site_receipt",
+            quantity_delta=quantity,
+            uom=product.unit,
+            document_type="test_fixture",
+            document_id=f"site-{site.id}",
+            document_line_id=str(product.id),
+            reference=f"TEST-SITE-{site.id}",
+            note="Synthetic test-only site inventory",
+            created_by="test",
+            approved_by="test",
+            effective_date="2026-11-07",
+        )
 
     def test_counter_and_submission_key_are_unique(self):
         db = SessionLocal()
@@ -434,14 +458,17 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def test_requester_return_waits_for_warehouse_manager_confirmation(self):
         db = SessionLocal()
         warehouse = Warehouse(name="Returns Test WH")
+        site = Site(program="FTTH", name="Returns Test Site")
         product = Product(sku="RETURN-TEST", name="Return test material")
         damaged_product = Product(sku="RETURN-DAMAGED-APPROVAL-TEST", name="Damaged approval test material")
-        db.add_all([warehouse, product, damaged_product])
+        db.add_all([warehouse, site, product, damaged_product])
         db.flush()
         db.add_all([
             StockBalance(warehouse_id=warehouse.id, product_id=product.id, quantity=10),
             StockBalance(warehouse_id=warehouse.id, product_id=damaged_product.id, quantity=20),
         ])
+        self.seed_site_inventory(db, site, product, 3)
+        self.seed_site_inventory(db, site, damaged_product, 4)
         db.commit()
 
         requester_request = SimpleNamespace(
@@ -450,6 +477,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         pending = main.create_material_return(
             main.MaterialReturnIn(
                 warehouse_id=warehouse.id,
+                site_id=site.name,
                 returned_by="Requester",
                 items=[
                     main.MaterialReturnItemIn(product_id=product.id, quantity=3, condition="Good"),
@@ -501,14 +529,17 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertIs(route.endpoint, main.create_material_return)
         db = SessionLocal()
         warehouse = Warehouse(name="Damaged Returns Test WH")
+        site = Site(program="FTTH", name="Damaged Returns Test Site")
         good_product = Product(sku="RETURN-GOOD-TEST", name="Good return test material")
         damaged_product = Product(sku="RETURN-DAMAGED-TEST", name="Damaged return test material")
-        db.add_all([warehouse, good_product, damaged_product])
+        db.add_all([warehouse, site, good_product, damaged_product])
         db.flush()
         db.add_all([
             StockBalance(warehouse_id=warehouse.id, product_id=good_product.id, quantity=10),
             StockBalance(warehouse_id=warehouse.id, product_id=damaged_product.id, quantity=20),
         ])
+        self.seed_site_inventory(db, site, good_product, 3)
+        self.seed_site_inventory(db, site, damaged_product, 4)
         db.commit()
 
         manager_request = SimpleNamespace(
@@ -517,6 +548,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         result = main.create_material_return(
             main.MaterialReturnIn(
                 warehouse_id=warehouse.id,
+                site_id=site.name,
                 returned_by="Field team",
                 items=[
                     main.MaterialReturnItemIn(product_id=good_product.id, quantity=3, condition="Good"),
@@ -555,8 +587,11 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
 
         db = SessionLocal()
         warehouse = Warehouse(program="SINGLE_RAN", name="SR Serial Return WH")
+        site = Site(program="SINGLE_RAN", name="SR Serial Return Site")
         product = Product(program="SINGLE_RAN", sku="SR-DAMAGE-SERIAL-TEST", name="SR damaged serialized material")
-        db.add_all([warehouse, product])
+        db.add_all([warehouse, site, product])
+        db.commit()
+        self.seed_site_inventory(db, site, product, 2)
         db.commit()
 
         requester_request = SimpleNamespace(
@@ -568,6 +603,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             main.create_material_return(
                 main.MaterialReturnIn(
                     program="SINGLE_RAN",
+                    site_id=site.name,
                     warehouse_id=warehouse.id,
                     returned_by="SR Requester",
                     items=[main.MaterialReturnItemIn(product_id=product.id, quantity=1, condition="Damaged")],
@@ -581,6 +617,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         pending = main.create_material_return(
             main.MaterialReturnIn(
                 program="SINGLE_RAN",
+                site_id=site.name,
                 warehouse_id=warehouse.id,
                 returned_by="SR Requester",
                 material_status="Dismantle",
@@ -601,6 +638,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         new_return = main.create_material_return(
             main.MaterialReturnIn(
                 program="SINGLE_RAN",
+                site_id=site.name,
                 warehouse_id=warehouse.id,
                 returned_by="SR Requester",
                 material_status="New",
@@ -638,6 +676,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             main.create_material_return(
                 main.MaterialReturnIn(
                     program="SINGLE_RAN",
+                    site_id=site.name,
                     warehouse_id=warehouse.id,
                     returned_by="SR Requester",
                     items=[main.MaterialReturnItemIn(
@@ -757,9 +796,13 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def test_rollout_difference_excludes_confirmed_returns(self):
         db = SessionLocal()
         warehouse = Warehouse(name="Usage Return Test WH")
+        site = db.query(Site).filter_by(program="FTTH", name="Maqawba").first()
+        if site is None:
+            site = Site(program="FTTH", name="Maqawba")
         product = Product(sku="USAGE-RETURN-TEST", name="Metal wedge clamping")
-        db.add_all([warehouse, product])
+        db.add_all([warehouse, site, product])
         db.flush()
+        self.seed_site_inventory(db, site, product, 2)
         requisition = MaterialRequisition(
             order_number="MR-USAGE-RETURN-TEST",
             warehouse_id=warehouse.id,

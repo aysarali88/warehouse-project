@@ -1,0 +1,63 @@
+.site-transfer-gate{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:8px;background:#fff}
+.site-transfer-gate strong{color:var(--brand)}
+.site-transfer-gate p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.site-transfer-gate.is-disabled{border-left-color:var(--amber);background:#fffaf1}
+.site-transfer-gate.is-error{border-left-color:var(--red);background:#fff8f8}
+.site-transfer-message{padding:10px 12px;border:1px solid;border-radius:7px;font-size:13px;font-weight:800;overflow-wrap:anywhere}
+.site-transfer-message-error{border-color:#f1c4c4;background:#fff2f2;color:#a12626}
+.site-transfer-message-success{border-color:#bfe4cb;background:#effaf2;color:#126d3b}
+.site-transfer-create,.site-transfer-list-card{min-width:0}
+.site-transfer-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:14px}
+.site-transfer-section-head h3{margin:0;color:var(--brand);font-size:16px}
+.site-transfer-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.site-transfer-form .field{min-width:0}
+.site-transfer-form input[readonly]{background:#f4f8fa;color:#42576b}
+.site-transfer-hint{color:var(--muted);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.site-transfer-form-actions{grid-column:1/-1;display:flex;justify-content:flex-start;padding-top:3px}
+.site-transfer-list-tools{display:flex;align-items:flex-end;gap:8px}
+.site-transfer-list-tools .field{min-width:190px}
+.site-transfer-table-wrap{max-height:min(62vh,760px);overflow:auto}
+.site-transfer-table{min-width:1120px}
+.site-transfer-table th,.site-transfer-table td{vertical-align:middle}
+.site-transfer-table td[rowspan]{background:#fff}
+.site-transfer-cell-sub{display:block;margin-top:3px;color:var(--muted);font-size:10px}
+.site-transfer-status{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#eef3f6;color:#475a6c;font-size:11px;font-weight:900}
+.site-transfer-status.status-draft{background:#eef3f6;color:#475a6c}
+.site-transfer-status.status-approved{background:#eaf2ff;color:#2157a4}
+.site-transfer-status.status-in_transit{background:#fff4df;color:#8b5900}
+.site-transfer-status.status-partially_received{background:#e7f5f5;color:#006d70}
+.site-transfer-status.status-received{background:#e8f6ed;color:#16733d}
+.site-transfer-status.status-cancelled{background:#fdecec;color:#a52f2f}
+.site-transfer-actions{display:flex;gap:6px}
+.site-transfer-pagination{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.site-transfer-corrections{padding:12px 16px}
+.site-transfer-corrections summary{color:var(--muted);font-size:12px;font-weight:900;cursor:pointer}
+.site-transfer-correction-form{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto auto;gap:10px;align-items:end;margin-top:13px}
+.site-transfer-confirm{display:flex;align-items:center;gap:7px;min-height:39px;color:var(--muted);font-size:11px;font-weight:800}
+.site-transfer-confirm input{width:16px;height:16px;margin:0}
+.site-transfer-corrections>p{margin:10px 0 0}
+.site-transfer-dialog{width:min(620px,calc(100vw - 28px));max-width:none;padding:0;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);box-shadow:0 18px 60px rgba(15,32,48,.25)}
+.site-transfer-dialog::backdrop{background:rgba(11,29,43,.48)}
+.site-transfer-dialog>form{padding:18px}
+.site-transfer-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.site-transfer-dialog-head h3{margin:0;color:var(--brand);font-size:16px}
+.site-transfer-dialog-summary{margin:12px 0;padding:10px 12px;border-radius:7px;background:#f1f7f9;color:#304b60;font-weight:800;line-height:1.6}
+.site-transfer-dialog .site-transfer-form{margin-top:12px}
+.site-transfer-dialog-actions{display:flex;justify-content:flex-start;gap:8px;margin-top:14px}
+.site-transfer-view .btn:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:800px){
+  .site-transfer-section-head{align-items:stretch;flex-direction:column}
+  .site-transfer-list-tools{align-items:stretch;flex-wrap:wrap}
+  .site-transfer-list-tools .field{flex:1;min-width:160px}
+  .site-transfer-correction-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .site-transfer-confirm{grid-column:1/-1}
+}
+@media(max-width:560px){
+  .site-transfer-form{grid-template-columns:1fr}
+  .site-transfer-form-actions{grid-column:auto}
+  .site-transfer-form-actions .btn{width:100%}
+  .site-transfer-list-tools .btn{flex:1}
+  .site-transfer-correction-form{grid-template-columns:1fr}
+  .site-transfer-confirm{grid-column:auto}
+  .site-transfer-dialog>form{padding:14px}
+}

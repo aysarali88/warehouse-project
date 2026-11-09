@@ -1,4 +1,5 @@
 import os
+from urllib.parse import unquote, urlsplit
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -8,6 +9,8 @@ load_dotenv()
 
 DEFAULT_PROGRAM = "FTTH"
 SINGLE_RAN_PROGRAM = "SINGLE_RAN"
+WAREHOUSE_TEST_PROJECT_REF = "kdzhcizesmjseadwegvd"
+PRODUCTION_PROJECT_REF = "ndhccmrxpujpqhyewoac"
 
 
 def normalize_program(value: str = "") -> str:
@@ -24,10 +27,85 @@ def normalize_database_url(value: str) -> str:
     return value
 
 
-DATABASE_URL = normalize_database_url(os.getenv("FTTH_DATABASE_URL") or os.getenv("DATABASE_URL", "sqlite:///./rollout.db"))
-SR_DATABASE_URL = os.getenv("SR_DATABASE_URL", "").strip()
-if SR_DATABASE_URL:
-    SR_DATABASE_URL = normalize_database_url(SR_DATABASE_URL)
+APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+
+RENDER_RUNTIME_INDICATORS = (
+    "RENDER",
+    "RENDER_SERVICE_ID",
+    "RENDER_INSTANCE_ID",
+    "RENDER_SERVICE_NAME",
+    "RENDER_EXTERNAL_URL",
+    "RENDER_EXTERNAL_HOSTNAME",
+    "RENDER_GIT_COMMIT",
+)
+IS_RENDER_RUNTIME = any(os.getenv(name, "").strip() for name in RENDER_RUNTIME_INDICATORS)
+if APP_ENV == "test" and IS_RENDER_RUNTIME:
+    raise RuntimeError("APP_ENV=test is forbidden on Render; refusing to start with a test database")
+
+TEST_DATABASE_URL = normalize_database_url(os.getenv("TEST_DATABASE_URL", ""))
+
+
+def test_database_identity(url: str) -> dict:
+    value = str(url or "").strip()
+    if value.startswith("sqlite:"):
+        return {
+            "safe": bool(value) and PRODUCTION_PROJECT_REF not in value.casefold(),
+            "mode": "sqlite test database",
+            "test_ref_match": False,
+            "production_ref_detected": PRODUCTION_PROJECT_REF in value.casefold(),
+            "host": "",
+            "port": 0,
+            "database": "",
+        }
+    try:
+        parsed = urlsplit(value)
+        username = unquote(parsed.username or "")
+        host = (parsed.hostname or "").lower()
+        database = unquote(parsed.path.lstrip("/"))
+        production_ref_detected = PRODUCTION_PROJECT_REF in value.casefold()
+        test_ref_match = username == f"postgres.{WAREHOUSE_TEST_PROJECT_REF}"
+        shared_pooler = host.endswith(".pooler.supabase.com") and parsed.port == 5432
+        safe = (
+            parsed.scheme in {"postgresql+psycopg", "postgresql"}
+            and test_ref_match
+            and not production_ref_detected
+            and shared_pooler
+            and database == "postgres"
+        )
+        return {
+            "safe": safe,
+            "mode": "Supabase Shared Session Pooler" if shared_pooler else "other",
+            "test_ref_match": test_ref_match,
+            "production_ref_detected": production_ref_detected,
+            "host": host,
+            "port": parsed.port or 0,
+            "database": database,
+        }
+    except (TypeError, ValueError):
+        return {
+            "safe": False,
+            "mode": "unrecognized",
+            "test_ref_match": False,
+            "production_ref_detected": PRODUCTION_PROJECT_REF in value.casefold(),
+            "host": "",
+            "port": 0,
+            "database": "",
+        }
+
+
+if APP_ENV == "test":
+    if not TEST_DATABASE_URL:
+        raise RuntimeError("APP_ENV=test requires TEST_DATABASE_URL; database fallbacks are disabled")
+    _test_identity = test_database_identity(TEST_DATABASE_URL)
+    if not _test_identity["safe"]:
+        raise RuntimeError("TEST_DATABASE_URL does not identify an approved isolated test database")
+    DATABASE_URL = TEST_DATABASE_URL
+    SR_DATABASE_URL = ""
+else:
+    DATABASE_URL = normalize_database_url(os.getenv("FTTH_DATABASE_URL") or os.getenv("DATABASE_URL", "sqlite:///./rollout.db"))
+    SR_DATABASE_URL = os.getenv("SR_DATABASE_URL", "").strip()
+    if SR_DATABASE_URL:
+        SR_DATABASE_URL = normalize_database_url(SR_DATABASE_URL)
 
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
