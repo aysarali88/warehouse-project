@@ -17,7 +17,7 @@ load_dotenv(".env.test", override=False)
 import database
 from database import APP_ENV, TEST_DATABASE_URL, create_database_engine, test_database_identity as _test_database_identity
 
-EXPECTED_TEST_REF = "fpxxzepcfzbetgijommc"
+EXPECTED_TEST_REF = "kdzhcizesmjseadwegvd"
 PRODUCTION_REF = "ndhccmrxpujpqhyewoac"
 IDENTITY = _test_database_identity(TEST_DATABASE_URL)
 if (

@@ -11,7 +11,7 @@ from uuid import uuid4
 import database
 from database import APP_ENV, TEST_DATABASE_URL, create_database_engine, test_database_identity
 
-EXPECTED_TEST_REF = "fpxxzepcfzbetgijommc"
+EXPECTED_TEST_REF = "kdzhcizesmjseadwegvd"
 PRODUCTION_REF = "ndhccmrxpujpqhyewoac"
 IDENTITY = test_database_identity(TEST_DATABASE_URL)
 if (

@@ -712,6 +712,8 @@ class FiberMapManagerTests(unittest.TestCase):
 
     def test_confirmed_line_candidates_are_exact_and_activation_creates_no_box_rows(self):
         expected = {
+            ("mansoura", "X1", "H12", "L4"),
+            ("mansoura", "X1", "H13", "L4"),
             ("rasammar", "X1", "H13", "L4"),
             ("hayalandaluszone1", "X1", "H1", "L4"),
             ("hayalandaluszone1", "X3", "H4", "L3"),
