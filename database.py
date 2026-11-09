@@ -9,7 +9,7 @@ load_dotenv()
 
 DEFAULT_PROGRAM = "FTTH"
 SINGLE_RAN_PROGRAM = "SINGLE_RAN"
-WAREHOUSE_TEST_PROJECT_REF = "fpxxzepcfzbetgijommc"
+WAREHOUSE_TEST_PROJECT_REF = "kdzhcizesmjseadwegvd"
 PRODUCTION_PROJECT_REF = "ndhccmrxpujpqhyewoac"
 
 

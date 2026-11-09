@@ -11,13 +11,17 @@ load_dotenv(".env.test", override=False)
 
 import database
 from database import APP_ENV, TEST_DATABASE_URL, create_database_engine, test_database_identity
-from migrations.site_inventory_foundation import migrate as migrate_foundation
-from migrations.site_inventory_rollout_cutover import migrate as migrate_rollout_cutover
-from migrations.site_inventory_transfers import TRANSFER_TABLES, migrate as migrate_transfers
+from migrations.run_site_inventory_production import (
+    MIGRATION_ORDER,
+    _version_table_security,
+    execute_migrations,
+    preflight_database,
+)
+from migrations.site_inventory_transfers import TRANSFER_TABLES
 from models import AuditLog, Product, Site
 
 
-EXPECTED_TEST_REF = "fpxxzepcfzbetgijommc"
+EXPECTED_TEST_REF = "kdzhcizesmjseadwegvd"
 PRODUCTION_REF = "ndhccmrxpujpqhyewoac"
 IDENTITY = test_database_identity(TEST_DATABASE_URL)
 if (
@@ -79,20 +83,22 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
                     "date VARCHAR(80) NOT NULL DEFAULT '', entry_time VARCHAR(80) NOT NULL DEFAULT '', "
                     "status VARCHAR(32) NOT NULL DEFAULT '', area VARCHAR(200) NOT NULL DEFAULT '')"
                 )
+                connection.exec_driver_sql(
+                    f'INSERT INTO "{cls.schema}"."rollout_records" '
+                    "(record_id, date, entry_time, status, area) "
+                    "VALUES ('LEGACY-ROW', '2026-11-02', '2026-11-02 09:00:00', 'Done', 'Synthetic Site')"
+                )
 
             cls.app_engine = create_engine(
                 TEST_DATABASE_URL,
                 connect_args={"options": f"-c search_path={cls.schema} -c lock_timeout=5000 -c statement_timeout=10000"},
             )
             event.listen(cls.app_engine, "before_cursor_execute", reject_writes_outside_test_schema)
-            cls.foundation = migrate_foundation(cls.app_engine)
-            cls.rollout_cutover = migrate_rollout_cutover(cls.app_engine)
-            cls.transfers = migrate_transfers(cls.app_engine)
-            cls.repeat_results = (
-                migrate_foundation(cls.app_engine),
-                migrate_rollout_cutover(cls.app_engine),
-                migrate_transfers(cls.app_engine),
-            )
+            cls.clean_preflight = preflight_database(cls.app_engine, cls.schema)
+            cls.dry_run_results = execute_migrations(cls.app_engine, cls.schema, execute=False)
+            cls.migration_results = execute_migrations(cls.app_engine, cls.schema, execute=True)
+            cls.complete_preflight = preflight_database(cls.app_engine, cls.schema)
+            cls.repeat_results = execute_migrations(cls.app_engine, cls.schema, execute=True)
         except Exception:
             if cls.app_engine is not None:
                 cls.app_engine.dispose()
@@ -133,9 +139,10 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             raise AssertionError("Migration changed tables outside its temporary schema")
 
     def test_migrations_are_additive_versioned_and_rerunnable_in_target_schema(self):
-        self.assertEqual(self.foundation["schema"], self.schema)
-        self.assertEqual(self.rollout_cutover["schema"], self.schema)
-        self.assertEqual(self.transfers["schema"], self.schema)
+        self.assertEqual(self.clean_preflight["state"], "clean")
+        self.assertEqual(self.dry_run_results, [])
+        self.assertEqual([result["version"] for result in self.migration_results], list(MIGRATION_ORDER))
+        self.assertEqual(self.complete_preflight["state"], "complete")
         self.assertTrue(all(result["already_applied"] for result in self.repeat_results))
 
         inspector = inspect(self.engine)
@@ -165,16 +172,28 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
         self.assertEqual(outside_after, self.tables_before)
 
     def test_legacy_rollout_rows_remain_unstamped_and_ineligible_by_default(self):
-        with self.engine.begin() as connection:
-            connection.execute(text(
-                f'INSERT INTO "{self.schema}"."rollout_records" (record_id, date, entry_time, status, area) '
-                "VALUES ('LEGACY-ROW', '2026-11-02', '2026-11-02 09:00:00', 'Done', 'Synthetic Site')"
-            ))
+        with self.engine.connect() as connection:
             stamp = connection.execute(text(
                 f'SELECT site_inventory_recorded_at FROM "{self.schema}"."rollout_records" '
                 "WHERE record_id='LEGACY-ROW'"
             )).scalar_one()
         self.assertIsNone(stamp)
+
+    def test_migration_version_table_is_not_publicly_accessible_but_server_owner_can_use_it(self):
+        with self.engine.connect() as connection:
+            security = _version_table_security(connection, self.schema)
+            self.assertTrue(connection.execute(text(
+                "SELECT has_table_privilege(current_user, :table_name, 'SELECT') "
+                "AND has_table_privilege(current_user, :table_name, 'INSERT')"
+            ), {"table_name": f"{self.schema}.site_inventory_schema_versions"}).scalar_one())
+        self.assertTrue(security["rls_enabled"])
+        self.assertFalse(security["force_rls"])
+        self.assertFalse(security["public_access"])
+        self.assertFalse(security["anon_access"])
+        self.assertFalse(security["authenticated_access"])
+        self.assertFalse(security["service_role_access"])
+        self.assertTrue(security["server_access"])
+        self.assertTrue(security["protected"])
 
 
 if __name__ == "__main__":

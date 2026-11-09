@@ -49,11 +49,23 @@ def ensure_version_table(connection, schema: str) -> None:
         primary_key = set(inspector.get_pk_constraint("site_inventory_schema_versions", schema=schema).get("constrained_columns") or ())
         if columns != {"version", "applied_at"} or primary_key != {"version"}:
             raise RuntimeError("Unexpected site_inventory_schema_versions structure; migration stopped")
-        return
+    else:
+        target = qualified(connection, schema, "site_inventory_schema_versions")
+        connection.exec_driver_sql(
+            f"CREATE TABLE {target} (version VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+
     target = qualified(connection, schema, "site_inventory_schema_versions")
-    connection.exec_driver_sql(
-        f"CREATE TABLE {target} (version VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())"
-    )
+    connection.exec_driver_sql(f"ALTER TABLE {target} ENABLE ROW LEVEL SECURITY")
+    connection.exec_driver_sql(f"REVOKE ALL ON TABLE {target} FROM PUBLIC")
+    preparer = connection.dialect.identifier_preparer
+    for role in ("anon", "authenticated", "service_role"):
+        exists = connection.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname=:role"), {"role": role}
+        ).first()
+        if exists:
+            role_name = preparer.quote(role)
+            connection.exec_driver_sql(f"REVOKE ALL ON TABLE {target} FROM {role_name}")
 
 
 def version_applied(connection, schema: str, version: str) -> bool:

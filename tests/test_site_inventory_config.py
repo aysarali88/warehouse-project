@@ -8,6 +8,7 @@ from site_inventory_config import (
     feature_flag_enabled,
     integration_enabled,
     parse_cutover_timestamp,
+    cutover_programs,
     site_inventory_readiness,
     validate_rollout_cutover_eligibility,
 )
@@ -27,6 +28,9 @@ class SiteInventoryConfigurationTests(unittest.TestCase):
             self.assertFalse(integration_enabled("SITE_INVENTORY_MR_ENABLED", "FTTH", normalize_program))
             status = site_inventory_readiness("FTTH", normalize_program)
         self.assertFalse(status["configuration_ready"])
+        self.assertFalse(status["cutover_program_enabled"])
+        self.assertEqual(cutover_programs(normalize_program), set())
+        self.assertIsNone(parse_cutover_timestamp())
         self.assertEqual(status["cutover_timestamp_status"], "missing")
         self.assertTrue(all(not state["enabled"] for state in status["integrations"].values()))
 

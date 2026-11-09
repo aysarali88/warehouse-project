@@ -21,7 +21,7 @@ RENDER_ENV_NAMES = (
     "RENDER_GIT_COMMIT",
 )
 TEST_URL = (
-    "postgresql+psycopg://postgres.fpxxzepcfzbetgijommc:"
+    "postgresql+psycopg://postgres.kdzhcizesmjseadwegvd:"
     "DO_NOT_LEAK_TEST_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 )
 
