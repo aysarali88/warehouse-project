@@ -215,7 +215,7 @@ class MaterialReturnSiteInventoryPostgreSQLValidation(TestCase):
         suffix = uuid4().hex[:10]
         with self.Session() as db:
             with db.begin():
-                site = Site(program="FTTH", name=f"PG MR Return Site {suffix}")
+                site = Site(program="FTTH", name=f"PG MR Return Site {suffix}", site_inventory_enabled=True)
                 warehouse = Warehouse(program="FTTH", name=f"PG MR Return WH {suffix}")
                 db.add_all([site, warehouse])
                 db.flush()
@@ -364,6 +364,24 @@ class MaterialReturnSiteInventoryPostgreSQLValidation(TestCase):
         self.assertEqual(replay_values["site"][adequate_product], Decimal("16.000000"))
         self.assertEqual(replay_values["site_movements"], 1)
         self.assertEqual(replay_values["stock_movements"], 1)
+
+    def test_inactive_site_blocks_confirmed_return_without_warehouse_receipt(self):
+        fixture = self.make_fixture()
+        product_id = fixture["products"]["main"]
+        pending = self.create_pending(fixture, [{"product_id": product_id, "quantity": 4}])
+        with self.Session() as db:
+            db.get(Site, fixture["site_id"]).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as error:
+            self.approve(pending["id"])
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "Site Inventory is not active for this Site.")
+        values = self.values(fixture, pending["id"])
+        self.assertEqual(values["status"], "pending_warehouse")
+        self.assertEqual(values["site"][product_id], Decimal("50.000000"))
+        self.assertEqual(values["warehouse"][product_id], 10)
+        self.assertEqual(values["site_movements"], 0)
+        self.assertEqual(values["stock_movements"], 0)
 
     def test_direct_manager_confirmation_posts_site_and_warehouse_changes_together(self):
         fixture = self.make_fixture(opening=20)

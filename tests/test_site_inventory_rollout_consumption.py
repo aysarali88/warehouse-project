@@ -44,7 +44,7 @@ class RolloutConsumptionTests(unittest.TestCase):
         site_name = area or f"Rollout Consumption Site {suffix}"
         with SessionLocal() as db:
             with db.begin():
-                site = Site(program="FTTH", name=site_name)
+                site = Site(program="FTTH", name=site_name, site_inventory_enabled=True)
                 product = Product(
                     program="FTTH", sku=f"ROLLOUT-CONSUME-{suffix}",
                     name=f"Rollout material {suffix}", unit=unit,
@@ -133,6 +133,19 @@ class RolloutConsumptionTests(unittest.TestCase):
             with self.assertRaises(main.HTTPException) as error:
                 self.confirm(fixture)
         self.assertEqual(error.exception.status_code, 503)
+        self.assertEqual(self.site_quantity(fixture), Decimal("50.000000"))
+        self.assertEqual(self.consumption_movements(fixture), [])
+
+    def test_inactive_site_blocks_rollout_consumption_without_posting(self):
+        fixture = self.make_fixture()
+        with SessionLocal() as db:
+            site = db.get(Site, fixture["site_id"])
+            site.site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(main.HTTPException) as error:
+            self.confirm(fixture)
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "Site Inventory is not active for this Site.")
         self.assertEqual(self.site_quantity(fixture), Decimal("50.000000"))
         self.assertEqual(self.consumption_movements(fixture), [])
 

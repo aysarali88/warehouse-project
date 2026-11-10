@@ -229,7 +229,7 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
         line_specs = lines or [("M", "M", 7, "main"), ("M", "M", 3, "main")]
         with self.Session() as db:
             with db.begin():
-                site = Site(program="FTTH", name=f"PG MR Site {suffix}")
+                site = Site(program="FTTH", name=f"PG MR Site {suffix}", site_inventory_enabled=True)
                 warehouse = Warehouse(program="FTTH", name=f"PG MR WH {suffix}")
                 db.add_all([site, warehouse])
                 db.flush()
@@ -486,6 +486,22 @@ class SiteInventoryMRIssuePostgreSQLValidation(TestCase):
                 self.assertEqual(result["stock_movements"], 0)
                 self.assertTrue(all(quantity in (100, 3) for quantity in result["stock"].values()))
                 self.assertTrue(all(quantity == 0 for quantity in result["technician_balance"].values()))
+
+    def test_inactive_site_blocks_actual_issue_without_partial_warehouse_changes(self):
+        fixture = self.make_mr(lines=[("M", "M", 4, "main")])
+        with self.Session() as db:
+            db.get(Site, fixture["site_id"]).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as error:
+            self.issue(fixture)
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "Site Inventory is not active for this Site.")
+        result = self.values(fixture)
+        self.assertEqual(result["status"], "approved")
+        self.assertEqual(result["stock"]["main"], 100)
+        self.assertEqual(result["technician_balance"]["main"], 0)
+        self.assertEqual(result["stock_movements"], 0)
+        self.assertEqual(result["site_movements"], 0)
 
     def test_site_posting_failure_rolls_back_every_warehouse_change(self):
         fixture = self.make_mr(lines=[("M", "M", 4, "main")])

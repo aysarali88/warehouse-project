@@ -19,16 +19,19 @@ from migrations.site_inventory_foundation import FOUNDATION_TABLES, VERSION as F
 from migrations.site_inventory_rollout_cutover import COLUMN as ROLLOUT_CUTOFF_COLUMN
 from migrations.site_inventory_rollout_cutover import VERSION as ROLLOUT_VERSION, migrate as migrate_rollout_cutover
 from migrations.site_inventory_transfers import TRANSFER_TABLES, VERSION as TRANSFERS_VERSION, migrate as migrate_transfers
+from migrations.site_inventory_site_activation import COLUMN as SITE_ACTIVATION_COLUMN
+from migrations.site_inventory_site_activation import VERSION as SITE_ACTIVATION_VERSION, migrate as migrate_site_activation
 from migrations.site_inventory_migration_utils import qualified, validate_model_table
 
 
 PRODUCTION_PROJECT_REF = "ndhccmrxpujpqhyewoac"
 WAREHOUSE_TEST_PROJECT_REF = "kdzhcizesmjseadwegvd"
-MIGRATION_ORDER = (FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION)
+MIGRATION_ORDER = (FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION, SITE_ACTIVATION_VERSION)
 MIGRATION_SPECS = (
     (FOUNDATION_VERSION, migrate_foundation),
     (ROLLOUT_VERSION, migrate_rollout_cutover),
     (TRANSFERS_VERSION, migrate_transfers),
+    (SITE_ACTIVATION_VERSION, migrate_site_activation),
 )
 FOUNDATION_TABLE_SET = frozenset(FOUNDATION_TABLES)
 TRANSFER_TABLE_SET = frozenset(TRANSFER_TABLES)
@@ -137,9 +140,10 @@ def validate_migration_state(
     recorded_versions: list[str],
     existing_managed_tables: set[str],
     has_rollout_cutover_column: bool,
+    has_site_activation_column: bool,
 ) -> str:
     if not version_table_exists:
-        if recorded_versions or existing_managed_tables or has_rollout_cutover_column:
+        if recorded_versions or existing_managed_tables or has_rollout_cutover_column or has_site_activation_column:
             raise MigrationPreflightError("Unversioned or partial Site Inventory schema detected; no migration was run")
         return "clean"
 
@@ -163,6 +167,8 @@ def validate_migration_state(
         raise MigrationPreflightError("Transfer migration version does not match its table state")
     if has_rollout_cutover_column != (applied_count >= 2):
         raise MigrationPreflightError("Rollout cutover version does not match its column state")
+    if has_site_activation_column != (applied_count >= 4):
+        raise MigrationPreflightError("Site activation version does not match its column state")
     return "complete" if applied_count == len(MIGRATION_ORDER) else f"prefix-{applied_count}-of-{len(MIGRATION_ORDER)}"
 
 
@@ -274,6 +280,9 @@ def preflight_database(engine, schema: str) -> dict:
             rollout_columns = {
                 column["name"] for column in inspector.get_columns("rollout_records", schema=schema)
             }
+            site_columns = {
+                column["name"] for column in inspector.get_columns("sites", schema=schema)
+            }
             state = validate_migration_state(
                 version_table_exists=version_table_exists,
                 version_columns=version_columns,
@@ -281,12 +290,18 @@ def preflight_database(engine, schema: str) -> dict:
                 recorded_versions=recorded_versions,
                 existing_managed_tables=existing_managed,
                 has_rollout_cutover_column=ROLLOUT_CUTOFF_COLUMN in rollout_columns,
+                has_site_activation_column=SITE_ACTIVATION_COLUMN in site_columns,
             )
             if version_table_exists and recorded_versions:
                 from migrations.site_inventory_rollout_cutover import _validate_existing_column
 
                 if len(recorded_versions) >= 2 and not _validate_existing_column(connection, schema):
                     raise MigrationPreflightError("Recorded rollout cutover column has an unexpected definition")
+                if len(recorded_versions) >= 4:
+                    from migrations.site_inventory_site_activation import _validate_column
+
+                    if not _validate_column(connection, schema):
+                        raise MigrationPreflightError("Recorded Site activation column has an unexpected definition")
                 if recorded_versions:
                     from models import (
                         SiteAlias,

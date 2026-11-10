@@ -121,7 +121,7 @@ class SiteInventoryPostgreSQLValidation(TestCase):
         suffix = uuid4().hex[:12]
         with self.Session() as db:
             with db.begin():
-                self.site = Site(program="FTTH", name=f"PG Test Site {suffix}")
+                self.site = Site(program="FTTH", name=f"PG Test Site {suffix}", site_inventory_enabled=True)
                 self.product = Product(program="FTTH", sku=f"PG-{suffix}", name="Postgres cable", unit="M")
                 db.add_all([self.site, self.product])
                 db.flush()
@@ -162,6 +162,73 @@ class SiteInventoryPostgreSQLValidation(TestCase):
                 program="FTTH", site_id=self.site_id, product_id=self.product_id
             ).first()
             return None if row is None else row.on_hand_qty
+
+    def test_site_activation_can_be_admin_toggled_and_audited(self):
+        with self.Session() as db:
+            with db.begin():
+                site = inventory.set_site_inventory_enabled(
+                    db, program="FTTH", site_id=self.site_id, enabled=False, actor="Admin Test",
+                )
+                self.assertFalse(site.site_inventory_enabled)
+        with self.Session() as db:
+            with db.begin():
+                site = inventory.set_site_inventory_enabled(
+                    db, program="FTTH", site_id=self.site_id, enabled=True, actor="Admin Test",
+                )
+                self.assertTrue(site.site_inventory_enabled)
+        with self.Session() as db:
+            actions = db.query(AuditLog.action).filter(
+                AuditLog.entity_type == "site_inventory", AuditLog.entity_id == str(self.site_id),
+            ).all()
+        self.assertEqual({action for (action,) in actions}, {
+            "site_inventory_site_activated", "site_inventory_site_deactivated",
+        })
+
+    def test_inactive_site_blocks_opening_and_manual_movement_without_postgres_state_changes(self):
+        with self.Session() as db:
+            with db.begin():
+                db.get(Site, self.site_id).site_inventory_enabled = False
+
+        with self.Session() as db:
+            before = (
+                db.query(SiteMaterialMovement).count(),
+                db.query(SiteBalance).count(),
+                db.query(SiteOpeningBalanceRequest).count(),
+            )
+
+        with self.assertRaises(HTTPException) as opening_error:
+            with self.Session() as db:
+                with db.begin():
+                    inventory.create_opening_balance_request(
+                        db,
+                        program="FTTH",
+                        site_id=self.site_id,
+                        product_id=self.product_id,
+                        quantity="10",
+                        uom="M",
+                        effective_date="2026-11-06",
+                        reference="INACTIVE-OPENING",
+                        note="Synthetic inactive-site opening request",
+                        entered_by="Admin Test",
+                        request_token=uuid4().hex,
+                    )
+        self.assertEqual(opening_error.exception.status_code, 409)
+
+        with self.assertRaises(HTTPException) as movement_error:
+            self._post(
+                amount="2",
+                token=uuid4().hex,
+                doc_id=f"INACTIVE-MANUAL-{uuid4().hex[:8]}",
+            )
+        self.assertEqual(movement_error.exception.status_code, 409)
+
+        with self.Session() as db:
+            after = (
+                db.query(SiteMaterialMovement).count(),
+                db.query(SiteBalance).count(),
+                db.query(SiteOpeningBalanceRequest).count(),
+            )
+        self.assertEqual(after, before)
 
     def test_migration_is_versioned_and_confined_to_temporary_schema(self):
         self.assertEqual(self.migration_result["schema"], self.schema)
@@ -350,7 +417,7 @@ class SiteInventoryPostgreSQLValidation(TestCase):
             self._post(amount="10", token="different-token-for-same-event-01", doc_id="DOC-FTTH")
         with self.Session() as db:
             with db.begin():
-                sr_site = Site(program="SINGLE_RAN", name=f"SR {uuid4().hex[:8]}")
+                sr_site = Site(program="SINGLE_RAN", name=f"SR {uuid4().hex[:8]}", site_inventory_enabled=True)
                 sr_product = Product(program="SINGLE_RAN", sku=f"SR-{uuid4().hex[:8]}", name="SR cable", unit="M")
                 db.add_all([sr_site, sr_product])
                 db.flush()
