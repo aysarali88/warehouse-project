@@ -18,6 +18,7 @@ from site_inventory_service import (
     reconciliation_rows,
     resolve_site_alias,
     reverse_site_movement,
+    set_site_inventory_enabled,
 )
 from site_inventory_config import site_inventory_admin_write_enabled, site_inventory_readiness
 
@@ -26,6 +27,11 @@ class SiteAliasCreate(BaseModel):
     program: str = "FTTH"
     site_id: int = Field(gt=0)
     display_alias: str = Field(min_length=1, max_length=200)
+
+
+class SiteInventoryActivationUpdate(BaseModel):
+    program: str = "FTTH"
+    enabled: bool
 
 
 class OpeningBalanceCreate(BaseModel):
@@ -113,7 +119,10 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         ).order_by(SiteOpeningBalanceRequest.id).all()
         return {
             "success": True,
-            "sites": [{"id": row.id, "name": row.name} for row in sites],
+            "sites": [{
+                "id": row.id, "name": row.name,
+                "site_inventory_enabled": bool(row.site_inventory_enabled),
+            } for row in sites],
             "products": [{"id": row.id, "sku": row.sku, "name": row.name, "uom": row.unit or "PCS"} for row in products],
             "pending_openings": [{
                 "id": row.id, "site_id": row.site_id, "site": row.site.name,
@@ -122,6 +131,48 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
                 "effective_date": row.effective_date, "reference": row.reference,
                 "note": row.note, "entered_by": row.entered_by,
             } for row in pending],
+        }
+
+    @router.get("/api/warehouse/site-inventory/sites")
+    def site_inventory_sites(
+        request: Request,
+        program: str = "FTTH",
+        db: Session = Depends(db_dependency),
+    ):
+        authorize(request, "Admin")
+        rows = db.query(Site).filter_by(program=normalize_program_fn(program)).order_by(Site.name, Site.id).all()
+        return {"success": True, "sites": [{
+            "id": row.id,
+            "program": row.program,
+            "name": row.name,
+            "site_inventory_enabled": bool(row.site_inventory_enabled),
+        } for row in rows]}
+
+    @router.patch("/api/warehouse/site-inventory/sites/{site_id}")
+    def site_inventory_site_activation_update(
+        site_id: int,
+        data: SiteInventoryActivationUpdate,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        actor = authorize(request, "Admin")
+        require_admin_writes_enabled()
+        with db.begin():
+            site = set_site_inventory_enabled(
+                db,
+                program=data.program,
+                site_id=site_id,
+                enabled=data.enabled,
+                actor=actor,
+            )
+        return {
+            "success": True,
+            "site": {
+                "id": site.id,
+                "program": site.program,
+                "name": site.name,
+                "site_inventory_enabled": bool(site.site_inventory_enabled),
+            },
         }
 
     @router.get("/api/warehouse/site-inventory")

@@ -206,7 +206,7 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
         site_name = area or f"PG Rollout Consumption Site {suffix}"
         with self.Session() as db:
             with db.begin():
-                site = Site(program="FTTH", name=site_name)
+                site = Site(program="FTTH", name=site_name, site_inventory_enabled=True)
                 product = Product(
                     program="FTTH", sku=f"PG-ROLLOUT-CONSUME-{suffix}",
                     name=f"PG rollout material {suffix}", unit=unit,
@@ -272,6 +272,18 @@ class RolloutConsumptionPostgreSQLValidation(TestCase):
         self.assertEqual(first["movement_id"], retry["movement_id"])
         self.assertTrue(retry["replayed"])
         self.assertEqual(len(self.movements(fixture)), 1)
+
+    def test_inactive_site_blocks_confirmed_consumption_without_ledger_change(self):
+        fixture = self.make_fixture()
+        with self.Session() as db:
+            db.get(Site, fixture["site_id"]).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as error:
+            self.confirm(fixture)
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(error.exception.detail, "Site Inventory is not active for this Site.")
+        self.assertEqual(self.balance(fixture), Decimal("50.000000"))
+        self.assertEqual(self.movements(fixture), [])
 
     def test_concurrent_same_confirmation_is_idempotent(self):
         fixture = self.make_fixture(opening=100)

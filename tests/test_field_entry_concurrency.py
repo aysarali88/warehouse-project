@@ -458,7 +458,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def test_requester_return_waits_for_warehouse_manager_confirmation(self):
         db = SessionLocal()
         warehouse = Warehouse(name="Returns Test WH")
-        site = Site(program="FTTH", name="Returns Test Site")
+        site = Site(program="FTTH", name="Returns Test Site", site_inventory_enabled=True)
         product = Product(sku="RETURN-TEST", name="Return test material")
         damaged_product = Product(sku="RETURN-DAMAGED-APPROVAL-TEST", name="Damaged approval test material")
         db.add_all([warehouse, site, product, damaged_product])
@@ -529,7 +529,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertIs(route.endpoint, main.create_material_return)
         db = SessionLocal()
         warehouse = Warehouse(name="Damaged Returns Test WH")
-        site = Site(program="FTTH", name="Damaged Returns Test Site")
+        site = Site(program="FTTH", name="Damaged Returns Test Site", site_inventory_enabled=True)
         good_product = Product(sku="RETURN-GOOD-TEST", name="Good return test material")
         damaged_product = Product(sku="RETURN-DAMAGED-TEST", name="Damaged return test material")
         db.add_all([warehouse, site, good_product, damaged_product])
@@ -587,7 +587,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
 
         db = SessionLocal()
         warehouse = Warehouse(program="SINGLE_RAN", name="SR Serial Return WH")
-        site = Site(program="SINGLE_RAN", name="SR Serial Return Site")
+        site = Site(program="SINGLE_RAN", name="SR Serial Return Site", site_inventory_enabled=True)
         product = Product(program="SINGLE_RAN", sku="SR-DAMAGE-SERIAL-TEST", name="SR damaged serialized material")
         db.add_all([warehouse, site, product])
         db.commit()
@@ -798,7 +798,9 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         warehouse = Warehouse(name="Usage Return Test WH")
         site = db.query(Site).filter_by(program="FTTH", name="Maqawba").first()
         if site is None:
-            site = Site(program="FTTH", name="Maqawba")
+            site = Site(program="FTTH", name="Maqawba", site_inventory_enabled=True)
+        else:
+            site.site_inventory_enabled = True
         product = Product(sku="USAGE-RETURN-TEST", name="Metal wedge clamping")
         db.add_all([warehouse, site, product])
         db.flush()

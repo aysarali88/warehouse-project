@@ -119,11 +119,46 @@ def _stage(_name: str) -> None:
 
 
 def _check_site_product(db, program: str, site_id: int, product_id: int):
-    site = db.query(Site).filter_by(id=site_id, program=program).first()
+    site = db.query(Site).filter_by(id=site_id, program=program).with_for_update().first()
     product = db.query(Product).filter_by(id=product_id, program=program).first()
     if site is None or product is None:
         raise HTTPException(status_code=404, detail="Site or product not found in this program")
+    require_site_inventory_enabled(site)
     return site, product
+
+
+def require_site_inventory_enabled(site: Site) -> Site:
+    if not bool(site.site_inventory_enabled):
+        raise HTTPException(status_code=409, detail="Site Inventory is not active for this Site.")
+    return site
+
+
+def set_site_inventory_enabled(db, *, program: str, site_id: int, enabled: bool, actor: str) -> Site:
+    _require_transaction(db)
+    program_key = normalize_program(program)
+    site = db.query(Site).filter_by(id=site_id, program=program_key).with_for_update().first()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found in this program")
+    next_value = bool(enabled)
+    if bool(site.site_inventory_enabled) != next_value:
+        previous = bool(site.site_inventory_enabled)
+        site.site_inventory_enabled = next_value
+        _audit(db, "site_inventory_site_activated" if next_value else "site_inventory_site_deactivated",
+               str(site.id), actor, {
+                   "program": program_key,
+                   "site_id": site.id,
+                   "site": site.name,
+                   "previous_enabled": previous,
+                   "site_inventory_enabled": next_value,
+               })
+    return site
+
+
+def _lock_active_site(db, program: str, site_id: int) -> Site:
+    site = db.query(Site).filter_by(id=site_id, program=program).with_for_update().first()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found in this program")
+    return require_site_inventory_enabled(site)
 
 
 def _validate_uom(product: Product, uom: str) -> str:
@@ -614,6 +649,7 @@ def prepare_material_requisition_issue(db, program: str, site_label: str, items:
             status_code=409,
             detail=f"MR site '{label}' is not mapped to a unique Site in {program_key}; add an explicit Site alias",
         )
+    site = _lock_active_site(db, program_key, site.id)
 
     prepared = []
     for item in items:
@@ -659,6 +695,7 @@ def prepare_material_return_receipt(db, program: str, site_label: str, items: li
             status_code=409,
             detail=f"Material return site '{label}' is not mapped to a unique Site in {program_key}; add an explicit Site alias",
         )
+    site = _lock_active_site(db, program_key, site.id)
 
     prepared = []
     for item in items:
@@ -740,6 +777,7 @@ def prepare_rollout_consumption(db, program: str, site_label: str, product_id: i
             status_code=409,
             detail=f"Field Entry Area '{label}' is not mapped to one Site in {program_key}; add an explicit Site alias",
         )
+    site = _lock_active_site(db, program_key, site.id)
 
     if not product_id:
         raise HTTPException(status_code=400, detail="A numeric product_id is required for consumption confirmation")

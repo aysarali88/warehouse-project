@@ -112,6 +112,7 @@ class Site(Base):
     id = Column(Integer, primary_key=True, index=True)
     program = Column(String, default="FTTH", nullable=False, index=True)
     name = Column(String, nullable=False, index=True)
+    site_inventory_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

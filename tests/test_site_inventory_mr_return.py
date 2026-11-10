@@ -51,7 +51,7 @@ class MaterialReturnSiteInventoryTests(unittest.TestCase):
         suffix = uuid4().hex[:10]
         with SessionLocal() as db:
             with db.begin():
-                site = Site(program="FTTH", name=f"MR Return Site {suffix}")
+                site = Site(program="FTTH", name=f"MR Return Site {suffix}", site_inventory_enabled=True)
                 warehouse = Warehouse(program="FTTH", name=f"MR Return WH {suffix}")
                 db.add_all([site, warehouse])
                 db.flush()
@@ -139,6 +139,36 @@ class MaterialReturnSiteInventoryTests(unittest.TestCase):
             self.assertEqual(db.query(StockBalance).filter_by(
                 warehouse_id=fixture["warehouse_id"], product_id=product_id,
             ).one().quantity, 10)
+
+    def test_inactive_site_blocks_return_confirmation_without_receiving_warehouse_stock(self):
+        fixture = self.make_fixture()
+        product_id = fixture["products"]["main"]
+        with SessionLocal() as db:
+            pending = self.create_pending(db, fixture, [
+                {"product_id": product_id, "quantity": 4, "condition": "Good"},
+            ])
+            site = db.get(Site, fixture["site_id"])
+            site.site_inventory_enabled = False
+            db.commit()
+
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as error:
+                self.approve(db, fixture, pending["id"])
+            self.assertEqual(error.exception.status_code, 409)
+            self.assertEqual(error.exception.detail, "Site Inventory is not active for this Site.")
+            db.rollback()
+
+        with SessionLocal() as db:
+            row = db.get(MaterialReturn, pending["id"])
+            self.assertEqual(row.status, "pending_warehouse")
+            self.assertEqual(self.site_qty(db, fixture, product_id), Decimal("50.000000"))
+            self.assertEqual(db.query(StockBalance).filter_by(
+                warehouse_id=fixture["warehouse_id"], product_id=product_id,
+            ).one().quantity, 10)
+            self.assertEqual(db.query(StockMovement).filter_by(reference=pending["return_number"]).count(), 0)
+            self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                document_type="material_return", document_id=str(pending["id"]),
+            ).count(), 0)
 
     def test_disabled_integration_preserves_legacy_confirmed_return_behavior(self):
         fixture = self.make_fixture()

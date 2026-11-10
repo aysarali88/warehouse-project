@@ -4,7 +4,8 @@ from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from types import SimpleNamespace
 from sqlalchemy.exc import IntegrityError
 
 
@@ -42,7 +43,7 @@ class SiteInventoryFoundationTests(unittest.TestCase):
         self.program = "FTTH"
         suffix = uuid4().hex[:10]
         with SessionLocal() as db:
-            self.site = Site(program=self.program, name=f"Foundation Test {suffix}")
+            self.site = Site(program=self.program, name=f"Foundation Test {suffix}", site_inventory_enabled=True)
             self.product = Product(program=self.program, sku=f"FOUND-{suffix}", name="Fiber cable", unit="M")
             db.add_all([self.site, self.product])
             db.commit()
@@ -103,6 +104,158 @@ class SiteInventoryFoundationTests(unittest.TestCase):
         self.assertEqual(_validate_schema("warehouse_app", "postgresql"), "warehouse_app")
         with self.assertRaises(ValueError):
             _validate_schema("bad-schema", "postgresql")
+
+    def test_site_inventory_activation_defaults_off_and_admin_toggle_is_audited(self):
+        suffix = uuid4().hex[:10]
+        with SessionLocal() as db:
+            with db.begin():
+                site = Site(program=self.program, name=f"Activation Test {suffix}")
+                db.add(site)
+                db.flush()
+                site_id = site.id
+                self.assertFalse(site.site_inventory_enabled)
+
+        with SessionLocal() as db:
+            with db.begin():
+                enabled = inventory.set_site_inventory_enabled(
+                    db, program=self.program, site_id=site_id, enabled=True, actor="Admin Test",
+                )
+                self.assertTrue(enabled.site_inventory_enabled)
+        with SessionLocal() as db:
+            with db.begin():
+                disabled = inventory.set_site_inventory_enabled(
+                    db, program=self.program, site_id=site_id, enabled=False, actor="Admin Test",
+                )
+                self.assertFalse(disabled.site_inventory_enabled)
+        with SessionLocal() as db:
+            actions = db.query(AuditLog.action).filter(
+                AuditLog.entity_type == "site_inventory", AuditLog.entity_id == str(site_id),
+            ).all()
+        self.assertEqual({action for (action,) in actions}, {
+            "site_inventory_site_activated", "site_inventory_site_deactivated",
+        })
+
+    def test_default_site_bootstrap_never_activates_sites_and_admin_can_activate_later(self):
+        suffix = uuid4().hex[:10]
+        existing_inactive_name = f"Bootstrap inactive {suffix}"
+        existing_active_name = f"Bootstrap active {suffix}"
+        missing_name = f"Bootstrap missing {suffix}"
+        site_ids = []
+
+        try:
+            with SessionLocal() as db:
+                existing_inactive = Site(
+                    program=self.program, name=existing_inactive_name, site_inventory_enabled=False,
+                )
+                existing_active = Site(
+                    program=self.program, name=existing_active_name, site_inventory_enabled=True,
+                )
+                db.add_all([existing_inactive, existing_active])
+                db.commit()
+                site_ids = [existing_inactive.id, existing_active.id]
+
+            with patch.object(
+                main, "DEFAULT_SITE_IDS",
+                (existing_inactive_name, existing_active_name, missing_name),
+            ), patch.object(main, "get_sessionmaker", return_value=SessionLocal):
+                main.ensure_default_site_ids()
+
+            with SessionLocal() as db:
+                inactive = db.query(Site).filter_by(
+                    program=self.program, name=existing_inactive_name,
+                ).one()
+                active = db.query(Site).filter_by(
+                    program=self.program, name=existing_active_name,
+                ).one()
+                bootstrapped = db.query(Site).filter_by(
+                    program=self.program, name=missing_name,
+                ).one()
+                site_ids.append(bootstrapped.id)
+                self.assertFalse(inactive.site_inventory_enabled)
+                self.assertTrue(active.site_inventory_enabled)
+                self.assertFalse(bootstrapped.site_inventory_enabled)
+                bootstrapped_id = bootstrapped.id
+
+            from site_inventory_api import SiteInventoryActivationUpdate
+
+            activation_endpoint = next(
+                route.endpoint for route in main.app.routes
+                if getattr(route, "path", None) == "/api/warehouse/site-inventory/sites/{site_id}"
+                and "PATCH" in getattr(route, "methods", set())
+            )
+            request = Request({"type": "http", "headers": [], "query_string": b""})
+            request.state.current_user = SimpleNamespace(
+                role="Admin", name="Admin Test", username="admin",
+            )
+            with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}):
+                with SessionLocal() as db:
+                    activation_endpoint(
+                        bootstrapped_id,
+                        SiteInventoryActivationUpdate(program=self.program, enabled=True),
+                        request,
+                        db,
+                    )
+            with SessionLocal() as db:
+                self.assertTrue(db.get(Site, bootstrapped_id).site_inventory_enabled)
+        finally:
+            if site_ids:
+                with SessionLocal() as db:
+                    with db.begin():
+                        db.query(AuditLog).filter(
+                            AuditLog.entity_type == "site_inventory",
+                            AuditLog.entity_id.in_([str(site_id) for site_id in site_ids]),
+                        ).delete(synchronize_session=False)
+                        db.query(Site).filter(Site.id.in_(site_ids)).delete(synchronize_session=False)
+
+    def test_new_ftth_site_created_through_admin_api_is_active_by_default(self):
+        site_name = f"New FTTH Area {uuid4().hex[:10]}"
+        request = Request({"type": "http", "headers": [], "query_string": b""})
+        request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
+        with SessionLocal() as db:
+            response = main.create_site(main.SiteIn(name=site_name, program="FTTH"), request, db)
+            row = db.get(Site, response["site"]["id"])
+            self.assertTrue(row.site_inventory_enabled)
+            db.delete(row)
+            db.commit()
+
+    def test_new_non_ftth_site_created_through_admin_api_is_inactive_by_default(self):
+        site_name = f"New Single RAN Area {uuid4().hex[:10]}"
+        request = Request({"type": "http", "headers": [], "query_string": b""})
+        request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
+        with SessionLocal() as db:
+            response = main.create_site(main.SiteIn(name=site_name, program="SINGLE_RAN"), request, db)
+            row = db.get(Site, response["site"]["id"])
+            self.assertFalse(row.site_inventory_enabled)
+            db.delete(row)
+            db.commit()
+
+    def test_inactive_site_rejects_opening_and_manual_movement_without_state_changes(self):
+        suffix = uuid4().hex[:10]
+        with SessionLocal() as db:
+            with db.begin():
+                site = Site(program=self.program, name=f"Inactive Site {suffix}")
+                db.add(site)
+                db.flush()
+                inactive_site_id = site.id
+
+        with self.assertRaises(HTTPException) as movement_error:
+            self._post(quantity="3", site_id=inactive_site_id, event_id=f"INACTIVE-{suffix}")
+        self.assertEqual(movement_error.exception.status_code, 409)
+        self.assertEqual(movement_error.exception.detail, "Site Inventory is not active for this Site.")
+
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as opening_error:
+                with db.begin():
+                    inventory.create_opening_balance_request(
+                        db, program=self.program, site_id=inactive_site_id, product_id=self.product_id,
+                        quantity="3", uom="M", effective_date="2026-11-06",
+                        reference=f"INACTIVE-{suffix}", note="Should be blocked", entered_by="tester",
+                        request_token=f"inactive-opening-{suffix}-token",
+                    )
+            self.assertEqual(opening_error.exception.status_code, 409)
+            self.assertEqual(db.query(SiteMaterialMovement).filter_by(site_id=inactive_site_id).count(), 0)
+            self.assertEqual(db.query(SiteBalance).filter_by(site_id=inactive_site_id).count(), 0)
+            self.assertEqual(db.query(SiteOpeningBalanceRequest).filter_by(site_id=inactive_site_id).count(), 0)
 
     def test_alias_normalization_and_collision_rejection(self):
         with SessionLocal() as db:
@@ -192,7 +345,7 @@ class SiteInventoryFoundationTests(unittest.TestCase):
         first_id, _ = self._post(quantity="4", token=token, event_id="FTTH-DOC")
         with SessionLocal() as db:
             with db.begin():
-                sr_site = Site(program="SINGLE_RAN", name=f"SR {uuid4().hex[:8]}")
+                sr_site = Site(program="SINGLE_RAN", name=f"SR {uuid4().hex[:8]}", site_inventory_enabled=True)
                 sr_product = Product(program="SINGLE_RAN", sku=f"SR-{uuid4().hex[:8]}", name="SR material", unit="M")
                 db.add_all([sr_site, sr_product])
                 db.flush()
@@ -208,7 +361,7 @@ class SiteInventoryFoundationTests(unittest.TestCase):
         legacy_event = inventory.source_event_key(self.program, "incoming", "manual_test", "LEGACY-DOC", "1")
         with SessionLocal() as db:
             with db.begin():
-                legacy_site = Site(program=self.program, name=f"Legacy {uuid4().hex[:8]}")
+                legacy_site = Site(program=self.program, name=f"Legacy {uuid4().hex[:8]}", site_inventory_enabled=True)
                 legacy_product = Product(program=self.program, sku=f"LEGACY-{uuid4().hex[:8]}", name="Legacy material", unit="M")
                 db.add_all([legacy_site, legacy_product])
                 db.flush()

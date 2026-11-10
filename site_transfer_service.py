@@ -25,6 +25,7 @@ from site_inventory_service import (
     _require_transaction,
     normalize_uom,
     post_site_movement,
+    require_site_inventory_enabled,
     request_token_hash,
     source_event_key,
 )
@@ -78,10 +79,17 @@ def _transfer(db, transfer_id: int, program: str, *, lock: bool = False) -> Site
 def _validate_route_and_lines(db, program: str, from_site_id: int, to_site_id: int, items: list[dict]):
     if from_site_id == to_site_id:
         raise HTTPException(status_code=400, detail="From Site and To Site must be different")
-    from_site = db.query(Site).filter_by(id=from_site_id, program=program).first()
-    to_site = db.query(Site).filter_by(id=to_site_id, program=program).first()
-    if from_site is None or to_site is None:
+    sites = (
+        db.query(Site)
+        .filter(Site.id.in_([from_site_id, to_site_id]), Site.program == program)
+        .order_by(Site.id)
+        .with_for_update()
+        .all()
+    )
+    if len(sites) != 2:
         raise HTTPException(status_code=404, detail="Both sites must exist in the selected program")
+    for site in sites:
+        require_site_inventory_enabled(site)
     if not items:
         raise HTTPException(status_code=400, detail="At least one transfer line is required")
 
@@ -104,6 +112,21 @@ def _validate_route_and_lines(db, program: str, from_site_id: int, to_site_id: i
             raise HTTPException(status_code=400, detail=f"UOM for product {product_id} must match product unit ({product_uom})")
         normalized.append({"product_id": product_id, "quantity": quantity, "uom": uom})
     return normalized
+
+
+def _require_transfer_sites_enabled(db, transfer: SiteTransfer) -> None:
+    site_ids = sorted({transfer.from_site_id, transfer.to_site_id})
+    sites = (
+        db.query(Site)
+        .filter(Site.id.in_(site_ids), Site.program == transfer.program)
+        .order_by(Site.id)
+        .with_for_update()
+        .all()
+    )
+    if len(sites) != 2:
+        raise HTTPException(status_code=404, detail="Both transfer sites must exist in this program")
+    for site in sites:
+        require_site_inventory_enabled(site)
 
 
 def _lines_for_transfer(db, transfer_id: int) -> list[SiteTransferItem]:
@@ -271,6 +294,7 @@ def create_transfer(db, *, program: str, from_site_id: int, to_site_id: int, ite
 def approve_transfer(db, transfer_id: int, program: str, actor: str) -> SiteTransfer:
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
+    _require_transfer_sites_enabled(db, row)
     actor_name = _actor(actor)
     if row.status == "draft":
         row.status = "approved"
@@ -286,6 +310,7 @@ def approve_transfer(db, transfer_id: int, program: str, actor: str) -> SiteTran
 def dispatch_transfer(db, transfer_id: int, program: str, actor: str, request_token: str) -> SiteTransfer:
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
+    _require_transfer_sites_enabled(db, row)
     actor_name = _actor(actor)
     token_hash = request_token_hash(row.program, request_token)
     existing_token = db.query(SiteTransferDispatch).filter_by(
@@ -351,6 +376,7 @@ def receive_transfer(db, transfer_id: int, program: str, actor: str, *, items: l
                      reference: str, notes: str, request_token: str) -> SiteTransferReceipt:
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
+    _require_transfer_sites_enabled(db, row)
     actor_name = _actor(actor)
     reference_value = _clean_text(reference, 200, "Receipt reference")
     notes_value = _clean_text(notes, 4000, "Receipt notes")
@@ -476,6 +502,7 @@ def reverse_transfer_receipt(db, transfer_id: int, program: str, receipt_item_id
                              note: str, request_token: str) -> SiteTransferCorrection:
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
+    _require_transfer_sites_enabled(db, row)
     actor_name = _actor(actor)
     note_value = _clean_text(note, 1000, "Correction note", required=True)
     token_hash = request_token_hash(row.program, request_token)
@@ -539,6 +566,7 @@ def reverse_transfer_dispatch(db, transfer_id: int, program: str, actor: str, no
                               request_token: str, *, confirm_physical_return: bool) -> SiteTransferCorrection:
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
+    _require_transfer_sites_enabled(db, row)
     actor_name = _actor(actor)
     note_value = _clean_text(note, 1000, "Correction note", required=True)
     if not confirm_physical_return:

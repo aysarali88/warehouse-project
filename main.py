@@ -419,7 +419,7 @@ def ensure_default_site_ids():
         }
         for name in DEFAULT_SITE_IDS:
             if name.casefold() not in existing:
-                db.add(Site(program=DEFAULT_PROGRAM, name=name))
+                db.add(Site(program=DEFAULT_PROGRAM, name=name, site_inventory_enabled=False))
         db.commit()
     except Exception:
         db.rollback()
@@ -4603,7 +4603,11 @@ async def publish_area_builder(
         canonical_site_area_name(site.name).casefold() == area_name.casefold()
         for site in db.query(Site).filter(Site.program == program_key).all()
     ):
-        db.add(Site(program=program_key, name=area_name))
+        db.add(Site(
+            program=program_key,
+            name=area_name,
+            site_inventory_enabled=(program_key == DEFAULT_PROGRAM),
+        ))
     log_audit(db, "publish_fiber_map_area", "fiber_map_area", area_name, actor, {"city": city_name, **payload["summary"]})
     db.commit()
     clear_rollout_db_cache()
@@ -6887,7 +6891,10 @@ def list_sites(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)
     for row in rows:
         name = canonical_site_area_name(row.name)
         key = "awladabushala" if name == "Awlad Abushala" else f"site:{row.id}"
-        sites_by_name.setdefault(key, {"id": row.id, "program": program_key, "name": name})
+        sites_by_name.setdefault(key, {
+            "id": row.id, "program": program_key, "name": name,
+            "site_inventory_enabled": bool(row.site_inventory_enabled),
+        })
     sites = sorted(sites_by_name.values(), key=lambda site: site["name"].casefold())
     return {"success": True, "sites": sites}
 
@@ -6909,8 +6916,15 @@ def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session
             None,
         )
         if existing:
-            return {"success": True, "site": {"id": existing.id, "program": program_key, "name": name}}
-    row = Site(program=program_key, name=name)
+            return {"success": True, "site": {
+                "id": existing.id, "program": program_key, "name": name,
+                "site_inventory_enabled": bool(existing.site_inventory_enabled),
+            }}
+    row = Site(
+        program=program_key,
+        name=name,
+        site_inventory_enabled=(program_key == DEFAULT_PROGRAM),
+    )
     db.add(row)
     try:
         db.commit()
@@ -6919,7 +6933,10 @@ def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session
         raise HTTPException(status_code=400, detail="Site ID already exists") from exc
     db.refresh(row)
     clear_warehouse_cache()
-    return {"success": True, "site": {"id": row.id, "program": program_key, "name": row.name}}
+    return {"success": True, "site": {
+        "id": row.id, "program": program_key, "name": row.name,
+        "site_inventory_enabled": bool(row.site_inventory_enabled),
+    }}
 
 
 def resolved_site_name(db: Session, program: str, site_value: str) -> str:

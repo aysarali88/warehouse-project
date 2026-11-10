@@ -75,7 +75,16 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
                 connection.exec_driver_sql(f'CREATE SCHEMA "{cls.schema}"')
                 cls.schema_created = True
                 translated = connection.execution_options(schema_translate_map={None: cls.schema})
-                for table in (Site.__table__, Product.__table__, AuditLog.__table__):
+                connection.exec_driver_sql(
+                    f'CREATE TABLE "{cls.schema}"."sites" ('
+                    "id SERIAL PRIMARY KEY, program VARCHAR(32) NOT NULL DEFAULT 'FTTH', "
+                    "name VARCHAR(200) NOT NULL, created_at TIMESTAMPTZ DEFAULT now(), "
+                    "CONSTRAINT uq_site_program_name UNIQUE (program, name))"
+                )
+                connection.exec_driver_sql(
+                    f'INSERT INTO "{cls.schema}"."sites" (program, name) VALUES (\'FTTH\', \'Pre-existing Site\')'
+                )
+                for table in (Product.__table__, AuditLog.__table__):
                     table.create(bind=translated)
                 connection.exec_driver_sql(
                     f'CREATE TABLE "{cls.schema}"."rollout_records" ('
@@ -88,6 +97,9 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
                     "(record_id, date, entry_time, status, area) "
                     "VALUES ('LEGACY-ROW', '2026-11-02', '2026-11-02 09:00:00', 'Done', 'Synthetic Site')"
                 )
+                cls.pre_migration_site_count = connection.execute(text(
+                    f'SELECT count(*) FROM "{cls.schema}"."sites"'
+                )).scalar_one()
 
             cls.app_engine = create_engine(
                 TEST_DATABASE_URL,
@@ -153,6 +165,21 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             "site_opening_balance_requests", "site_inventory_schema_versions",
             "rollout_records",
         }.issubset(tables))
+        site_columns = {column["name"]: column for column in inspect(self.engine).get_columns(
+            "sites", schema=self.schema,
+        )}
+        activation = site_columns["site_inventory_enabled"]
+        self.assertFalse(activation["nullable"])
+        self.assertIn("false", str(activation["default"]).lower())
+        with self.engine.connect() as connection:
+            site_count_after = connection.execute(text(
+                f'SELECT count(*) FROM "{self.schema}"."sites"'
+            )).scalar_one()
+            self.assertEqual(site_count_after, self.pre_migration_site_count)
+            self.assertFalse(connection.execute(text(
+                f'SELECT site_inventory_enabled FROM "{self.schema}"."sites" '
+                "WHERE name='Pre-existing Site'"
+            )).scalar_one())
         columns = {column["name"]: column for column in inspector.get_columns(
             "rollout_records", schema=self.schema,
         )}
@@ -168,6 +195,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             "site-inventory-foundation-v1",
             "site-inventory-rollout-cutover-v1",
             "site-inventory-transfers-v1",
+            "site-inventory-site-activation-v1",
         }.issubset(versions))
         self.assertEqual(outside_after, self.tables_before)
 

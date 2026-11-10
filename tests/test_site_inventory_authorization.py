@@ -105,6 +105,49 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
                 result = endpoint(self.make_request(role), db=DummySession())
                 self.assertEqual(result, {"success": True, "items": []})
 
+    def test_site_inventory_activation_is_admin_only_and_uses_the_existing_write_gate(self):
+        update = self.endpoints["/api/warehouse/site-inventory/sites/{site_id}"]
+        payload = site_inventory_api.SiteInventoryActivationUpdate(program="FTTH", enabled=True)
+        for role in (None, "Requester", "Technician", "Warehouse Manager", "Management", "Approval"):
+            db = DummySession()
+            with self.subTest(role=role), patch.dict(os.environ, {}, clear=True), patch.object(
+                site_inventory_api, "set_site_inventory_enabled"
+            ) as activate:
+                with self.assertRaises(HTTPException) as error:
+                    update(5, payload, self.make_request(role), db)
+                self.assertEqual(error.exception.status_code, 401 if role is None else 403)
+                activate.assert_not_called()
+                self.assertEqual(db.begin_calls, 0)
+
+        db = DummySession()
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            site_inventory_api, "set_site_inventory_enabled"
+        ) as activate:
+            with self.assertRaises(HTTPException) as error:
+                update(5, payload, self.make_request("Admin"), db)
+            self.assertEqual(error.exception.status_code, 503)
+            activate.assert_not_called()
+            self.assertEqual(db.begin_calls, 0)
+
+        site = SimpleNamespace(id=5, program="FTTH", name="Synthetic Site", site_inventory_enabled=True)
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "true"}), patch.object(
+            site_inventory_api, "set_site_inventory_enabled", return_value=site
+        ) as activate:
+            result = update(5, payload, self.make_request("Admin"), DummySession())
+        self.assertEqual(result["site"]["site_inventory_enabled"], True)
+        activate.assert_called_once()
+
+    def test_site_activation_status_list_is_read_only_while_writes_are_disabled(self):
+        endpoint = self.endpoints["/api/warehouse/site-inventory/sites"]
+        for role in (None, "Requester", "Technician", "Warehouse Manager", "Management", "Approval"):
+            with self.subTest(role=role), patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(HTTPException) as error:
+                    endpoint(self.make_request(role), db=DummySession())
+                self.assertEqual(error.exception.status_code, 401 if role is None else 403)
+        with patch.dict(os.environ, {}, clear=True):
+            result = endpoint(self.make_request("Admin"), db=DummySession())
+        self.assertEqual(result, {"success": True, "sites": []})
+
     def test_opening_approval_roles_remain_admin_and_approval(self):
         endpoint = self.endpoints["/api/warehouse/site-inventory/opening-balances/{request_id}/approve"]
         movement = SimpleNamespace(id=12)

@@ -58,8 +58,8 @@ class SiteTransferTests(unittest.TestCase):
         suffix = uuid4().hex[:12]
         with SessionLocal() as db:
             with db.begin():
-                self.source = Site(program="FTTH", name=f"Transfer Source {suffix}")
-                self.destination = Site(program="FTTH", name=f"Transfer Destination {suffix}")
+                self.source = Site(program="FTTH", name=f"Transfer Source {suffix}", site_inventory_enabled=True)
+                self.destination = Site(program="FTTH", name=f"Transfer Destination {suffix}", site_inventory_enabled=True)
                 self.other_program_site = Site(program="SINGLE_RAN", name=f"Other Program {suffix}")
                 self.product = Product(program="FTTH", sku=f"TR-{suffix}", name="Transfer cable", unit="M")
                 db.add_all([self.source, self.destination, self.other_program_site, self.product])
@@ -148,6 +148,31 @@ class SiteTransferTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as missing_product:
             self._create(product_id=999999)
         self.assertEqual(missing_product.exception.status_code, 404)
+
+    def test_transfer_creation_requires_both_sites_to_be_active(self):
+        with SessionLocal() as db:
+            initial_count = db.query(SiteTransfer).count()
+            db.get(Site, self.source_id).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as inactive_source:
+            self._create()
+        self.assertEqual(inactive_source.exception.status_code, 409)
+        self.assertEqual(inactive_source.exception.detail, "Site Inventory is not active for this Site.")
+
+        with SessionLocal() as db:
+            db.get(Site, self.source_id).site_inventory_enabled = True
+            db.get(Site, self.destination_id).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as inactive_destination:
+            self._create()
+        self.assertEqual(inactive_destination.exception.status_code, 409)
+        self.assertEqual(inactive_destination.exception.detail, "Site Inventory is not active for this Site.")
+        with SessionLocal() as db:
+            self.assertEqual(db.query(SiteTransfer).count(), initial_count)
+            self.assertEqual(db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.site_id.in_([self.source_id, self.destination_id]),
+                SiteMaterialMovement.document_type.like("site_transfer%"),
+            ).count(), 0)
 
     def test_create_dispatch_and_partial_receipts_update_ledger_and_transit(self):
         transfer_id = self._create(quantity=30)

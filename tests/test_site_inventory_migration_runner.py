@@ -102,6 +102,7 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
             recorded_versions=[],
             existing_managed_tables=set(),
             has_rollout_cutover_column=False,
+            has_site_activation_column=False,
         ), "clean")
 
         for count in range(1, len(MIGRATION_ORDER) + 1):
@@ -116,6 +117,7 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
                         | (set(TRANSFER_TABLE_SET) if count >= 3 else set())
                     ),
                     has_rollout_cutover_column=count >= 2,
+                    has_site_activation_column=count >= 4,
                 )
                 expected = "complete" if count == len(MIGRATION_ORDER) else f"prefix-{count}-of-{len(MIGRATION_ORDER)}"
                 self.assertEqual(state, expected)
@@ -123,22 +125,32 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
     def test_partial_unknown_and_mismatched_migration_states_are_rejected(self):
         invalid_states = (
             dict(version_table_exists=False, version_columns=None, version_primary_key=None,
-                 recorded_versions=[], existing_managed_tables={"site_balances"}, has_rollout_cutover_column=False),
+                 recorded_versions=[], existing_managed_tables={"site_balances"}, has_rollout_cutover_column=False,
+                 has_site_activation_column=False),
             dict(version_table_exists=False, version_columns=None, version_primary_key=None,
-                 recorded_versions=[], existing_managed_tables=set(), has_rollout_cutover_column=True),
+                 recorded_versions=[], existing_managed_tables=set(), has_rollout_cutover_column=True,
+                 has_site_activation_column=False),
             dict(version_table_exists=True, version_columns={"version", "applied_at"}, version_primary_key={"version"},
-                 recorded_versions=[], existing_managed_tables=set(), has_rollout_cutover_column=False),
+                 recorded_versions=[], existing_managed_tables=set(), has_rollout_cutover_column=False,
+                 has_site_activation_column=False),
             dict(version_table_exists=True, version_columns={"version", "applied_at"}, version_primary_key={"version"},
-                 recorded_versions=[MIGRATION_ORDER[1]], existing_managed_tables=set(), has_rollout_cutover_column=False),
+                 recorded_versions=[MIGRATION_ORDER[1]], existing_managed_tables=set(), has_rollout_cutover_column=False,
+                 has_site_activation_column=False),
             dict(version_table_exists=True, version_columns={"version", "applied_at"}, version_primary_key={"version"},
                  recorded_versions=list(MIGRATION_ORDER[:1]), existing_managed_tables=set(FOUNDATION_TABLE_SET - {"site_balances"}),
-                 has_rollout_cutover_column=False),
+                 has_rollout_cutover_column=False, has_site_activation_column=False),
             dict(version_table_exists=True, version_columns={"version", "applied_at"}, version_primary_key={"version"},
                  recorded_versions=list(MIGRATION_ORDER[:1]), existing_managed_tables=set(FOUNDATION_TABLE_SET),
-                 has_rollout_cutover_column=True),
+                 has_rollout_cutover_column=True, has_site_activation_column=False),
             dict(version_table_exists=True, version_columns={"version", "applied_at", "extra"}, version_primary_key={"version"},
                  recorded_versions=list(MIGRATION_ORDER[:1]), existing_managed_tables=set(FOUNDATION_TABLE_SET),
-                 has_rollout_cutover_column=False),
+                 has_rollout_cutover_column=False, has_site_activation_column=False),
+            dict(version_table_exists=False, version_columns=None, version_primary_key=None,
+                 recorded_versions=[], existing_managed_tables=set(), has_rollout_cutover_column=False,
+                 has_site_activation_column=True),
+            dict(version_table_exists=True, version_columns={"version", "applied_at"}, version_primary_key={"version"},
+                 recorded_versions=list(MIGRATION_ORDER[:3]), existing_managed_tables=set(FOUNDATION_TABLE_SET | TRANSFER_TABLE_SET),
+                 has_rollout_cutover_column=True, has_site_activation_column=True),
         )
         for kwargs in invalid_states:
             with self.subTest(kwargs=kwargs), self.assertRaises(MigrationPreflightError):
@@ -195,6 +207,7 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
             root / "migrations" / "site_inventory_foundation.py",
             root / "migrations" / "site_inventory_rollout_cutover.py",
             root / "migrations" / "site_inventory_transfers.py",
+            root / "migrations" / "site_inventory_site_activation.py",
         )
         destructive = re.compile(r"\bDROP\s+(?:TABLE|COLUMN)\b|\bDELETE\s+FROM\b|\bUPDATE\s+rollout_records\b", re.IGNORECASE)
         for path in paths:

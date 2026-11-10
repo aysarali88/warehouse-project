@@ -144,8 +144,8 @@ class SiteTransferPostgreSQLValidation(TestCase):
         suffix = uuid4().hex[:12]
         with self.Session() as db:
             with db.begin():
-                self.source = Site(program="FTTH", name=f"PG transfer source {suffix}")
-                self.destination = Site(program="FTTH", name=f"PG transfer destination {suffix}")
+                self.source = Site(program="FTTH", name=f"PG transfer source {suffix}", site_inventory_enabled=True)
+                self.destination = Site(program="FTTH", name=f"PG transfer destination {suffix}", site_inventory_enabled=True)
                 self.product = Product(program="FTTH", sku=f"PG-TR-{suffix}", name="PG transfer cable", unit="M")
                 db.add_all([self.source, self.destination, self.product])
                 db.flush()
@@ -304,6 +304,33 @@ class SiteTransferPostgreSQLValidation(TestCase):
                     )
         self.assertEqual(over.exception.status_code, 409)
         self.assertEqual(self.balance(self.destination_id), Decimal("7.000000"))
+
+    def test_transfer_creation_requires_both_sites_to_be_active(self):
+        with self.Session() as db:
+            db.get(Site, self.source_id).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as inactive_source:
+            self.create_transfer(5)
+        self.assertEqual(inactive_source.exception.status_code, 409)
+        self.assertEqual(inactive_source.exception.detail, "Site Inventory is not active for this Site.")
+
+        with self.Session() as db:
+            db.get(Site, self.source_id).site_inventory_enabled = True
+            db.get(Site, self.destination_id).site_inventory_enabled = False
+            db.commit()
+        with self.assertRaises(HTTPException) as inactive_destination:
+            self.create_transfer(5)
+        self.assertEqual(inactive_destination.exception.status_code, 409)
+        self.assertEqual(inactive_destination.exception.detail, "Site Inventory is not active for this Site.")
+        with self.Session() as db:
+            self.assertEqual(db.query(SiteTransfer).filter(
+                SiteTransfer.from_site_id == self.source_id,
+                SiteTransfer.to_site_id == self.destination_id,
+            ).count(), 0)
+            self.assertEqual(db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.site_id.in_([self.source_id, self.destination_id]),
+                SiteMaterialMovement.document_type.like("site_transfer%"),
+            ).count(), 0)
 
     def test_insufficient_dispatch_is_atomic_and_cannot_be_retried_as_a_second_dispatch(self):
         first = self.create_transfer(75)
