@@ -13,6 +13,7 @@ import database
 from database import APP_ENV, TEST_DATABASE_URL, create_database_engine, test_database_identity
 from migrations.run_site_inventory_production import (
     MIGRATION_ORDER,
+    MIGRATION_SPECS,
     _version_table_security,
     execute_migrations,
     preflight_database,
@@ -108,7 +109,22 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             event.listen(cls.app_engine, "before_cursor_execute", reject_writes_outside_test_schema)
             cls.clean_preflight = preflight_database(cls.app_engine, cls.schema)
             cls.dry_run_results = execute_migrations(cls.app_engine, cls.schema, execute=False)
-            cls.migration_results = execute_migrations(cls.app_engine, cls.schema, execute=True)
+            cls.prior_migration_results = execute_migrations(
+                cls.app_engine, cls.schema, execute=True, migration_specs=MIGRATION_SPECS[:4],
+            )
+            with cls.app_engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{cls.schema}"."site_balances" '
+                    'ADD CONSTRAINT ck_site_balance_nonnegative CHECK (on_hand_qty >= 0)'
+                )
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{cls.schema}"."site_opening_balance_requests" '
+                    'ADD CONSTRAINT ck_site_opening_quantity_nonnegative CHECK (quantity >= 0)'
+                )
+            cls.before_negative_preflight = preflight_database(cls.app_engine, cls.schema)
+            cls.migration_results = cls.prior_migration_results + execute_migrations(
+                cls.app_engine, cls.schema, execute=True, migration_specs=MIGRATION_SPECS[4:],
+            )
             cls.complete_preflight = preflight_database(cls.app_engine, cls.schema)
             cls.repeat_results = execute_migrations(cls.app_engine, cls.schema, execute=True)
         except Exception:
@@ -153,6 +169,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
     def test_migrations_are_additive_versioned_and_rerunnable_in_target_schema(self):
         self.assertEqual(self.clean_preflight["state"], "clean")
         self.assertEqual(self.dry_run_results, [])
+        self.assertEqual(self.before_negative_preflight["state"], "prefix-4-of-5")
         self.assertEqual([result["version"] for result in self.migration_results], list(MIGRATION_ORDER))
         self.assertEqual(self.complete_preflight["state"], "complete")
         self.assertTrue(all(result["already_applied"] for result in self.repeat_results))
@@ -171,6 +188,12 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
         activation = site_columns["site_inventory_enabled"]
         self.assertFalse(activation["nullable"])
         self.assertIn("false", str(activation["default"]).lower())
+        for table, old_check in (
+            ("site_balances", "ck_site_balance_nonnegative"),
+            ("site_opening_balance_requests", "ck_site_opening_quantity_nonnegative"),
+        ):
+            checks = {row["name"] for row in inspector.get_check_constraints(table, schema=self.schema)}
+            self.assertNotIn(old_check, checks)
         with self.engine.connect() as connection:
             site_count_after = connection.execute(text(
                 f'SELECT count(*) FROM "{self.schema}"."sites"'
@@ -196,6 +219,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             "site-inventory-rollout-cutover-v1",
             "site-inventory-transfers-v1",
             "site-inventory-site-activation-v1",
+            "site-inventory-negative-opening-v1",
         }.issubset(versions))
         self.assertEqual(outside_after, self.tables_before)
 

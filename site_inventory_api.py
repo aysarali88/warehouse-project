@@ -38,7 +38,7 @@ class OpeningBalanceCreate(BaseModel):
     program: str = "FTTH"
     site_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
-    quantity: Decimal = Field(ge=0)
+    quantity: Decimal
     uom: str = Field(min_length=1, max_length=24)
     effective_date: str = Field(min_length=10, max_length=10)
     reference: str = Field(min_length=1, max_length=200)

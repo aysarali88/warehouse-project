@@ -179,6 +179,7 @@ class SiteInventoryPostgreSQLValidation(TestCase):
         with self.Session() as db:
             actions = db.query(AuditLog.action).filter(
                 AuditLog.entity_type == "site_inventory", AuditLog.entity_id == str(self.site_id),
+                AuditLog.action.in_({"site_inventory_site_activated", "site_inventory_site_deactivated"}),
             ).all()
         self.assertEqual({action for (action,) in actions}, {
             "site_inventory_site_activated", "site_inventory_site_deactivated",
@@ -468,6 +469,34 @@ class SiteInventoryPostgreSQLValidation(TestCase):
         self.assertIsNone(self._balance())
         with self.Session() as db:
             self.assertEqual(db.query(SiteMaterialMovement).filter_by(site_id=self.site_id).count(), 0)
+
+    def test_negative_initial_opening_and_recovery_are_atomic_on_postgres(self):
+        with self.Session() as db:
+            with db.begin():
+                request = inventory.create_opening_balance_request(
+                    db, program="FTTH", site_id=self.site_id, product_id=self.product_id,
+                    quantity="-5", uom="M", effective_date="2026-11-06",
+                    reference="NEGATIVE-LEGACY", note="Synthetic cutover deficit",
+                    entered_by="test-requester", request_token=f"negative-{uuid4().hex}",
+                )
+                request_id = request.id
+        with self.Session() as db:
+            with db.begin():
+                inventory.approve_opening_balance(db, request_id, "FTTH", "test-approver")
+        self.assertEqual(self._balance(), Decimal("-5.000000"))
+        with self.assertRaises(HTTPException) as debit:
+            self._post(amount="1", movement_type="outgoing", doc_id="NEGATIVE-OUT")
+        self.assertEqual(debit.exception.status_code, 409)
+        self.assertEqual(self._balance(), Decimal("-5.000000"))
+        self._post(amount="3", doc_id="NEGATIVE-IN-1")
+        self.assertEqual(self._balance(), Decimal("-2.000000"))
+        self._post(amount="20", doc_id="NEGATIVE-IN-2")
+        self.assertEqual(self._balance(), Decimal("18.000000"))
+        with self.Session() as db:
+            self.assertEqual(
+                inventory.reconciliation_rows(db, "FTTH", self.site_id, self.product_id)[0]["status"],
+                "MATCH",
+            )
 
     def test_rollback_after_ledger_balance_and_before_commit(self):
         with self.Session() as db:

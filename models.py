@@ -139,7 +139,6 @@ class SiteBalance(Base):
     __tablename__ = "site_balances"
     __table_args__ = (
         UniqueConstraint("program", "site_id", "product_id", name="uq_site_balance_program_site_product"),
-        CheckConstraint("on_hand_qty >= 0", name="ck_site_balance_nonnegative"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -205,7 +204,6 @@ class SiteOpeningBalanceRequest(Base):
     __tablename__ = "site_opening_balance_requests"
     __table_args__ = (
         UniqueConstraint("program", "request_token_hash", name="uq_site_opening_program_request_token"),
-        CheckConstraint("quantity >= 0", name="ck_site_opening_quantity_nonnegative"),
         Index(
             "uq_site_opening_pending_once",
             "program", "site_id", "product_id",

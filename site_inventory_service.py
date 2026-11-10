@@ -258,8 +258,6 @@ def post_site_movement(
         raise HTTPException(status_code=400, detail="Incoming movement quantity must be positive")
     if kind == "outgoing" and quantity >= 0:
         raise HTTPException(status_code=400, detail="Outgoing movement quantity must be negative")
-    if kind == "opening_balance" and quantity < 0:
-        raise HTTPException(status_code=400, detail="Opening balance cannot be negative")
     if kind != "opening_balance" and quantity == 0:
         raise HTTPException(status_code=400, detail="Movement quantity cannot be zero")
     if not reference_value or not note_value or not actor or not approver:
@@ -309,6 +307,12 @@ def post_site_movement(
         return existing
 
     balance = _ensure_balance_row(db, program_key, site_id, product_id)
+    if kind == "opening_balance" and quantity < 0:
+        has_history = db.query(SiteMaterialMovement.id).filter_by(
+            program=program_key, site_id=site_id, product_id=product_id
+        ).first()
+        if has_history or _decimal(balance.on_hand_qty) != 0:
+            raise HTTPException(status_code=409, detail="Negative opening balance requires an untouched site/product")
     scoped_hash = request_token_hash(program_key, request_token) if request_token else None
     idempotency_key = scoped_hash or event_key
     values = dict(
@@ -361,13 +365,11 @@ def post_site_movement(
         program=program_key, source_event_key=event_key
     ).one()
     _stage("after_movement")
+    update_statement = update(SiteBalance).where(SiteBalance.id == balance.id)
+    if quantity < 0 and kind != "opening_balance":
+        update_statement = update_statement.where(SiteBalance.on_hand_qty + quantity >= 0)
     changed = db.execute(
-        update(SiteBalance)
-        .where(
-            SiteBalance.id == balance.id,
-            SiteBalance.on_hand_qty + quantity >= 0,
-        )
-        .values(on_hand_qty=SiteBalance.on_hand_qty + quantity, updated_at=func.now())
+        update_statement.values(on_hand_qty=SiteBalance.on_hand_qty + quantity, updated_at=func.now())
     )
     if changed.rowcount != 1:
         raise HTTPException(status_code=409, detail="Site balance is insufficient; negative balances are blocked")
@@ -404,8 +406,6 @@ def create_opening_balance_request(
     _require_transaction(db)
     program_key = normalize_program(program)
     amount = _decimal(quantity)
-    if amount < 0:
-        raise HTTPException(status_code=400, detail="Opening balance cannot be negative")
     try:
         date.fromisoformat(str(effective_date))
     except (TypeError, ValueError) as exc:
@@ -415,6 +415,10 @@ def create_opening_balance_request(
         raise HTTPException(status_code=400, detail="Opening balance reference, note, and requester are required")
     _, product = _check_site_product(db, program_key, site_id, product_id)
     unit = _validate_uom(product, uom)
+    if amount < 0 and db.query(SiteMaterialMovement.id).filter_by(
+        program=program_key, site_id=site_id, product_id=product_id
+    ).first():
+        raise HTTPException(status_code=409, detail="Negative opening balance requires an untouched site/product")
     scoped_hash = request_token_hash(program_key, request_token)
     legacy_hash = legacy_request_token_hash(request_token)
     previous = db.query(SiteOpeningBalanceRequest).filter(
@@ -930,8 +934,6 @@ def _projection_snapshot(db, program: str):
         for row in db.query(SiteBalance).filter_by(program=program).all()
     }
     keys = sorted(set(ledger) | set(balances))
-    if any(ledger.get(key, Decimal("0")) < 0 for key in keys):
-        raise HTTPException(status_code=409, detail="Ledger totals contain negative inventory; projection rebuild was not applied")
     rows = [{
         "site_id": key[0],
         "product_id": key[1],
