@@ -118,6 +118,7 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
                     ),
                     has_rollout_cutover_column=count >= 2,
                     has_site_activation_column=count >= 4,
+                    negative_opening_check_state="relaxed" if count >= 5 else "legacy",
                 )
                 expected = "complete" if count == len(MIGRATION_ORDER) else f"prefix-{count}-of-{len(MIGRATION_ORDER)}"
                 self.assertEqual(state, expected)
@@ -155,6 +156,27 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
         for kwargs in invalid_states:
             with self.subTest(kwargs=kwargs), self.assertRaises(MigrationPreflightError):
                 validate_migration_state(**kwargs)
+
+    def test_negative_opening_constraint_state_must_match_version(self):
+        common = dict(
+            version_table_exists=True,
+            version_columns={"version", "applied_at"},
+            version_primary_key={"version"},
+            existing_managed_tables=set(FOUNDATION_TABLE_SET | TRANSFER_TABLE_SET),
+            has_rollout_cutover_column=True,
+            has_site_activation_column=True,
+        )
+        for versions, state in (
+            (MIGRATION_ORDER[:4], "partial"),
+            (MIGRATION_ORDER, "legacy"),
+            (MIGRATION_ORDER, "partial"),
+        ):
+            with self.subTest(versions=versions, state=state):
+                with self.assertRaises(MigrationPreflightError):
+                    validate_migration_state(
+                        **common, recorded_versions=list(versions),
+                        negative_opening_check_state=state,
+                    )
 
     def test_dry_run_never_calls_migration_functions(self):
         calls = []

@@ -184,6 +184,7 @@ class SiteTransferTests(unittest.TestCase):
         self.assertEqual(after_dispatch["status"], "in_transit")
         self.assertEqual(after_dispatch["items"][0]["in_transit_qty"], "30.000000")
         self.assertEqual(self._balance(self.source_id), Decimal("20.000000"))
+
         self.assertEqual(self._balance(self.destination_id), Decimal("0"))
 
         with SessionLocal() as db:
@@ -229,6 +230,76 @@ class SiteTransferTests(unittest.TestCase):
         self.assertEqual(self._view(transfer_id)["items"][0]["in_transit_qty"], "0.000000")
         self.assertEqual(self._balance(self.destination_id), Decimal("30.000000"))
         self.assertEqual(self._balance(self.source_id), Decimal("20.000000"))
+
+    def test_legacy_negative_opening_never_allows_outbound_overspend_and_receipt_recovers_it(self):
+        def open_product(source_qty, destination_qty):
+            suffix = uuid4().hex[:12]
+            with SessionLocal() as db:
+                with db.begin():
+                    product = Product(program="FTTH", sku=f"NEG-TR-{suffix}", name="Legacy transfer material", unit="M")
+                    db.add(product)
+                    db.flush()
+                    for site_id, quantity in ((self.source_id, source_qty), (self.destination_id, destination_qty)):
+                        request = create_opening_balance_request(
+                            db, program="FTTH", site_id=site_id, product_id=product.id,
+                            quantity=quantity, uom="M", effective_date="2026-11-07",
+                            reference=f"NEG-OPEN-{site_id}-{suffix}", note="Synthetic legacy cutover",
+                            entered_by="opening-user", request_token=f"negative-opening-{site_id}-{suffix}",
+                        )
+                        approve_opening_balance(db, request.id, "FTTH", "test-admin")
+                    return product.id
+
+        def balance(site_id, product_id):
+            with SessionLocal() as db:
+                return db.query(SiteBalance).filter_by(
+                    program="FTTH", site_id=site_id, product_id=product_id,
+                ).one().on_hand_qty
+
+        ten_product = open_product(10, -5)
+        oversized = self._create(quantity=20, product_id=ten_product)
+        with SessionLocal() as db:
+            with db.begin():
+                transfers.approve_transfer(db, oversized, "FTTH", "test-admin")
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as insufficient:
+                with db.begin():
+                    transfers.dispatch_transfer(db, oversized, "FTTH", "test-admin", f"dispatch-{uuid4().hex}")
+        self.assertEqual(insufficient.exception.status_code, 409)
+        self.assertEqual(balance(self.source_id, ten_product), 10)
+        self.assertEqual(balance(self.destination_id, ten_product), -5)
+        self.assertEqual(self._view(oversized)["status"], "approved")
+
+        exact = self._create(quantity=10, product_id=ten_product)
+        self._approve_dispatch(exact)
+        self.assertEqual(balance(self.source_id, ten_product), 0)
+
+        negative_source_product = open_product(-5, 0)
+        blocked = self._create(quantity=1, product_id=negative_source_product)
+        with SessionLocal() as db:
+            with db.begin():
+                transfers.approve_transfer(db, blocked, "FTTH", "test-admin")
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as negative_source:
+                with db.begin():
+                    transfers.dispatch_transfer(db, blocked, "FTTH", "test-admin", f"dispatch-{uuid4().hex}")
+        self.assertEqual(negative_source.exception.status_code, 409)
+        self.assertEqual(balance(self.source_id, negative_source_product), -5)
+
+        recovery_product = open_product(20, -5)
+        recovery = self._create(quantity=20, product_id=recovery_product)
+        self._approve_dispatch(recovery)
+        item_id = self._view(recovery)["items"][0]["id"]
+        with SessionLocal() as db:
+            with db.begin():
+                transfers.receive_transfer(
+                    db, recovery, "FTTH", "test-admin",
+                    items=[{"transfer_item_id": item_id, "quantity": 20, "uom": "M"}],
+                    reference="LEGACY-RECOVERY", notes="Synthetic negative-balance recovery",
+                    request_token=f"receipt-{uuid4().hex}",
+                )
+        self.assertEqual(balance(self.source_id, recovery_product), 0)
+        self.assertEqual(balance(self.destination_id, recovery_product), 15)
+        self.assertEqual(self._view(recovery)["status"], "received")
 
     def test_over_receipt_is_rejected_and_receipt_uom_is_exact(self):
         transfer_id = self._create(quantity=10)

@@ -396,6 +396,33 @@ class SiteInventoryFoundationTests(unittest.TestCase):
         self.assertEqual(error.exception.status_code, 409)
         self.assertIsNone(self._balance())
 
+    def test_negative_initial_opening_can_be_recovered_but_not_worsened(self):
+        request_id = self._opening(quantity="-5")
+        with SessionLocal() as db:
+            with db.begin():
+                inventory.approve_opening_balance(db, request_id, self.program, "Approver")
+        self.assertEqual(self._balance(), Decimal("-5"))
+
+        with self.assertRaises(HTTPException) as outgoing:
+            self._post(quantity="1", movement_type="outgoing")
+        self.assertEqual(outgoing.exception.status_code, 409)
+        self.assertEqual(self._balance(), Decimal("-5"))
+
+        self._post(quantity="3", event_id="NEGATIVE-RECOVERY-1")
+        self.assertEqual(self._balance(), Decimal("-2"))
+        self._post(quantity="20", event_id="NEGATIVE-RECOVERY-2")
+        self.assertEqual(self._balance(), Decimal("18"))
+        with SessionLocal() as db:
+            rows = inventory.reconciliation_rows(db, self.program, self.site_id, self.product_id)
+            self.assertEqual(rows[0]["status"], "MATCH")
+
+    def test_negative_opening_is_rejected_after_prior_site_history(self):
+        self._post(quantity="2", event_id="PRIOR-HISTORY")
+        with self.assertRaises(HTTPException) as opening:
+            self._opening(quantity="-1")
+        self.assertEqual(opening.exception.status_code, 409)
+        self.assertEqual(self._balance(), Decimal("2"))
+
     def test_failure_rolls_back_movement_balance_and_audit(self):
         with SessionLocal() as db:
             before = db.query(AuditLog).filter_by(entity_type="site_inventory").count()

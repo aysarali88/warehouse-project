@@ -21,17 +21,20 @@ from migrations.site_inventory_rollout_cutover import VERSION as ROLLOUT_VERSION
 from migrations.site_inventory_transfers import TRANSFER_TABLES, VERSION as TRANSFERS_VERSION, migrate as migrate_transfers
 from migrations.site_inventory_site_activation import COLUMN as SITE_ACTIVATION_COLUMN
 from migrations.site_inventory_site_activation import VERSION as SITE_ACTIVATION_VERSION, migrate as migrate_site_activation
+from migrations.site_inventory_negative_opening import LEGACY_CHECKS
+from migrations.site_inventory_negative_opening import VERSION as NEGATIVE_OPENING_VERSION, _legacy_checks, migrate as migrate_negative_opening
 from migrations.site_inventory_migration_utils import qualified, validate_model_table
 
 
 PRODUCTION_PROJECT_REF = "ndhccmrxpujpqhyewoac"
 WAREHOUSE_TEST_PROJECT_REF = "kdzhcizesmjseadwegvd"
-MIGRATION_ORDER = (FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION, SITE_ACTIVATION_VERSION)
+MIGRATION_ORDER = (FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION, SITE_ACTIVATION_VERSION, NEGATIVE_OPENING_VERSION)
 MIGRATION_SPECS = (
     (FOUNDATION_VERSION, migrate_foundation),
     (ROLLOUT_VERSION, migrate_rollout_cutover),
     (TRANSFERS_VERSION, migrate_transfers),
     (SITE_ACTIVATION_VERSION, migrate_site_activation),
+    (NEGATIVE_OPENING_VERSION, migrate_negative_opening),
 )
 FOUNDATION_TABLE_SET = frozenset(FOUNDATION_TABLES)
 TRANSFER_TABLE_SET = frozenset(TRANSFER_TABLES)
@@ -141,6 +144,7 @@ def validate_migration_state(
     existing_managed_tables: set[str],
     has_rollout_cutover_column: bool,
     has_site_activation_column: bool,
+    negative_opening_check_state: str = "legacy",
 ) -> str:
     if not version_table_exists:
         if recorded_versions or existing_managed_tables or has_rollout_cutover_column or has_site_activation_column:
@@ -169,6 +173,10 @@ def validate_migration_state(
         raise MigrationPreflightError("Rollout cutover version does not match its column state")
     if has_site_activation_column != (applied_count >= 4):
         raise MigrationPreflightError("Site activation version does not match its column state")
+    if negative_opening_check_state == "partial":
+        raise MigrationPreflightError("Partial negative-opening constraint state detected")
+    if applied_count >= 5 and negative_opening_check_state != "relaxed":
+        raise MigrationPreflightError("Negative-opening version does not match its constraint state")
     return "complete" if applied_count == len(MIGRATION_ORDER) else f"prefix-{applied_count}-of-{len(MIGRATION_ORDER)}"
 
 
@@ -283,6 +291,8 @@ def preflight_database(engine, schema: str) -> dict:
             site_columns = {
                 column["name"] for column in inspector.get_columns("sites", schema=schema)
             }
+            legacy_checks = _legacy_checks(connection, schema) if version_table_exists else set()
+            expected_legacy_checks = {name for name, _ in LEGACY_CHECKS.values()}
             state = validate_migration_state(
                 version_table_exists=version_table_exists,
                 version_columns=version_columns,
@@ -291,6 +301,10 @@ def preflight_database(engine, schema: str) -> dict:
                 existing_managed_tables=existing_managed,
                 has_rollout_cutover_column=ROLLOUT_CUTOFF_COLUMN in rollout_columns,
                 has_site_activation_column=SITE_ACTIVATION_COLUMN in site_columns,
+                negative_opening_check_state=(
+                    "legacy" if not version_table_exists or legacy_checks == expected_legacy_checks
+                    else "relaxed" if not legacy_checks else "partial"
+                ),
             )
             if version_table_exists and recorded_versions:
                 from migrations.site_inventory_rollout_cutover import _validate_existing_column
@@ -403,7 +417,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     parser.add_argument("--schema", required=True, help="Explicit Production schema; expected value is public")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Perform read-only preflight only (the default)")
-    mode.add_argument("--execute", action="store_true", help="Apply the three migrations in their fixed order")
+    mode.add_argument("--execute", action="store_true", help="Apply the versioned migrations in their fixed order")
     args = parser.parse_args(argv)
     env = os.environ if environ is None else environ
 

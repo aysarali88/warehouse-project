@@ -355,6 +355,60 @@ class SiteTransferPostgreSQLValidation(TestCase):
         with self.Session() as db:
             self.assertEqual(db.query(SiteTransferDispatch).filter_by(transfer_id=poor).count(), 0)
 
+    def test_negative_legacy_balance_blocks_outbound_and_inbound_transfer_recovers(self):
+        suffix = uuid4().hex[:12]
+        with self.Session() as db:
+            with db.begin():
+                opening = inventory.create_opening_balance_request(
+                    db,
+                    program="FTTH",
+                    site_id=self.destination_id,
+                    product_id=self.product_id,
+                    quantity=-5,
+                    uom="M",
+                    effective_date="2026-11-10",
+                    reference=f"PG-NEG-OPEN-{suffix}",
+                    note="Synthetic negative cutover balance",
+                    entered_by="test-opening-user",
+                    request_token=f"pg-negative-opening-{suffix}-token",
+                )
+                inventory.approve_opening_balance(db, opening.id, "FTTH", "test-admin")
+        self.assertEqual(self.balance(self.destination_id), Decimal("-5.000000"))
+
+        outbound = self.create_transfer(
+            1, from_site_id=self.destination_id, to_site_id=self.source_id
+        )
+        with self.Session() as db:
+            with db.begin():
+                transfers.approve_transfer(db, outbound, "FTTH", "test-admin")
+        with self.Session() as db:
+            with self.assertRaises(HTTPException) as insufficient:
+                with db.begin():
+                    transfers.dispatch_transfer(
+                        db, outbound, "FTTH", "test-admin", f"pg-negative-out-{suffix}-token"
+                    )
+        self.assertEqual(insufficient.exception.status_code, 409)
+        self.assertEqual(self.balance(self.destination_id), Decimal("-5.000000"))
+        self.assertEqual(self.transfer_view(outbound)["status"], "approved")
+
+        inbound = self.create_transfer(20, request_token=f"pg-negative-in-{suffix}-request")
+        self.approve_and_dispatch(inbound, f"pg-negative-in-{suffix}-dispatch")
+        inbound_item_id = self.transfer_view(inbound)["items"][0]["id"]
+        self.assertEqual(self.balance(self.destination_id), Decimal("-5.000000"))
+        with self.Session() as db:
+            with db.begin():
+                transfers.receive_transfer(
+                    db,
+                    inbound,
+                    "FTTH",
+                    "test-admin",
+                    items=[{"transfer_item_id": inbound_item_id, "quantity": 20, "uom": "M"}],
+                    reference=f"PG-NEG-RECEIPT-{suffix}",
+                    notes="Recover negative legacy balance",
+                    request_token=f"pg-negative-receipt-{suffix}-token",
+                )
+        self.assertEqual(self.balance(self.destination_id), Decimal("15.000000"))
+
     def test_concurrent_transfers_cannot_overspend_source_balance(self):
         first = self.create_transfer(60)
         second = self.create_transfer(60)

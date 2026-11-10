@@ -18,6 +18,7 @@ PREVIOUS_VERSIONS = (
     "site-inventory-rollout-cutover-v1",
     "site-inventory-transfers-v1",
 )
+LATER_VERSIONS = ("site-inventory-negative-opening-v1",)
 
 
 def _column_definition(connection, schema: str | None) -> dict | None:
@@ -56,6 +57,7 @@ def _check_prior_versions(connection, schema: str | None, *, activation_applied:
     expected = set(PREVIOUS_VERSIONS)
     if activation_applied:
         expected.add(VERSION)
+        expected.update(LATER_VERSIONS)
     if recorded != expected:
         raise RuntimeError("Site activation migration requires the complete expected prior migration state")
 
