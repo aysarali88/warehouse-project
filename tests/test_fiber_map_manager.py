@@ -846,6 +846,89 @@ class FiberMapManagerTests(unittest.TestCase):
             for row in updated["active"]
         ))
 
+    def test_al_dhel_missing_lines_are_derived_from_current_hub_topology(self):
+        boxes = []
+        for xbox, hub, lines in (
+            ("X1", "H2", (1, 3)),
+            ("X2", "H5", (1, 2, 3, 4)),
+            ("X99", "H77", (1,)),
+        ):
+            for line in lines:
+                boxes.append({
+                    "Area": "Al-Dhel Street",
+                    "Zone": "Al-Dhel Street",
+                    "City": "Tripoli",
+                    "Related to XBOX": xbox,
+                    "XBOX": f"X-BOX{xbox[1:]}",
+                    "Part": f"{xbox}-Part01",
+                    "Hub": hub,
+                    "Line": line,
+                    "Splitter": 1,
+                    "Box code": f"{hub}-L{line}-S1",
+                    "Box type": "SUB BOX",
+                    "Real length m": "",
+                    "Cable length m": 50,
+                    "Material type": "Single-Core Distribution Cable_50m",
+                    "dB": "",
+                })
+        self.db.add(main.FiberMapArea(
+            program="FTTH",
+            area="Al-Dhel Street",
+            city="Tripoli",
+            start_date="",
+            end_date="",
+            target_users=0,
+            design_data=json.dumps({"boxes": boxes, "routes": []}),
+            created_by="test",
+        ))
+        self.db.commit()
+
+        area = next(
+            row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"]
+            if row["name"] == "Al-Dhel Street"
+        )
+        candidates = {
+            (row["xbox"], row["hub"], row["line"]): row
+            for row in area["line_candidates"]
+        }
+        self.assertEqual(set(candidates), {
+            ("X1", "H2", "L2"),
+            ("X1", "H2", "L4"),
+            ("X99", "H77", "L2"),
+            ("X99", "H77", "L3"),
+            ("X99", "H77", "L4"),
+        })
+        self.assertFalse(any(row["xbox"] == "X1" and row["hub"] == "H1" for row in area["line_candidates"]))
+        self.assertTrue(main.fiber_map_manager_can_add_empty_line("Al-Dhel Street", "X1", "H2", "L2"))
+
+        with self.assertRaises(HTTPException) as unlisted:
+            main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+                area=area["name"], xbox="X5", hub="H1", line="L4", expected_revision=area["revision"],
+            ), self.request, self.db)
+        self.assertEqual(unlisted.exception.status_code, 400)
+
+        saved_box_count = len(boxes)
+        result = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+            area=area["name"], xbox="X1", hub="H2", line="L2", expected_revision=area["revision"],
+        ), self.request, self.db)
+        self.assertTrue(result["changed"])
+        saved_area = self.db.query(main.FiberMapArea).filter_by(area="Al-Dhel Street").one()
+        self.assertEqual(len(json.loads(saved_area.design_data)["boxes"]), saved_box_count)
+
+        updated = next(
+            row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"]
+            if row["name"] == "Al-Dhel Street"
+        )
+        enabled = next(
+            row for row in updated["line_candidates"]
+            if row["xbox"] == "X1" and row["hub"] == "H2" and row["line"] == "L2"
+        )
+        self.assertTrue(enabled["enabled"])
+        self.assertFalse(any(
+            main.rollout_code_key(row["code"]).startswith("H2L2") and row["xbox"] == "X1"
+            for row in updated["active"]
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()
