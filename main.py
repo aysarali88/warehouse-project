@@ -5296,7 +5296,9 @@ def issue_material_requisition_row(db: Session, row: MaterialRequisition, actor:
         site, prepared_items = prepare_material_requisition_issue(
             db, program_key, row.site_id, items
         )
-    elif items:
+        if site is None:
+            site_inventory_enabled = False
+    if items and not site_inventory_enabled:
         prepared_items = []
         for item in items:
             product = db.query(Product).filter(
