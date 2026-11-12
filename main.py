@@ -3918,10 +3918,14 @@ FIBER_MAP_MANAGER_LINE_CANDIDATES = {
 }
 
 
-def fiber_map_manager_mansoura_topology(reference: dict) -> dict[str, dict[str, set[str]]]:
+FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS = {"mansoura", "aldhelstreet"}
+
+
+def fiber_map_manager_area_topology(reference: dict, area: str) -> dict[str, dict[str, set[str]]]:
+    area_key = fiber_map_manager_area_key(area)
     topology: dict[str, dict[str, set[str]]] = {}
     for row in reference.get("boxes") or []:
-        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) != "mansoura":
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) != area_key:
             continue
         xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default=""))
         hub_match = re.fullmatch(r"H(\d+)", rollout_code_key(first_value(row, "Hub", "hub", default="")))
@@ -3934,7 +3938,7 @@ def fiber_map_manager_mansoura_topology(reference: dict) -> dict[str, dict[str, 
 
 
 def fiber_map_manager_can_add_empty_line(area: str, xbox: str, hub: str, line: str) -> bool:
-    if fiber_map_manager_area_key(area) == "mansoura":
+    if fiber_map_manager_area_key(area) in FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS:
         return (
             re.fullmatch(r"X\d+", rollout_xbox_key(xbox)) is not None
             and re.fullmatch(r"H\d+", rollout_code_key(hub)) is not None
@@ -4071,37 +4075,41 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
         if cable_length > 0 and float(cable_length).is_integer():
             cable_lengths.add(int(cable_length))
 
-    mansoura_topology = (
-        fiber_map_manager_mansoura_topology(reference)
+    dynamic_topologies = (
+        {
+            area_key: fiber_map_manager_area_topology(reference, area_key)
+            for area_key in FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS
+        }
         if normalize_program(program) == DEFAULT_PROGRAM
         else {}
     )
     if normalize_program(program) == DEFAULT_PROGRAM:
-        topology_by_area["mansoura"] = {
-            xbox: {hub: set(lines) for hub, lines in hubs.items()}
-            for xbox, hubs in mansoura_topology.items()
-        }
+        for area_key, topology in dynamic_topologies.items():
+            topology_by_area[area_key] = {
+                xbox: {hub: set(lines) for hub, lines in hubs.items()}
+                for xbox, hubs in topology.items()
+            }
     line_candidates_by_area: dict[str, list[dict]] = {}
     candidate_config = FIBER_MAP_MANAGER_LINE_CANDIDATES if normalize_program(program) == DEFAULT_PROGRAM else {}
     if candidate_config:
-        candidate_config = {key: value for key, value in candidate_config.items() if key != "mansoura"}
-        supported_lines = {f"L{number}" for number in range(1, 5)}
-        candidate_config["mansoura"] = {
-            xbox: {
-                hub: supported_lines - existing_lines
-                for hub, existing_lines in hubs.items()
-                if supported_lines - existing_lines
-            }
-            for xbox, hubs in mansoura_topology.items()
+        candidate_config = {
+            key: value for key, value in candidate_config.items()
+            if key not in FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS
         }
+        supported_lines = {f"L{number}" for number in range(1, 5)}
+        for area_key, topology in dynamic_topologies.items():
+            candidate_config[area_key] = {
+                xbox: {
+                    hub: supported_lines - existing_lines
+                    for hub, existing_lines in hubs.items()
+                    if supported_lines - existing_lines
+                }
+                for xbox, hubs in topology.items()
+            }
     for area_key, xboxes in candidate_config.items():
         for xbox, hubs in xboxes.items():
             for hub, lines in hubs.items():
-                existing_lines = (
-                    mansoura_topology.get(xbox, {}).get(hub, set())
-                    if area_key == "mansoura"
-                    else topology_by_area.get(area_key, {}).get(xbox, {}).get(hub, set())
-                )
+                existing_lines = topology_by_area.get(area_key, {}).get(xbox, {}).get(hub, set())
                 for line in sorted(lines, key=lambda value: int(value[1:])):
                     if line in existing_lines:
                         continue
