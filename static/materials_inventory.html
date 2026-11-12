@@ -1647,10 +1647,10 @@ body.sr-program .login-logo img{
           <form class="site-transfer-form" id="siteTransferCreateForm">
             <div class="field"><label for="siteTransferFromSite">From Site</label><select id="siteTransferFromSite" required><option value="">Select source site</option></select></div>
             <div class="field"><label for="siteTransferToSite">To Site</label><select id="siteTransferToSite" required><option value="">Select destination site</option></select></div>
-            <div class="field"><label for="siteTransferProduct">Material / Product</label><select id="siteTransferProduct" required><option value="">Select material</option></select></div>
-            <div class="field"><label for="siteTransferUom">UOM</label><input id="siteTransferUom" type="text" readonly aria-readonly="true"></div>
-            <div class="field"><label for="siteTransferAvailable">Available Qty at From Site</label><input id="siteTransferAvailable" type="text" readonly aria-readonly="true" value="0"><small class="site-transfer-hint" id="siteTransferAvailabilityHint">Select a source site and material.</small></div>
-            <div class="field"><label for="siteTransferQuantity">Transfer Qty</label><input id="siteTransferQuantity" name="quantity" type="number" min="0.000001" step="0.000001" inputmode="decimal" required></div>
+            <div class="site-transfer-lines-wrap">
+              <div class="site-transfer-lines-head"><strong>Materials</strong><button class="btn soft" id="siteTransferAddLine" type="button" data-site-transfer-command="add-line">Add material</button></div>
+              <div id="siteTransferLines" class="site-transfer-lines"></div>
+            </div>
             <div class="field"><label for="siteTransferReference">Reference</label><input id="siteTransferReference" name="reference" type="text" maxlength="200"></div>
             <div class="field"><label for="siteTransferNotes">Notes</label><input id="siteTransferNotes" name="notes" type="text" maxlength="4000"></div>
             <div class="site-transfer-form-actions"><button class="btn primary" id="siteTransferCreateButton" type="submit" disabled>Submit Transfer</button></div>
