@@ -712,8 +712,6 @@ class FiberMapManagerTests(unittest.TestCase):
 
     def test_confirmed_line_candidates_are_exact_and_activation_creates_no_box_rows(self):
         expected = {
-            ("mansoura", "X1", "H12", "L4"),
-            ("mansoura", "X1", "H13", "L4"),
             ("rasammar", "X1", "H13", "L4"),
             ("hayalandaluszone1", "X1", "H1", "L4"),
             ("hayalandaluszone1", "X3", "H4", "L3"),
@@ -771,6 +769,82 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertTrue(disabled["changed"])
         updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
         self.assertFalse(next(row for row in updated["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H1" and row["line"] == "L4")["enabled"])
+
+    def test_mansoura_missing_lines_are_derived_from_current_hub_topology(self):
+        boxes = []
+        for xbox, hub, lines in (
+            ("X1", "H12", (1, 3)),
+            ("X1", "H13", (2,)),
+            ("X2", "H5", (1, 2, 3, 4)),
+        ):
+            for line in lines:
+                boxes.append({
+                    "Area": "Mansoura",
+                    "Zone": "Mansoura",
+                    "City": "Misurata",
+                    "Related to XBOX": xbox,
+                    "XBOX": f"X-BOX{xbox[1:]}",
+                    "Part": f"{xbox}-Part01",
+                    "Hub": hub,
+                    "Line": line,
+                    "Splitter": 1,
+                    "Box code": f"{hub}-L{line}-S1",
+                    "Box type": "SUB BOX",
+                    "Real length m": "",
+                    "Cable length m": 50,
+                    "Material type": "Single-Core Distribution Cable_50m",
+                    "dB": "",
+                })
+        self.db.add(main.FiberMapArea(
+            program="FTTH",
+            area="Mansoura",
+            city="Misurata",
+            start_date="",
+            end_date="",
+            target_users=0,
+            design_data=json.dumps({"boxes": boxes, "routes": []}),
+            created_by="test",
+        ))
+        self.db.commit()
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Mansoura")
+        candidates = {
+            (row["xbox"], row["hub"], row["line"]): row
+            for row in area["line_candidates"]
+        }
+        self.assertEqual(set(candidates), {
+            ("X1", "H12", "L2"),
+            ("X1", "H12", "L4"),
+            ("X1", "H13", "L1"),
+            ("X1", "H13", "L3"),
+            ("X1", "H13", "L4"),
+        })
+        self.assertNotIn(("X1", "H12", "L1"), candidates)
+        self.assertNotIn(("X1", "H13", "L2"), candidates)
+        self.assertFalse(any(row["hub"] == "H99" for row in area["line_candidates"]))
+        self.assertTrue(main.fiber_map_manager_can_add_empty_line("Mansoura", "X1", "H12", "L4"))
+        with self.assertRaises(HTTPException) as unlisted:
+            main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+                area=area["name"], xbox="X9", hub="H99", line="L4", expected_revision=area["revision"],
+            ), self.request, self.db)
+        self.assertEqual(unlisted.exception.status_code, 400)
+
+        saved_area_count = self.db.query(main.FiberMapArea).count()
+        result = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+            area=area["name"], xbox="X1", hub="H12", line="L4", expected_revision=area["revision"],
+        ), self.request, self.db)
+        self.assertTrue(result["changed"])
+        self.assertEqual(self.db.query(main.FiberMapArea).count(), saved_area_count)
+
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Mansoura")
+        self.assertTrue(next(
+            row for row in updated["line_candidates"]
+            if row["xbox"] == "X1" and row["hub"] == "H12" and row["line"] == "L4"
+        )["enabled"])
+        self.assertFalse(any(
+            main.rollout_code_key(row["code"]).startswith("H12L4") and row["xbox"] == "X1"
+            for row in updated["active"]
+        ))
 
 
 if __name__ == "__main__":

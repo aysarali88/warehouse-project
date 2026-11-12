@@ -3899,9 +3899,6 @@ def fiber_map_manager_splitter_limit(area: str) -> int:
 
 
 FIBER_MAP_MANAGER_LINE_CANDIDATES = {
-    "mansoura": {
-        "X1": {"H12": {"L4"}, "H13": {"L4"}},
-    },
     "rasammar": {
         "X1": {"H13": {"L4"}},
     },
@@ -3921,7 +3918,28 @@ FIBER_MAP_MANAGER_LINE_CANDIDATES = {
 }
 
 
+def fiber_map_manager_mansoura_topology(reference: dict) -> dict[str, dict[str, set[str]]]:
+    topology: dict[str, dict[str, set[str]]] = {}
+    for row in reference.get("boxes") or []:
+        if fiber_map_manager_area_key(first_value(row, "Area", "Zone", default="")) != "mansoura":
+            continue
+        xbox = rollout_xbox_key(first_value(row, "Related to XBOX", "XBOX", default=""))
+        hub_match = re.fullmatch(r"H(\d+)", rollout_code_key(first_value(row, "Hub", "hub", default="")))
+        line = fiber_map_manager_line_key(first_value(row, "Line", "line", default=""))
+        if not xbox or not hub_match or not line:
+            continue
+        topology.setdefault(xbox, {}).setdefault(f"H{int(hub_match.group(1))}", set()).add(line)
+
+    return topology
+
+
 def fiber_map_manager_can_add_empty_line(area: str, xbox: str, hub: str, line: str) -> bool:
+    if fiber_map_manager_area_key(area) == "mansoura":
+        return (
+            re.fullmatch(r"X\d+", rollout_xbox_key(xbox)) is not None
+            and re.fullmatch(r"H\d+", rollout_code_key(hub)) is not None
+            and line in {f"L{number}" for number in range(1, 5)}
+        )
     return line in (
         FIBER_MAP_MANAGER_LINE_CANDIDATES
         .get(fiber_map_manager_area_key(area), {})
@@ -4053,12 +4071,37 @@ def fiber_map_manager_options(db: Session, program: str) -> dict:
         if cable_length > 0 and float(cable_length).is_integer():
             cable_lengths.add(int(cable_length))
 
+    mansoura_topology = (
+        fiber_map_manager_mansoura_topology(reference)
+        if normalize_program(program) == DEFAULT_PROGRAM
+        else {}
+    )
+    if normalize_program(program) == DEFAULT_PROGRAM:
+        topology_by_area["mansoura"] = {
+            xbox: {hub: set(lines) for hub, lines in hubs.items()}
+            for xbox, hubs in mansoura_topology.items()
+        }
     line_candidates_by_area: dict[str, list[dict]] = {}
     candidate_config = FIBER_MAP_MANAGER_LINE_CANDIDATES if normalize_program(program) == DEFAULT_PROGRAM else {}
+    if candidate_config:
+        candidate_config = {key: value for key, value in candidate_config.items() if key != "mansoura"}
+        supported_lines = {f"L{number}" for number in range(1, 5)}
+        candidate_config["mansoura"] = {
+            xbox: {
+                hub: supported_lines - existing_lines
+                for hub, existing_lines in hubs.items()
+                if supported_lines - existing_lines
+            }
+            for xbox, hubs in mansoura_topology.items()
+        }
     for area_key, xboxes in candidate_config.items():
         for xbox, hubs in xboxes.items():
             for hub, lines in hubs.items():
-                existing_lines = topology_by_area.get(area_key, {}).get(xbox, {}).get(hub, set())
+                existing_lines = (
+                    mansoura_topology.get(xbox, {}).get(hub, set())
+                    if area_key == "mansoura"
+                    else topology_by_area.get(area_key, {}).get(xbox, {}).get(hub, set())
+                )
                 for line in sorted(lines, key=lambda value: int(value[1:])):
                     if line in existing_lines:
                         continue
@@ -4338,7 +4381,11 @@ def fiber_map_manager_toggle_line(data: FiberMapLineToggleIn, request: Request, 
     hub_match = re.fullmatch(r"H(\d+)", rollout_code_key(data.hub))
     line = fiber_map_manager_line_key(data.line)
     hub = f"H{int(hub_match.group(1))}" if hub_match else ""
-    if not hub or not fiber_map_manager_can_add_empty_line(area_name, xbox, hub, line):
+    approved_candidate = any(
+        row["xbox"] == xbox and row["hub"] == hub and row["line"] == line
+        for row in area_option["line_candidates"]
+    )
+    if not hub or not approved_candidate or not fiber_map_manager_can_add_empty_line(area_name, xbox, hub, line):
         raise HTTPException(status_code=400, detail="This line is not an approved activation candidate")
 
     already_has_boxes = any(
