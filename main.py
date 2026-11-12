@@ -2612,8 +2612,11 @@ def rollout_norm(value) -> str:
 
 def canonical_site_area_name(value: str) -> str:
     text_value = str(value or "").strip()
-    if rollout_norm(text_value) in {"awladaboshaalah", "awladabushala"}:
+    key = rollout_norm(text_value)
+    if key in {"awladaboshaalah", "awladabushala"}:
         return "Awlad Abushala"
+    if key in {"mansoura", "almansoura"}:
+        return "Al-Mansoura"
     return text_value
 
 
@@ -2621,6 +2624,8 @@ def rollout_area_key(value) -> str:
     key = rollout_norm(value)
     if key in {"awladaboshaalah", "awladabushala"}:
         return "awladabushala"
+    if key in {"mansoura", "almansoura"}:
+        return "almansoura"
     if key in {"hayalandalusz1", "hayandalusz1", "hayalandaluszone1", "hayandaluszone1"}:
         return "hayalandaluszone1"
     return "hayalandaluszone2" if key in {"hayalandalus", "hayandaluszone2", "hayalandaluszone2"} else key
@@ -2629,6 +2634,8 @@ def rollout_area_key(value) -> str:
 def rollout_area_label(value) -> str:
     if rollout_area_key(value) == "awladabushala":
         return "Awlad Abushala"
+    if rollout_area_key(value) == "almansoura":
+        return "Al-Mansoura"
     if rollout_area_key(value) == "hayalandaluszone1":
         return "Hay Al Andalus Z1"
     return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
@@ -5669,6 +5676,8 @@ def canonical_area_name(value: str) -> str:
         return "Hay Demascus"
     if key in {"maqawba", "magawba"}:
         return "Maqawba"
+    if key in {"mansoura", "almansoura"}:
+        return "Al-Mansoura"
     if key in {"hayalandalusz3", "hayalandaluszone3"}:
         return "Hay Al Andalus Z3"
     if key in {"hayandalus", "hayalandalus", "hayalandalusz2", "hayalandaluszone2"}:
@@ -5680,6 +5689,19 @@ def canonical_rollout_usage_area(value: str) -> str:
     if normalize_usage_key(value) in {"berawtaleem", "albera"}:
         return "Bera W Taleem"
     return canonical_area_name(value)
+
+
+def rollout_usage_area_aliases(value: str) -> set[str]:
+    key = normalize_usage_key(canonical_rollout_usage_area(value))
+    aliases = {
+        "berawtaleem": {"berawtaleem", "albera"},
+        "haydemascus": {"haydemascus", "haydamascus", "haydemashq"},
+        "maqawba": {"maqawba", "magawba"},
+        "almansoura": {"mansoura", "almansoura"},
+        "hayalandaluszone2": {"hayalandalus", "hayandalus", "hayalandalusz2", "hayalandaluszone2"},
+        "hayalandaluszone3": {"hayalandalusz3", "hayalandaluszone3"},
+    }
+    return {key} | aliases.get(key, set())
 
 
 def canonical_mr_history_area(value: str) -> str:
@@ -7032,6 +7054,19 @@ def create_site(data: SiteIn, request: Request, db: Session = Depends(db_session
             return {"success": True, "site": {
                 "id": existing.id, "program": program_key, "name": name,
                 "site_inventory_enabled": bool(existing.site_inventory_enabled),
+            }}
+    elif name == "Al-Mansoura":
+        existing = [
+            row for row in db.query(Site).filter(Site.program == program_key).all()
+            if canonical_site_area_name(row.name).casefold() == name.casefold()
+        ]
+        if len(existing) > 1:
+            raise HTTPException(status_code=409, detail="Al-Mansoura has multiple Site records; resolve the duplicate IDs first")
+        if existing:
+            row = existing[0]
+            return {"success": True, "site": {
+                "id": row.id, "program": program_key, "name": name,
+                "site_inventory_enabled": bool(row.site_inventory_enabled),
             }}
     row = Site(
         program=program_key,
@@ -8931,14 +8966,7 @@ def list_rollout_material_usage_details(
         raise HTTPException(status_code=400, detail="Area and material are required")
 
     records = []
-    area_aliases = {normalize_usage_key(area_key)}
-    area_aliases.update({
-        "berawtaleem": {"berawtaleem", "albera"},
-        "haydemascus": {"haydemascus", "haydamascus", "haydemashq"},
-        "maqawba": {"maqawba", "magawba"},
-        "hayalandaluszone2": {"hayalandalus", "hayandalus", "hayalandalusz2", "hayandaluszone2", "hayalandaluszone2"},
-        "hayalandaluszone3": {"hayalandalusz3", "hayalandaluszone3"},
-    }.get(normalize_usage_key(area_key), set()))
+    area_aliases = rollout_usage_area_aliases(area_key)
     material_aliases = {
         "subbox": {"subbox", "fat2810ss8a"},
         "endbox": {"endbox", "fat2810se8a"},
