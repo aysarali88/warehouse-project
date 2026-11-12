@@ -13,6 +13,14 @@
 .site-transfer-form .field{min-width:0}
 .site-transfer-form input[readonly]{background:#f4f8fa;color:#42576b}
 .site-transfer-hint{color:var(--muted);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.site-transfer-lines-wrap{grid-column:1/-1;min-width:0}
+.site-transfer-lines-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.site-transfer-lines-head strong{color:var(--brand);font-size:13px}
+.site-transfer-lines{display:grid;gap:8px}
+.site-transfer-line{display:grid;grid-template-columns:minmax(220px,2fr) minmax(80px,.65fr) minmax(140px,1.2fr) minmax(130px,1fr) auto;gap:10px;align-items:end;padding:10px;border:1px solid var(--line);border-radius:7px;background:#f8fbfc}
+.site-transfer-line .field{min-width:0}
+.site-transfer-line .field input,.site-transfer-line .field select{min-width:0}
+.site-transfer-remove-line{min-height:38px}
 .site-transfer-form-actions{grid-column:1/-1;display:flex;justify-content:flex-start;padding-top:3px}
 .site-transfer-list-tools{display:flex;align-items:flex-end;gap:8px}
 .site-transfer-list-tools .field{min-width:190px}
@@ -49,6 +57,9 @@
   .site-transfer-section-head{align-items:stretch;flex-direction:column}
   .site-transfer-list-tools{align-items:stretch;flex-wrap:wrap}
   .site-transfer-list-tools .field{flex:1;min-width:160px}
+  .site-transfer-line{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .site-transfer-line .field:first-child{grid-column:1/-1}
+  .site-transfer-remove-line{justify-self:start}
   .site-transfer-correction-form{grid-template-columns:repeat(2,minmax(0,1fr))}
   .site-transfer-confirm{grid-column:1/-1}
 }

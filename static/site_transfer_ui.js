@@ -5,6 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const SCALE = 1000000n;
   const PAGE_SIZE = 25;
+  const MAX_TRANSFER_LINES = 100;
 
   function quantityUnits(value) {
     let raw = String(value ?? '').trim();
@@ -34,6 +35,19 @@
     return '';
   }
 
+  function newTransferLine(id) {
+    return {
+      id,
+      productId: '',
+      quantity: '',
+      availableQty: '0',
+      availabilityLoading: false,
+      availabilityLoaded: false,
+      availabilityError: '',
+      availabilityRequest: 0,
+    };
+  }
+
   function errorMessage(error) {
     return String(error?.message || 'The request could not be completed.');
   }
@@ -58,11 +72,7 @@
       status: '',
       loading: false,
       busy: false,
-      availabilityLoading: false,
-      availabilityLoaded: false,
-      availabilityError: '',
-      availableQty: '0',
-      form: { fromSiteId: '', toSiteId: '', productId: '', uom: '', quantity: '', reference: '', notes: '' },
+      form: { fromSiteId: '', toSiteId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' },
       receipt: null,
       program: '',
     };
@@ -77,6 +87,7 @@
       if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
       return `ui-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     };
+    let nextLineId = 2;
     const setError = (error) => {
       state.error = errorMessage(error);
       if (isFeatureDisabled(error)) {
@@ -118,9 +129,7 @@
         state.sites = [];
         state.products = [];
         state.transfers = [];
-        state.form = { fromSiteId: '', toSiteId: '', productId: '', uom: '', quantity: '', reference: '', notes: '' };
-        state.availabilityLoaded = false;
-        state.availableQty = '0';
+        state.form = { fromSiteId: '', toSiteId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' };
       }
       state.gate = 'checking';
       state.gateMessage = 'Checking transfer readiness…';
@@ -135,7 +144,7 @@
         if (!state.sites.length || !state.products.length) await fetchOptions();
         state.loading = false;
         publish();
-        if (state.form.fromSiteId && state.form.productId) await refreshAvailability();
+        if (state.form.fromSiteId) await refreshAllAvailability();
         return true;
       } catch (error) {
         state.loading = false;
@@ -170,17 +179,22 @@
       }
     }
 
-    async function refreshAvailability() {
-      const { fromSiteId, productId } = state.form;
-      state.availabilityError = '';
+    async function refreshLineAvailability(lineId) {
+      const line = state.form.lines.find(row => row.id === String(lineId));
+      if (!line) return false;
+      const { fromSiteId } = state.form;
+      const productId = line.productId;
+      const requestId = ++line.availabilityRequest;
+      line.availabilityError = '';
       if (state.gate !== 'enabled' || !fromSiteId || !productId) {
-        state.availableQty = '0';
-        state.availabilityLoaded = false;
+        line.availableQty = '0';
+        line.availabilityLoaded = false;
+        line.availabilityLoading = false;
         publish();
         return false;
       }
-      state.availabilityLoading = true;
-      state.availabilityLoaded = false;
+      line.availabilityLoading = true;
+      line.availabilityLoaded = false;
       publish();
       try {
         const data = await api(url('/api/warehouse/site-inventory', {
@@ -189,31 +203,70 @@
         const row = (data.items || []).find(item =>
           String(item.site_id) === String(fromSiteId) && String(item.product_id) === String(productId)
         );
-        state.availableQty = row?.on_hand_qty ?? '0';
-        state.availabilityLoaded = true;
-        state.availabilityLoading = false;
+        if (line.availabilityRequest !== requestId) return false;
+        line.availableQty = row?.on_hand_qty ?? '0';
+        line.availabilityLoaded = true;
+        line.availabilityLoading = false;
         publish();
         return true;
       } catch (error) {
-        state.availabilityLoading = false;
-        state.availabilityError = errorMessage(error);
-        state.availabilityLoaded = false;
+        if (line.availabilityRequest !== requestId) return false;
+        line.availabilityLoading = false;
+        line.availabilityError = errorMessage(error);
+        line.availabilityLoaded = false;
         publish();
         return false;
       }
     }
 
+    async function refreshAllAvailability() {
+      const lineIds = state.form.lines.filter(line => line.productId).map(line => line.id);
+      await Promise.all(lineIds.map(refreshLineAvailability));
+      return lineIds.every(id => state.form.lines.find(line => line.id === id)?.availabilityLoaded);
+    }
+
     function updateForm(field, value) {
-      if (!Object.prototype.hasOwnProperty.call(state.form, field)) return;
+      if (!['fromSiteId', 'toSiteId'].includes(field)) return;
       state.form[field] = value;
-      if (field === 'productId') {
-        const product = state.products.find(row => String(row.id) === String(value));
-        state.form.uom = product?.uom || '';
-      }
       state.error = '';
       publish();
-      if (field === 'fromSiteId' || field === 'productId') return refreshAvailability();
+      if (field === 'fromSiteId') return refreshAllAvailability();
       return Promise.resolve(true);
+    }
+
+    function addLine() {
+      if (state.busy || state.form.lines.length >= MAX_TRANSFER_LINES) return false;
+      state.form.lines.push(newTransferLine(`line-${nextLineId++}`));
+      state.error = '';
+      publish();
+      return true;
+    }
+
+    function removeLine(lineId) {
+      if (state.busy || state.form.lines.length <= 1) return false;
+      const index = state.form.lines.findIndex(line => line.id === String(lineId));
+      if (index < 0) return false;
+      state.form.lines[index].availabilityRequest += 1;
+      state.form.lines.splice(index, 1);
+      state.error = '';
+      publish();
+      return true;
+    }
+
+    async function updateLine(lineId, field, value) {
+      const line = state.form.lines.find(row => row.id === String(lineId));
+      if (!line || !['productId', 'quantity'].includes(field) || state.busy) return false;
+      line[field] = value;
+      state.error = '';
+      if (field === 'quantity') return true;
+      if (field === 'productId') {
+        line.quantity = '';
+        line.availableQty = '0';
+        line.availabilityLoaded = false;
+        line.availabilityError = '';
+      }
+      publish();
+      return field === 'productId' ? refreshLineAvailability(line.id) : true;
     }
 
     async function refreshAfterAction() {
@@ -223,32 +276,57 @@
       } catch (error) {
         state.error = `Action succeeded, but the transfer list could not refresh: ${errorMessage(error)}`;
       }
-      await refreshAvailability();
+      await refreshAllAvailability();
       publish();
     }
 
     async function createTransfer(values = {}) {
-      if (state.busy || state.gate !== 'enabled' || !state.availabilityLoaded) return false;
+      if (state.busy || state.gate !== 'enabled') return false;
       const form = { ...state.form, ...values };
-      const product = state.products.find(row => String(row.id) === String(form.productId));
+      const lines = (values.lines || state.form.lines).map(line => ({ ...line }));
       const siteIds = new Set(state.sites.map(row => String(row.id)));
-      const validation = validateTransferForm({
-        fromSiteId: form.fromSiteId,
-        toSiteId: form.toSiteId,
-        productId: form.productId,
-        uom: form.uom,
-        productUom: product?.uom || '',
-        quantity: form.quantity,
-      }, state.availableQty);
-      if (!siteIds.has(String(form.fromSiteId)) || !siteIds.has(String(form.toSiteId)) || !product) {
-        state.error = 'Select sites and a product from the loaded options.';
+      if (!siteIds.has(String(form.fromSiteId)) || !siteIds.has(String(form.toSiteId))) {
+        state.error = 'Select both sites from the loaded options.';
         publish();
         return false;
       }
-      if (validation) {
-        state.error = validation;
+      if (!lines.length || lines.length > MAX_TRANSFER_LINES) {
+        state.error = `Add between 1 and ${MAX_TRANSFER_LINES} materials.`;
         publish();
         return false;
+      }
+      const seenProducts = new Set();
+      for (const line of lines) {
+        const product = state.products.find(row => String(row.id) === String(line.productId));
+        if (!product) {
+          state.error = 'Select a material from the loaded options for every row.';
+          publish();
+          return false;
+        }
+        if (seenProducts.has(String(product.id))) {
+          state.error = 'A material can appear only once in a transfer.';
+          publish();
+          return false;
+        }
+        seenProducts.add(String(product.id));
+        if (line.availabilityLoading || !line.availabilityLoaded) {
+          state.error = 'Wait for the available quantity to load for every material.';
+          publish();
+          return false;
+        }
+        const validation = validateTransferForm({
+          fromSiteId: form.fromSiteId,
+          toSiteId: form.toSiteId,
+          productId: product.id,
+          uom: product.uom,
+          productUom: product.uom,
+          quantity: line.quantity,
+        }, line.availableQty);
+        if (validation) {
+          state.error = `${product.name}: ${validation}`;
+          publish();
+          return false;
+        }
       }
       state.busy = true;
       state.error = '';
@@ -261,14 +339,17 @@
             program: program(),
             from_site_id: Number(form.fromSiteId),
             to_site_id: Number(form.toSiteId),
-            items: [{ product_id: Number(product.id), quantity: form.quantity, uom: product.uom }],
+            items: lines.map(line => {
+              const product = state.products.find(row => String(row.id) === String(line.productId));
+              return { product_id: Number(product.id), quantity: line.quantity, uom: product.uom };
+            }),
             reference: form.reference,
             notes: form.notes,
             request_token: requestToken(),
           }),
         });
         state.message = `Transfer #${data.transfer?.id ?? ''} created as Draft.`;
-        state.form.quantity = '';
+        state.form.lines = [newTransferLine(`line-${nextLineId++}`)];
         state.form.reference = '';
         state.form.notes = '';
         await refreshAfterAction();
@@ -402,7 +483,7 @@
     }
 
     return {
-      state, open, loadPage, setPage, setStatus, updateForm, refreshAvailability,
+      state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine, refreshAllAvailability,
       createTransfer, approve, dispatch, openReceipt, closeReceipt, receive, reverseDispatch,
     };
   }
@@ -452,30 +533,34 @@
     function renderForm(state) {
       const from = element('siteTransferFromSite');
       const to = element('siteTransferToSite');
-      const product = element('siteTransferProduct');
-      if (!from || !to || !product) return;
+      const linesRoot = element('siteTransferLines');
+      if (!from || !to || !linesRoot) return;
       from.innerHTML = optionList(state.sites, state.form.fromSiteId, 'Select source site', row => row.name);
       to.innerHTML = `<option value="">Select destination site</option>${state.sites.map(row =>
         `<option value="${Number(row.id)}"${String(row.id) === String(state.form.toSiteId) ? ' selected' : ''}${String(row.id) === String(state.form.fromSiteId) ? ' disabled' : ''}>${escapeHtml(row.name)}</option>`
       ).join('')}`;
-      product.innerHTML = optionList(state.products, state.form.productId, 'Select material', row => `${row.name}${row.sku ? ` · ${row.sku}` : ''}`);
-      const selectedProduct = state.products.find(row => String(row.id) === String(state.form.productId));
-      const uom = element('siteTransferUom');
-      if (uom) uom.value = selectedProduct?.uom || '';
-      for (const [name, value] of Object.entries({
-        quantity: state.form.quantity,
-        reference: state.form.reference,
-        notes: state.form.notes,
-      })) {
+      linesRoot.innerHTML = state.form.lines.map((line, index) => {
+        const selectedProduct = state.products.find(row => String(row.id) === String(line.productId));
+        const usedElsewhere = new Set(state.form.lines.filter(other => other.id !== line.id).map(other => String(other.productId)));
+        const productOptions = `<option value="">Select material</option>${state.products.map(row =>
+          `<option value="${Number(row.id)}"${String(row.id) === String(line.productId) ? ' selected' : ''}${usedElsewhere.has(String(row.id)) ? ' disabled' : ''}>${escapeHtml(row.name)}${row.sku ? ` · ${escapeHtml(row.sku)}` : ''}</option>`
+        ).join('')}`;
+        return `<div class="site-transfer-line" data-site-transfer-line="${escapeHtml(line.id)}">
+          <div class="field"><label for="siteTransferProduct-${escapeHtml(line.id)}">Material ${index + 1}</label><select id="siteTransferProduct-${escapeHtml(line.id)}" data-site-transfer-line-field="productId" data-line-id="${escapeHtml(line.id)}" required>${productOptions}</select></div>
+          <div class="field"><label>UOM</label><input type="text" readonly aria-readonly="true" value="${escapeHtml(selectedProduct?.uom || '')}"></div>
+          <div class="field"><label>Available Qty at From Site</label><input type="text" readonly aria-readonly="true" value="${line.availabilityLoading ? 'Loading…' : displayQuantity(line.availableQty)}"><small class="site-transfer-hint">${escapeHtml(line.availabilityError || (line.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a material.'))}</small></div>
+          <div class="field"><label for="siteTransferQuantity-${escapeHtml(line.id)}">Transfer Qty</label><input id="siteTransferQuantity-${escapeHtml(line.id)}" data-site-transfer-line-field="quantity" data-line-id="${escapeHtml(line.id)}" type="number" min="0.000001" step="0.000001" inputmode="decimal" value="${escapeHtml(line.quantity)}" required></div>
+          <button class="btn soft site-transfer-remove-line" type="button" data-site-transfer-command="remove-line" data-line-id="${escapeHtml(line.id)}" aria-label="Remove material ${index + 1}"${state.busy || state.form.lines.length <= 1 ? ' disabled' : ''}>Remove</button>
+        </div>`;
+      }).join('');
+      for (const [name, value] of Object.entries({ reference: state.form.reference, notes: state.form.notes })) {
         const input = root.querySelector(`[name="${name}"]`);
         if (input && input.value !== value) input.value = value;
       }
-      const available = element('siteTransferAvailable');
-      if (available) available.value = state.availabilityLoading ? 'Loading…' : displayQuantity(state.availableQty);
-      const availabilityHint = element('siteTransferAvailabilityHint');
-      if (availabilityHint) availabilityHint.textContent = state.availabilityError || (state.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a source site and material.');
+      const addButton = element('siteTransferAddLine');
+      if (addButton) addButton.disabled = state.busy || state.form.lines.length >= MAX_TRANSFER_LINES;
       const submit = element('siteTransferCreateButton');
-      if (submit) submit.disabled = state.busy || state.availabilityLoading || !state.availabilityLoaded || !state.form.fromSiteId || !state.form.toSiteId || !state.form.productId;
+      if (submit) submit.disabled = state.busy || !state.form.fromSiteId || !state.form.toSiteId || state.form.lines.some(line => !line.productId || line.availabilityLoading || !line.availabilityLoaded);
     }
 
     function renderRows(state) {
@@ -589,7 +674,7 @@
       const target = event.target;
       if (target.id === 'siteTransferFromSite') controller.updateForm('fromSiteId', target.value);
       else if (target.id === 'siteTransferToSite') controller.updateForm('toSiteId', target.value);
-      else if (target.id === 'siteTransferProduct') controller.updateForm('productId', target.value);
+      else if (target.dataset.siteTransferLineField === 'productId') controller.updateLine(target.dataset.lineId, 'productId', target.value);
       else if (target.id === 'siteTransferStatusFilter') controller.setStatus(target.value);
       else if (target.id === 'siteTransferCorrectionSelect') renderCorrections(controller.state);
     });
@@ -599,18 +684,22 @@
       if (target.name === 'receiptQuantity' && target.form?.id === 'siteTransferReceiveForm' && controller.state.receipt) controller.state.receipt.quantity = target.value;
       else if (target.name === 'receiptReference' && controller.state.receipt) controller.state.receipt.reference = target.value;
       else if (target.name === 'receiptNotes' && controller.state.receipt) controller.state.receipt.notes = target.value;
-      else if (target.form?.id === 'siteTransferCreateForm' && Object.prototype.hasOwnProperty.call(controller.state.form, target.name)) controller.state.form[target.name] = target.value;
+      else if (target.dataset.siteTransferLineField === 'quantity') {
+        controller.updateLine(target.dataset.lineId, 'quantity', target.value);
+        const error = element('siteTransferError');
+        if (error && !controller.state.error) {
+          error.textContent = '';
+          error.classList.add('hidden');
+        }
+      }
+      else if (target.form?.id === 'siteTransferCreateForm' && ['reference', 'notes'].includes(target.name)) controller.state.form[target.name] = target.value;
     });
 
     root.addEventListener('submit', async event => {
       if (event.target.id === 'siteTransferCreateForm') {
         event.preventDefault();
         const form = event.target;
-        await controller.createTransfer({
-          quantity: form.elements.quantity.value,
-          reference: form.elements.reference.value,
-          notes: form.elements.notes.value,
-        });
+        await controller.createTransfer({ reference: form.elements.reference.value, notes: form.elements.notes.value });
       } else if (event.target.id === 'siteTransferReceiveForm') {
         event.preventDefault();
         await controller.receive();
@@ -637,6 +726,8 @@
       if (action === 'refresh') await controller.open();
       else if (action === 'previous') await controller.setPage(controller.state.page - 1);
       else if (action === 'next') await controller.setPage(controller.state.page + 1);
+      else if (action === 'add-line') controller.addLine();
+      else if (action === 'remove-line') controller.removeLine(event.target.closest('[data-site-transfer-command]')?.dataset.lineId);
       else if (action === 'close-receipt') controller.closeReceipt();
       else if (action === 'retry-gate') await controller.open();
     });
