@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from types import SimpleNamespace
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 
@@ -48,6 +49,29 @@ class SiteInventoryFoundationTests(unittest.TestCase):
             db.add_all([self.site, self.product])
             db.commit()
             self.site_id, self.product_id = self.site.id, self.product.id
+
+    def test_legacy_sites_table_gets_inventory_flag_disabled_without_losing_rows(self):
+        legacy_engine = create_engine("sqlite://")
+        try:
+            with legacy_engine.begin() as connection:
+                connection.execute(text(
+                    "CREATE TABLE sites (id INTEGER PRIMARY KEY, program VARCHAR NOT NULL, name VARCHAR NOT NULL)"
+                ))
+                connection.execute(text(
+                    "INSERT INTO sites (program, name) VALUES ('SINGLE_RAN', 'Existing SR site')"
+                ))
+
+            main.ensure_optional_columns(legacy_engine)
+
+            columns = {column["name"] for column in inspect(legacy_engine).get_columns("sites")}
+            self.assertIn("site_inventory_enabled", columns)
+            with legacy_engine.connect() as connection:
+                row = connection.execute(text(
+                    "SELECT program, name, site_inventory_enabled FROM sites"
+                )).one()
+            self.assertEqual(tuple(row), ("SINGLE_RAN", "Existing SR site", 0))
+        finally:
+            legacy_engine.dispose()
 
     def _post(self, *, quantity, token=None, event_id=None, movement_type="incoming", uom="M", program=None,
               site_id=None, product_id=None, event_type=None, document_type="manual_test", line_id="1"):

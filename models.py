@@ -398,6 +398,7 @@ class AppUser(Base):
     email = Column(String, default="")
     warehouse_name = Column(String, default="")
     area_builder_access = Column(Boolean, default=False, nullable=False)
+    can_request_materials = Column(Boolean, default=False, nullable=False)
     password_hash = Column(String, nullable=False)
     status = Column(String, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
