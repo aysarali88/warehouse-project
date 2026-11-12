@@ -325,6 +325,90 @@ class SiteInventoryFoundationTests(unittest.TestCase):
                 inventory.resolve_site_alias(db, self.program, "future site name")
             self.assertEqual(error.exception.status_code, 409)
 
+    def test_mansoura_resolves_to_unique_al_mansoura_site_without_persisted_alias(self):
+        with SessionLocal() as db:
+            canonical_site = Site(program=self.program, name="Al-Mansoura", site_inventory_enabled=True)
+            db.add(canonical_site)
+            db.commit()
+            canonical_site_id = canonical_site.id
+        try:
+            with SessionLocal() as db:
+                for label in ("Mansoura", "Al-Mansoura", "AL MANSOURA"):
+                    resolved = inventory.resolve_site_alias(db, self.program, label)
+                    self.assertEqual(resolved.id, canonical_site_id)
+        finally:
+            with SessionLocal() as db:
+                db.query(Site).filter_by(id=canonical_site_id).delete()
+                db.commit()
+
+    def test_mansoura_mapping_rejects_duplicate_sites_or_conflicting_aliases(self):
+        with SessionLocal() as db:
+            sites = [
+                Site(program=self.program, name="Al-Mansoura", site_inventory_enabled=True),
+                Site(program=self.program, name="Mansoura", site_inventory_enabled=True),
+            ]
+            db.add_all(sites)
+            db.commit()
+            site_ids = [row.id for row in sites]
+        try:
+            with SessionLocal() as db:
+                with self.assertRaises(HTTPException) as error:
+                    inventory.resolve_site_alias(db, self.program, "Mansoura")
+                self.assertEqual(error.exception.status_code, 409)
+        finally:
+            with SessionLocal() as db:
+                db.query(Site).filter(Site.id.in_(site_ids)).delete(synchronize_session=False)
+                db.commit()
+
+    def test_mansoura_is_reserved_as_the_canonical_site_name_not_a_free_alias(self):
+        with SessionLocal() as db:
+            other_site = Site(program=self.program, name="Other Site", site_inventory_enabled=True)
+            canonical_site = Site(program=self.program, name="Al-Mansoura", site_inventory_enabled=True)
+            db.add_all([other_site, canonical_site])
+            db.commit()
+            other_site_id, canonical_site_id = other_site.id, canonical_site.id
+        try:
+            with SessionLocal() as db:
+                with self.assertRaises(HTTPException) as error:
+                    with db.begin():
+                        inventory.create_site_alias(
+                            db, program=self.program, site_id=other_site_id,
+                            display_alias="Mansoura", actor="admin",
+                        )
+                self.assertEqual(error.exception.status_code, 409)
+        finally:
+            with SessionLocal() as db:
+                db.query(Site).filter(Site.id.in_([other_site_id, canonical_site_id])).delete(synchronize_session=False)
+                db.commit()
+
+    def test_mansoura_resolver_rejects_preexisting_alias_to_another_site(self):
+        with SessionLocal() as db:
+            other_site = Site(program=self.program, name="Other Mansoura Site", site_inventory_enabled=True)
+            canonical_site = Site(program=self.program, name="Al-Mansoura", site_inventory_enabled=True)
+            db.add_all([other_site, canonical_site])
+            db.flush()
+            conflicting_alias = SiteAlias(
+                program=self.program,
+                normalized_alias="mansoura",
+                display_alias="Mansoura",
+                site_id=other_site.id,
+                created_by="test",
+                updated_by="test",
+            )
+            db.add(conflicting_alias)
+            db.commit()
+            other_site_id, canonical_site_id, alias_id = other_site.id, canonical_site.id, conflicting_alias.id
+        try:
+            with SessionLocal() as db:
+                with self.assertRaises(HTTPException) as error:
+                    inventory.resolve_site_alias(db, self.program, "Mansoura")
+                self.assertEqual(error.exception.status_code, 409)
+        finally:
+            with SessionLocal() as db:
+                db.query(SiteAlias).filter_by(id=alias_id).delete()
+                db.query(Site).filter(Site.id.in_([other_site_id, canonical_site_id])).delete(synchronize_session=False)
+                db.commit()
+
     def test_uom_must_match_product_unit(self):
         with self.assertRaises(HTTPException) as error:
             self._post(quantity="3", uom="PCS")

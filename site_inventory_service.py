@@ -67,6 +67,13 @@ def normalize_site_alias(value: str) -> str:
     return result
 
 
+def canonical_site_lookup_key(value: str) -> str:
+    normalized = normalize_site_alias(value)
+    if normalized in {"mansoura", "al mansoura"}:
+        return "al mansoura"
+    return normalized
+
+
 def request_token_hash(program: str, token: str) -> str:
     value = str(token or "").strip()
     if len(value) < 16 or len(value) > 200:
@@ -584,7 +591,8 @@ def create_site_alias(db, *, program: str, site_id: int, display_alias: str, act
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found in this program")
     sites = db.query(Site).filter_by(program=program_key).all()
-    canonical_matches = [row for row in sites if normalize_site_alias(row.name) == normalized]
+    canonical_key = canonical_site_lookup_key(normalized)
+    canonical_matches = [row for row in sites if canonical_site_lookup_key(row.name) == canonical_key]
     if canonical_matches:
         raise HTTPException(status_code=409, detail="Alias collides with an existing canonical site name")
     existing = db.query(SiteAlias).filter_by(program=program_key, normalized_alias=normalized).first()
@@ -613,12 +621,18 @@ def create_site_alias(db, *, program: str, site_id: int, display_alias: str, act
 def resolve_site_alias(db, program: str, value: str) -> Site | None:
     program_key = normalize_program(program)
     normalized = normalize_site_alias(value)
-    aliases = db.query(SiteAlias).filter_by(program=program_key, normalized_alias=normalized).all()
+    canonical_key = canonical_site_lookup_key(normalized)
+    alias_keys = {normalized, canonical_key}
+    aliases = (
+        db.query(SiteAlias)
+        .filter(SiteAlias.program == program_key, SiteAlias.normalized_alias.in_(alias_keys))
+        .all()
+    )
     if len(aliases) > 1:
         raise HTTPException(status_code=409, detail="Alias mapping is ambiguous")
     matches = [
         site for site in db.query(Site).filter_by(program=program_key).all()
-        if normalize_site_alias(site.name) == normalized
+        if canonical_site_lookup_key(site.name) == canonical_key
     ]
     if len(matches) > 1:
         raise HTTPException(status_code=409, detail="Canonical site name is ambiguous; add an explicit mapping")
