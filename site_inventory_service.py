@@ -667,7 +667,17 @@ def prepare_material_requisition_issue(db, program: str, site_label: str, items:
             status_code=409,
             detail=f"MR site '{label}' is not mapped to a unique Site in {program_key}; add an explicit Site alias",
         )
-    site = _lock_active_site(db, program_key, site.id)
+    site = (
+        db.query(Site)
+        .filter(Site.id == site.id, Site.program == program_key)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found in this program")
+    if not bool(site.site_inventory_enabled):
+        return None, []
 
     prepared = []
     for item in items:
