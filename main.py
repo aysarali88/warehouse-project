@@ -175,6 +175,7 @@ def ensure_optional_columns(target_engine=engine):
     ]
     if target_engine.dialect.name == "postgresql":
         statements = [
+            "ALTER TABLE sites ADD COLUMN IF NOT EXISTS site_inventory_enabled BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS part_number VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor VARCHAR DEFAULT ''",
@@ -187,6 +188,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS area_builder_access BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS can_request_materials BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE material_requisitions ADD COLUMN IF NOT EXISTS return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN IF NOT EXISTS entry_time VARCHAR DEFAULT ''",
@@ -231,6 +233,7 @@ def ensure_optional_columns(target_engine=engine):
         )
     else:
         statements = [
+            "ALTER TABLE sites ADD COLUMN site_inventory_enabled BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE products ADD COLUMN qr_code VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN part_number VARCHAR DEFAULT ''",
             "ALTER TABLE products ADD COLUMN vendor VARCHAR DEFAULT ''",
@@ -243,6 +246,7 @@ def ensure_optional_columns(target_engine=engine):
             "ALTER TABLE app_users ADD COLUMN email VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN warehouse_name VARCHAR DEFAULT ''",
             "ALTER TABLE app_users ADD COLUMN area_builder_access BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE app_users ADD COLUMN can_request_materials BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE material_requisitions ADD COLUMN return_reason TEXT DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN related_to_xbox VARCHAR DEFAULT ''",
             "ALTER TABLE rollout_records ADD COLUMN entry_time VARCHAR DEFAULT ''",
@@ -602,14 +606,19 @@ def verify_password(password: str, stored: str = "") -> bool:
 
 
 def serialize_app_user(row, fallback: bool = False) -> dict:
+    program = normalize_program(row.get("program", DEFAULT_PROGRAM) if fallback else getattr(row, "program", DEFAULT_PROGRAM))
+    role = row["role"] if fallback else row.role
     return {
         "id": getattr(row, "id", "") or "",
-        "program": normalize_program(row.get("program", DEFAULT_PROGRAM) if fallback else getattr(row, "program", DEFAULT_PROGRAM)),
+        "program": program,
         "username": row["username"] if fallback else row.username,
         "name": (row.get("name") if fallback else row.name) or (row["username"] if fallback else row.username),
-        "role": row["role"] if fallback else row.role,
+        "role": role,
         "email": (row.get("email") if fallback else row.email) or "",
         "warehouse_name": (row.get("warehouse_name") if fallback else row.warehouse_name) or "",
+        "can_request_materials": bool(row.get("can_request_materials", False) if fallback else getattr(row, "can_request_materials", False))
+        if is_single_ran(program) and role.strip().lower() == "warehouse manager"
+        else False,
         "is_fallback": fallback,
     }
 
@@ -1292,6 +1301,7 @@ class AppUserIn(BaseModel):
     name: str = ""
     email: str = ""
     warehouse_name: str = ""
+    can_request_materials: bool = False
     program: str = DEFAULT_PROGRAM
 
 
@@ -1719,14 +1729,18 @@ def session_token_hash(token: str) -> str:
 
 
 def session_user_payload(user: AppUser, program: str) -> dict:
+    program_key = normalize_program(program)
     return {
         "id": user.id,
-        "program": normalize_program(program),
+        "program": program_key,
         "username": user.username,
         "name": user.name or user.username,
         "role": user.role,
         "warehouse_name": user.warehouse_name or "",
         "area_builder_access": bool(user.area_builder_access) or is_admin_role(user.role),
+        "can_request_materials": bool(getattr(user, "can_request_materials", False))
+        if is_single_ran(program_key) and user.role.strip().lower() == "warehouse manager"
+        else False,
     }
 
 
@@ -1760,6 +1774,30 @@ def require_roles(request: Request, *roles: str) -> AppUser:
     return user
 
 
+def can_request_materials(user: AppUser, program: str = DEFAULT_PROGRAM) -> bool:
+    role = user.role.strip().lower()
+    if role in {"admin", "management", "requester"}:
+        return True
+    return role == "warehouse manager" and is_single_ran(program) and bool(getattr(user, "can_request_materials", False))
+
+
+def can_manager_view_own_requisitions(user: AppUser, program: str = DEFAULT_PROGRAM) -> bool:
+    return (
+        is_single_ran(program)
+        and user.role.strip().lower() == "warehouse manager"
+        and bool(getattr(user, "can_request_materials", False))
+    )
+
+
+def require_material_request_access(request: Request, program: str = DEFAULT_PROGRAM) -> AppUser:
+    user = current_user(request)
+    program_key = normalize_program(program)
+    session_program = normalize_program(getattr(request.state, "session_program", program_key))
+    if session_program != program_key or not can_request_materials(user, program_key):
+        raise HTTPException(status_code=403, detail="You do not have permission to create material requisitions")
+    return user
+
+
 def can_access_area_builder(user: AppUser, program: str = DEFAULT_PROGRAM) -> bool:
     return not is_single_ran(program) and (is_admin_role(user.role) or bool(user.area_builder_access))
 
@@ -1785,6 +1823,13 @@ def request_scope_viewer(request: Request) -> str:
     if user.role.strip().lower() == "warehouse manager":
         return user.warehouse_name or user.name or user.username
     return request_actor(request)
+
+
+def requisition_view_context(request: Request, program: str) -> tuple[str, str, str, bool]:
+    user = current_user(request)
+    can_view_own = can_manager_view_own_requisitions(user, program)
+    identity = (user.name or user.username) if can_view_own else ""
+    return request_scope_viewer(request), user.role, identity, can_view_own
 
 
 def user_can_access_warehouse(user: AppUser, warehouse: Warehouse | None) -> bool:
@@ -5523,13 +5568,22 @@ def requisition_header_to_dict(row: MaterialRequisition) -> dict:
     }
 
 
-def user_can_view_requisition(row: MaterialRequisition, viewer: str = "", role: str = "") -> bool:
+def user_can_view_requisition(
+    row: MaterialRequisition,
+    viewer: str = "",
+    role: str = "",
+    requester_identity: str = "",
+    manager_can_request: bool = False,
+) -> bool:
     role_key = normalize_usage_key(role)
     viewer_key = normalize_usage_key(viewer)
     if role_key in {"admin", "management"}:
         return True
     if role_key == "warehousemanager":
-        return row.status in {"approved", "signed", "issued"} and warehouse_manager_handles_mr(viewer, row)
+        requester_key = normalize_usage_key(requester_identity)
+        owns_request = manager_can_request and bool(requester_key) and normalize_usage_key(row.created_by) == requester_key
+        manages_warehouse_request = row.status in {"approved", "signed", "issued"} and warehouse_manager_handles_mr(viewer, row)
+        return owns_request or manages_warehouse_request
     if role_key in {"approval", "approver"}:
         return row.status == "pending_approval" or normalize_usage_key(row.receiver_name) == viewer_key
     if role_key == "requester":
@@ -5619,6 +5673,8 @@ def requisition_history_payload(
     date_to: str = "",
     viewer: str = "",
     role: str = "",
+    requester_identity: str = "",
+    manager_can_request: bool = False,
     program: str = DEFAULT_PROGRAM,
 ) -> dict:
     program_key = normalize_program(program)
@@ -5629,7 +5685,7 @@ def requisition_history_payload(
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
-    visible_rows = [row for row in rows if user_can_view_requisition(row, viewer, role)]
+    visible_rows = [row for row in rows if user_can_view_requisition(row, viewer, role, requester_identity, manager_can_request)]
     options = {
         "warehouses": sorted({str(row.warehouse.name if row.warehouse else "").strip() for row in visible_rows if str(row.warehouse.name if row.warehouse else "").strip()}),
         "areas": sorted({canonical_mr_history_area(row.site_id) for row in visible_rows if str(row.site_id or "").strip()}),
@@ -5820,6 +5876,7 @@ def create_app_user(data: AppUserIn, request: Request, db: Session = Depends(db_
         existing.name = data.name.strip() or username
         existing.email = data.email.strip()
         existing.warehouse_name = data.warehouse_name.strip()
+        existing.can_request_materials = bool(data.can_request_materials) and is_single_ran(program_key) and role.strip().lower() == "warehouse manager"
         if password:
             existing.password_hash = hash_password(password)
         user = existing
@@ -5835,6 +5892,7 @@ def create_app_user(data: AppUserIn, request: Request, db: Session = Depends(db_
             role=role,
             email=data.email.strip(),
             warehouse_name=data.warehouse_name.strip(),
+            can_request_materials=bool(data.can_request_materials) and is_single_ran(program_key) and role.strip().lower() == "warehouse manager",
             password_hash=password_hash,
             status="active",
         )
@@ -6817,9 +6875,9 @@ def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_s
 @app.get("/api/warehouse/bootstrap")
 def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer = request_scope_viewer(request)
-    role = current_user(request).role
-    cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}"
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program_key)
+    cache_user = normalize_usage_key(requester_identity) if manager_can_request else ""
+    cache_key = f"{program_key}:{'light' if light else 'full'}:{normalize_usage_key(role)}:{normalize_usage_key(viewer)}:{cache_user}"
     cached = _warehouse_cache_get(cache_key)
     if cached is not None:
         return {**cached, "cached": True}
@@ -6828,7 +6886,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     usage = list_stock_usage(request, program_key, db)
     movements = list_stock_movements(request, 12 if light else 40, program_key, db)
     mrs = (
-        list_material_requisition_headers(80, db=db, viewer=viewer, role=role, program=program_key)
+        list_material_requisition_headers(80, db=db, viewer=viewer, role=role, requester_identity=requester_identity, manager_can_request=manager_can_request, program=program_key)
         if light
         else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
     )
@@ -8942,7 +9000,7 @@ def list_audit_logs(request: Request, limit: int = 50, program: str = DEFAULT_PR
 @app.get("/api/warehouse/material-requisitions")
 def list_material_requisitions(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_scope_viewer(request), current_user(request).role
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program_key)
     rows = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
@@ -8950,11 +9008,11 @@ def list_material_requisitions(request: Request, limit: int = 50, viewer: str = 
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
-    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role)]
+    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
     return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
-def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM):
+def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", requester_identity: str = "", manager_can_request: bool = False, program: str = DEFAULT_PROGRAM):
     program_key = normalize_program(program)
     rows = (
         db.query(MaterialRequisition)
@@ -8963,14 +9021,14 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
         .order_by(MaterialRequisition.id.desc())
         .all()
     )
-    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role)]
+    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
     return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
 def get_material_requisition(requisition_id: int, request: Request, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    viewer, role = request_scope_viewer(request), current_user(request).role
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program_key)
     row = (
         db.query(MaterialRequisition)
         .options(
@@ -8982,7 +9040,7 @@ def get_material_requisition(requisition_id: int, request: Request, viewer: str 
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    if not user_can_view_requisition(row, viewer, role):
+    if not user_can_view_requisition(row, viewer, role, requester_identity, manager_can_request):
         raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
     result = requisition_to_dict(row)
     if program_key == SINGLE_RAN_PROGRAM:
@@ -9007,8 +9065,8 @@ async def upload_sr_signed_mr_copy(requisition_id: int, request: Request, file: 
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    user = current_user(request)
-    if not user_can_view_requisition(row, request_scope_viewer(request), user.role):
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, SINGLE_RAN_PROGRAM)
+    if not user_can_view_requisition(row, viewer, role, requester_identity, manager_can_request):
         raise HTTPException(status_code=403, detail="Not allowed to upload a copy for this material requisition")
     if row.status != "issued":
         raise HTTPException(status_code=409, detail="Upload is available after the MR is issued")
@@ -9054,8 +9112,8 @@ def get_sr_signed_mr_copy(requisition_id: int, request: Request, db: Session = D
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Material requisition not found")
-    user = current_user(request)
-    if not user_can_view_requisition(row, request_scope_viewer(request), user.role):
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, SINGLE_RAN_PROGRAM)
+    if not user_can_view_requisition(row, viewer, role, requester_identity, manager_can_request):
         raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
     signed_copy = db.query(SrMaterialRequisitionSignedCopy).filter(
         SrMaterialRequisitionSignedCopy.requisition_id == row.id
@@ -9072,6 +9130,7 @@ def get_sr_signed_mr_copy(requisition_id: int, request: Request, db: Session = D
 
 @app.get("/api/warehouse/material-requisition-history")
 def list_material_requisition_history(
+    request: Request,
     warehouse: str = "",
     area: str = "",
     technician: str = "",
@@ -9084,6 +9143,7 @@ def list_material_requisition_history(
     program: str = DEFAULT_PROGRAM,
     db: Session = Depends(db_session),
 ):
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program)
     payload = requisition_history_payload(
         db,
         warehouse=warehouse,
@@ -9095,6 +9155,8 @@ def list_material_requisition_history(
         date_to=date_to,
         viewer=viewer,
         role=role,
+        requester_identity=requester_identity,
+        manager_can_request=manager_can_request,
         program=program,
     )
     return {"success": True, **payload}
@@ -9102,6 +9164,7 @@ def list_material_requisition_history(
 
 @app.get("/api/warehouse/material-requisition-history/export")
 def export_material_requisition_history(
+    request: Request,
     warehouse: str = "",
     area: str = "",
     technician: str = "",
@@ -9114,6 +9177,7 @@ def export_material_requisition_history(
     program: str = DEFAULT_PROGRAM,
     db: Session = Depends(db_session),
 ):
+    viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program)
     payload = requisition_history_payload(
         db,
         warehouse=warehouse,
@@ -9125,6 +9189,8 @@ def export_material_requisition_history(
         date_to=date_to,
         viewer=viewer,
         role=role,
+        requester_identity=requester_identity,
+        manager_can_request=manager_can_request,
         program=program,
     )
     workbook = Workbook()
@@ -9772,7 +9838,7 @@ async def preview_sr_request_items_excel(
         raise HTTPException(status_code=404, detail="Excel request upload is available for Single RAN only")
     kind = str(request_kind or "").strip().lower()
     if kind == "mr":
-        require_roles(request, "Admin", "Management", "Requester")
+        require_material_request_access(request, program)
     elif kind == "transfer":
         require_roles(request, "Admin", "Management", "Requester", "Warehouse Manager")
     else:
@@ -10122,8 +10188,8 @@ def list_receive_order_headers(limit: int = 50, program: str = DEFAULT_PROGRAM, 
 
 @app.post("/api/warehouse/material-requisitions")
 def create_material_requisition(data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    user = require_material_request_access(request, program_key)
     actor = request_actor(request)
     submission_token = data.submission_token.strip()
     if submission_token and len(submission_token) > 128:
@@ -10272,8 +10338,8 @@ def create_material_requisition(data: MaterialRequisitionIn, request: Request, d
 
 @app.post("/api/warehouse/material-requisitions/{requisition_id}/resubmit")
 def resubmit_material_requisition(requisition_id: int, data: MaterialRequisitionIn, request: Request, db: Session = Depends(db_session)):
-    user = require_roles(request, "Admin", "Management", "Requester")
     program_key = normalize_program(data.program)
+    user = require_material_request_access(request, program_key)
     data.site_id = resolved_site_name(db, program_key, data.site_id)
     row = (
         db.query(MaterialRequisition)

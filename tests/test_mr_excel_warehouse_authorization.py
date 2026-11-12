@@ -178,6 +178,32 @@ class MaterialRequisitionExcelWarehouseAuthorizationTests(unittest.TestCase):
             1,
         )
 
+    def test_warehouse_manager_request_permission_is_single_ran_only(self):
+        user = SimpleNamespace(role="Warehouse Manager", can_request_materials=True)
+        request = SimpleNamespace(state=SimpleNamespace(current_user=user, session_program="SINGLE_RAN"))
+
+        self.assertIs(main.require_material_request_access(request, "SINGLE_RAN"), user)
+        with self.assertRaises(HTTPException) as raised:
+            main.require_material_request_access(request, "FTTH")
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_unflagged_warehouse_manager_cannot_create_mr(self):
+        user = SimpleNamespace(role="Warehouse Manager", can_request_materials=False)
+        request = SimpleNamespace(state=SimpleNamespace(current_user=user, session_program="SINGLE_RAN"))
+
+        with self.assertRaises(HTTPException) as raised:
+            main.require_material_request_access(request, "SINGLE_RAN")
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_flagged_manager_can_only_view_own_pending_mr_and_warehouse_queue(self):
+        own_pending = SimpleNamespace(status="pending_approval", created_by="A.Gallay", warehouse=self.tripoli)
+        another_pending = SimpleNamespace(status="pending_approval", created_by="Other user", warehouse=self.tripoli)
+        approved_for_warehouse = SimpleNamespace(status="approved", created_by="Other user", warehouse=self.tripoli)
+
+        self.assertTrue(main.user_can_view_requisition(own_pending, "Tripoli", "Warehouse Manager", "A.Gallay", True))
+        self.assertFalse(main.user_can_view_requisition(another_pending, "Tripoli", "Warehouse Manager", "A.Gallay", True))
+        self.assertTrue(main.user_can_view_requisition(approved_for_warehouse, "Tripoli", "Warehouse Manager", "A.Gallay", False))
+
 
 if __name__ == "__main__":
     unittest.main()
