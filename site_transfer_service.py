@@ -9,11 +9,13 @@ from sqlalchemy.orm import aliased
 
 from database import normalize_program
 from models import (
+    AppUser,
     AuditLog,
     Product,
     Site,
     SiteMaterialMovement,
     SiteTransfer,
+    SiteTransferApproval,
     SiteTransferCorrection,
     SiteTransferDispatch,
     SiteTransferItem,
@@ -197,6 +199,9 @@ def _transfer_view(db, transfer: SiteTransfer) -> dict:
         program=transfer.program, transfer_id=transfer.id
     ).first()
     totals = _active_receipt_totals(db, transfer.id) if dispatch else {}
+    approval = db.query(SiteTransferApproval).filter_by(
+        program=transfer.program, transfer_id=transfer.id
+    ).first()
     cancelled = transfer.status == "cancelled"
     result_items = []
     for item in items:
@@ -228,20 +233,57 @@ def _transfer_view(db, transfer: SiteTransfer) -> dict:
         "created_at": transfer.created_at.isoformat() if transfer.created_at else "",
         "approved_by": transfer.approved_by,
         "approved_at": transfer.approved_at.isoformat() if transfer.approved_at else "",
+        "approval": ({
+            "status": approval.status,
+            "created_by_user_id": approval.created_by_user_id,
+            "approver_user_id": approval.approver_user_id,
+            "approver_name": approval.approver.name or approval.approver.username,
+            "approver_username": approval.approver.username,
+            "decided_by_user_id": approval.decided_by_user_id,
+            "decision_note": approval.decision_note,
+            "decided_at": approval.decided_at.isoformat() if approval.decided_at else "",
+        } if approval else None),
         "dispatched_by": dispatch.dispatched_by if dispatch else "",
         "dispatched_at": dispatch.dispatched_at.isoformat() if dispatch else "",
         "items": result_items,
     }
 
 
+def _active_requester(db, program: str, user_id: int, *, lock: bool = False) -> AppUser:
+    query = db.query(AppUser).filter(
+        AppUser.id == int(user_id), AppUser.program == program,
+        func.lower(AppUser.role) == "requester", func.lower(AppUser.status) == "active",
+    )
+    if lock:
+        query = query.with_for_update()
+    user = query.first()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Select an active Requester in this program as the regional manager")
+    return user
+
+
+def list_transfer_approvers(db, program: str) -> list[dict]:
+    program_key = normalize_program(program)
+    rows = db.query(AppUser).filter(
+        AppUser.program == program_key,
+        func.lower(AppUser.role) == "requester",
+        func.lower(AppUser.status) == "active",
+    ).order_by(func.lower(AppUser.name), func.lower(AppUser.username), AppUser.id).all()
+    return [{"id": row.id, "name": row.name or row.username, "username": row.username} for row in rows]
+
+
 def create_transfer(db, *, program: str, from_site_id: int, to_site_id: int, items: list[dict],
-                    reference: str, notes: str, actor: str, request_token: str) -> SiteTransfer:
+                    reference: str, notes: str, actor: str, request_token: str,
+                    approver_user_id: int | None = None, actor_user_id: int | None = None) -> SiteTransfer:
     _require_transaction(db)
     program_key = normalize_program(program)
     actor_name = _actor(actor)
     reference_value = _clean_text(reference, 200, "Reference")
     notes_value = _clean_text(notes, 4000, "Notes")
     token_hash = request_token_hash(program_key, request_token)
+    approver = _active_requester(db, program_key, approver_user_id, lock=True) if approver_user_id else None
+    if approver is not None and actor_user_id is not None and approver.id == int(actor_user_id):
+        raise HTTPException(status_code=400, detail="The transfer creator cannot be its regional manager approver")
     normalized_lines = _validate_route_and_lines(db, program_key, from_site_id, to_site_id, items)
 
     existing = db.query(SiteTransfer).filter_by(program=program_key, request_token_hash=token_hash).first()
@@ -256,6 +298,15 @@ def create_transfer(db, *, program: str, from_site_id: int, to_site_id: int, ite
             and existing.reference == reference_value
             and existing.notes == notes_value
             and old_lines == sorted(normalized_lines, key=lambda row: row["product_id"])
+        )
+        old_approval = db.query(SiteTransferApproval).filter_by(
+            program=program_key, transfer_id=existing.id
+        ).first()
+        exact = exact and (
+            (old_approval is None and approver is None)
+            or (old_approval is not None and approver is not None
+                and old_approval.approver_user_id == approver.id
+                and old_approval.created_by_user_id == actor_user_id)
         )
         if not exact:
             raise HTTPException(status_code=409, detail="Transfer request token was already used for different details")
@@ -280,12 +331,23 @@ def create_transfer(db, *, program: str, from_site_id: int, to_site_id: int, ite
             requested_qty=line["quantity"],
             uom=line["uom"],
         ))
+    if approver is not None:
+        if actor_user_id is None:
+            raise HTTPException(status_code=401, detail="Authenticated creator identity is required")
+        db.add(SiteTransferApproval(
+            program=program_key,
+            transfer_id=transfer.id,
+            created_by_user_id=int(actor_user_id),
+            approver_user_id=approver.id,
+            status="pending",
+        ))
     db.flush()
     _audit(db, "site_transfer_created", transfer.id, actor_name, {
         "program": program_key,
         "from_site_id": from_site_id,
         "to_site_id": to_site_id,
         "item_count": len(normalized_lines),
+        "approver_user_id": approver.id if approver else None,
         "reference": reference_value,
     })
     return transfer
@@ -295,6 +357,9 @@ def approve_transfer(db, transfer_id: int, program: str, actor: str) -> SiteTran
     _require_transaction(db)
     row = _transfer(db, transfer_id, program, lock=True)
     _require_transfer_sites_enabled(db, row)
+    assigned = db.query(SiteTransferApproval).filter_by(program=row.program, transfer_id=row.id).with_for_update().first()
+    if assigned is not None:
+        raise HTTPException(status_code=409, detail="This transfer must be approved by its assigned regional manager")
     actor_name = _actor(actor)
     if row.status == "draft":
         row.status = "approved"
@@ -304,6 +369,48 @@ def approve_transfer(db, transfer_id: int, program: str, actor: str) -> SiteTran
         _audit(db, "site_transfer_approved", row.id, actor_name, {"program": row.program})
     elif row.status not in {"approved", "in_transit", "partially_received", "received"}:
         raise HTTPException(status_code=409, detail="Only a draft transfer can be approved")
+    return row
+
+
+def decide_transfer_approval(db, transfer_id: int, program: str, *, user_id: int, actor: str,
+                              decision: str, note: str = "") -> SiteTransfer:
+    _require_transaction(db)
+    row = _transfer(db, transfer_id, program, lock=True)
+    approval = db.query(SiteTransferApproval).filter_by(
+        program=row.program, transfer_id=row.id
+    ).with_for_update().first()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Assigned regional manager approval was not found")
+    if approval.approver_user_id != int(user_id):
+        raise HTTPException(status_code=403, detail="Only the selected regional manager can decide this transfer")
+    if approval.status != "pending" or row.status != "draft":
+        raise HTTPException(status_code=409, detail="This transfer approval has already been decided")
+    decision_value = str(decision or "").strip().lower()
+    if decision_value not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Decision must be approved or rejected")
+    actor_name = _actor(actor)
+    now = datetime.now(timezone.utc)
+    approval.status = decision_value
+    approval.decided_by_user_id = int(user_id)
+    approval.decided_at = now
+    approval.decision_note = _clean_text(note, 1000, "Decision note", required=decision_value == "rejected")
+    if decision_value == "approved":
+        _require_transfer_sites_enabled(db, row)
+        row.status = "approved"
+        row.approved_by = actor_name
+        row.approved_at = now
+        action = "site_transfer_manager_approved"
+    else:
+        row.status = "cancelled"
+        action = "site_transfer_manager_rejected"
+    row.updated_at = now
+    _audit(db, action, row.id, actor_name, {
+        "program": row.program,
+        "approver_user_id": approval.approver_user_id,
+        "decision": decision_value,
+        "note": approval.decision_note,
+    })
+    db.flush()
     return row
 
 
@@ -627,13 +734,25 @@ def reverse_transfer_dispatch(db, transfer_id: int, program: str, actor: str, no
     return correction
 
 
-def get_transfer(db, transfer_id: int, program: str) -> dict:
-    return _transfer_view(db, _transfer(db, transfer_id, program))
+def get_transfer(db, transfer_id: int, program: str, *, approver_user_id: int | None = None) -> dict:
+    row = _transfer(db, transfer_id, program)
+    if approver_user_id is not None and db.query(SiteTransferApproval.id).filter_by(
+        program=normalize_program(program), transfer_id=row.id,
+        approver_user_id=int(approver_user_id),
+    ).first() is None:
+        raise HTTPException(status_code=404, detail="Site transfer not found")
+    return _transfer_view(db, row)
 
 
-def list_transfers(db, program: str, *, page: int = 1, page_size: int = 50, status: str = "") -> dict:
+def list_transfers(db, program: str, *, page: int = 1, page_size: int = 50, status: str = "",
+                   approver_user_id: int | None = None) -> dict:
     program_key = normalize_program(program)
     query = db.query(SiteTransfer).filter_by(program=program_key)
+    if approver_user_id is not None:
+        query = query.join(SiteTransferApproval, SiteTransferApproval.transfer_id == SiteTransfer.id).filter(
+            SiteTransferApproval.program == program_key,
+            SiteTransferApproval.approver_user_id == int(approver_user_id),
+        )
     status_value = str(status or "").strip().lower()
     if status_value:
         allowed = {"draft", "approved", "in_transit", "partially_received", "received", "cancelled"}

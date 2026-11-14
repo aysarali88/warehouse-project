@@ -25,6 +25,7 @@ from migrations.site_inventory_foundation import migrate as migrate_foundation
 from migrations.site_inventory_transfers import migrate as migrate_transfers
 from models import (
     Product,
+    AppUser,
     Site,
     SiteBalance,
     SiteMaterialMovement,
@@ -35,6 +36,7 @@ from models import (
     SiteTransferItem,
     SiteTransferReceipt,
     SiteTransferReceiptItem,
+    SiteTransferApproval,
 )
 from site_inventory_service import approve_opening_balance, create_opening_balance_request
 
@@ -46,9 +48,12 @@ class SiteTransferTests(unittest.TestCase):
             raise RuntimeError("Local transfer tests require an isolated SQLite test database")
         if inspect(engine).has_table("site_transfers"):
             raise RuntimeError("Transfer tables must not be created by application startup")
+        if inspect(engine).has_table("site_transfer_approvals"):
+            raise RuntimeError("Transfer approval table must not be created by application startup")
         migrate_foundation(engine, schema=None)
         cls.migration = migrate_transfers(engine, schema=None)
         cls.repeat_migration = migrate_transfers(engine, schema=None)
+        SiteTransferApproval.__table__.create(bind=engine, checkfirst=False)
 
     @classmethod
     def tearDownClass(cls):
@@ -62,12 +67,28 @@ class SiteTransferTests(unittest.TestCase):
                 self.destination = Site(program="FTTH", name=f"Transfer Destination {suffix}", site_inventory_enabled=True)
                 self.other_program_site = Site(program="SINGLE_RAN", name=f"Other Program {suffix}")
                 self.product = Product(program="FTTH", sku=f"TR-{suffix}", name="Transfer cable", unit="M")
+                self.admin_user = AppUser(
+                    program="FTTH", username=f"admin-{suffix}", name="Transfer Admin",
+                    role="Admin", status="active", password_hash="synthetic-test-hash",
+                )
+                self.manager_user = AppUser(
+                    program="FTTH", username=f"manager-{suffix}", name="Regional Manager",
+                    role="Requester", status="active", password_hash="synthetic-test-hash",
+                )
+                self.other_manager_user = AppUser(
+                    program="FTTH", username=f"other-manager-{suffix}", name="Other Manager",
+                    role="Requester", status="active", password_hash="synthetic-test-hash",
+                )
                 db.add_all([self.source, self.destination, self.other_program_site, self.product])
+                db.add_all([self.admin_user, self.manager_user, self.other_manager_user])
                 db.flush()
                 self.source_id = self.source.id
                 self.destination_id = self.destination.id
                 self.other_program_site_id = self.other_program_site.id
                 self.product_id = self.product.id
+                self.admin_user_id = self.admin_user.id
+                self.manager_user_id = self.manager_user.id
+                self.other_manager_user_id = self.other_manager_user.id
                 request = create_opening_balance_request(
                     db,
                     program="FTTH",
@@ -84,7 +105,7 @@ class SiteTransferTests(unittest.TestCase):
                 approve_opening_balance(db, request.id, "FTTH", "test-admin")
 
     def _create(self, *, quantity=30, request_token=None, uom="M", from_site_id=None, to_site_id=None,
-                product_id=None, program="FTTH"):
+                product_id=None, program="FTTH", approver_user_id=None, actor_user_id=None):
         token = request_token or f"transfer-{uuid4().hex}-request"
         with SessionLocal() as db:
             with db.begin():
@@ -98,8 +119,17 @@ class SiteTransferTests(unittest.TestCase):
                     notes="Warehouse-Test style local fixture",
                     actor="test-admin",
                     request_token=token,
+                    approver_user_id=approver_user_id,
+                    actor_user_id=actor_user_id,
                 )
                 return row.id
+
+    def _create_assigned(self, *, quantity=5, approver_user_id=None, actor_user_id=None):
+        return self._create(
+            quantity=quantity,
+            approver_user_id=self.manager_user_id if approver_user_id is None else approver_user_id,
+            actor_user_id=self.admin_user_id if actor_user_id is None else actor_user_id,
+        )
 
     def _approve_dispatch(self, transfer_id, token=None):
         with SessionLocal() as db:
@@ -131,6 +161,147 @@ class SiteTransferTests(unittest.TestCase):
             "site_transfers", "site_transfer_items", "site_transfer_dispatches",
             "site_transfer_receipts", "site_transfer_receipt_items", "site_transfer_corrections",
         }.issubset(names))
+
+    def test_assigned_regional_manager_approval_is_scoped_and_does_not_move_inventory(self):
+        before_source = self._balance(self.source_id)
+        before_destination = self._balance(self.destination_id)
+        with SessionLocal() as db:
+            before_movements = db.query(SiteMaterialMovement).count()
+
+        transfer_id = self._create_assigned()
+        with SessionLocal() as db:
+            approval = db.query(SiteTransferApproval).filter_by(transfer_id=transfer_id).one()
+            self.assertEqual(approval.status, "pending")
+            self.assertEqual(approval.approver_user_id, self.manager_user_id)
+            self.assertEqual(approval.created_by_user_id, self.admin_user_id)
+            self.assertEqual(transfers.list_transfers(
+                db, "FTTH", approver_user_id=self.manager_user_id,
+            )["total"], 1)
+            self.assertEqual(transfers.list_transfers(
+                db, "FTTH", approver_user_id=self.other_manager_user_id,
+            )["total"], 0)
+            with self.assertRaises(HTTPException) as hidden:
+                transfers.get_transfer(db, transfer_id, "FTTH", approver_user_id=self.other_manager_user_id)
+            self.assertEqual(hidden.exception.status_code, 404)
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as admin_bypass:
+                with db.begin():
+                    transfers.approve_transfer(db, transfer_id, "FTTH", "test-admin")
+            self.assertEqual(admin_bypass.exception.status_code, 409)
+
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as wrong_manager:
+                with db.begin():
+                    transfers.decide_transfer_approval(
+                        db, transfer_id, "FTTH", user_id=self.other_manager_user_id,
+                        actor="Other Manager", decision="approved",
+                    )
+            self.assertEqual(wrong_manager.exception.status_code, 403)
+
+        with SessionLocal() as db:
+            with db.begin():
+                row = transfers.decide_transfer_approval(
+                    db, transfer_id, "FTTH", user_id=self.manager_user_id,
+                    actor="Regional Manager", decision="approved",
+                )
+                self.assertEqual(row.status, "approved")
+
+        self.assertEqual(self._balance(self.source_id), before_source)
+        self.assertEqual(self._balance(self.destination_id), before_destination)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(SiteMaterialMovement).count(), before_movements)
+            approval = db.query(SiteTransferApproval).filter_by(transfer_id=transfer_id).one()
+            self.assertEqual(approval.status, "approved")
+            self.assertEqual(approval.decided_by_user_id, self.manager_user_id)
+
+    def test_assigned_manager_can_reject_only_with_reason_and_requester_must_be_valid(self):
+        with SessionLocal() as db:
+            before_transfer_movements = db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.event_type.like("site_transfer_%")
+            ).count()
+        with self.assertRaises(HTTPException) as self_approval:
+            self._create_assigned(approver_user_id=self.admin_user_id, actor_user_id=self.admin_user_id)
+        self.assertEqual(self_approval.exception.status_code, 400)
+
+        inactive_manager = AppUser(
+            program="FTTH", username=f"inactive-{uuid4().hex[:8]}", name="Inactive",
+            role="Requester", status="disabled", password_hash="synthetic-test-hash",
+        )
+        with SessionLocal() as db:
+            with db.begin():
+                db.add(inactive_manager)
+                db.flush()
+                inactive_id = inactive_manager.id
+        with self.assertRaises(HTTPException) as inactive:
+            self._create_assigned(approver_user_id=inactive_id)
+        self.assertEqual(inactive.exception.status_code, 400)
+
+        transfer_id = self._create_assigned()
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as missing_note:
+                with db.begin():
+                    transfers.decide_transfer_approval(
+                        db, transfer_id, "FTTH", user_id=self.manager_user_id,
+                        actor="Regional Manager", decision="rejected",
+                    )
+            self.assertEqual(missing_note.exception.status_code, 400)
+        with SessionLocal() as db:
+            with db.begin():
+                row = transfers.decide_transfer_approval(
+                    db, transfer_id, "FTTH", user_id=self.manager_user_id,
+                    actor="Regional Manager", decision="rejected", note="Incorrect destination stock",
+                )
+                self.assertEqual(row.status, "cancelled")
+        with SessionLocal() as db:
+            approval = db.query(SiteTransferApproval).filter_by(transfer_id=transfer_id).one()
+            self.assertEqual(approval.status, "rejected")
+            self.assertEqual(approval.decision_note, "Incorrect destination stock")
+            self.assertEqual(db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.event_type.like("site_transfer_%")
+            ).count(), before_transfer_movements)
+
+    def test_transfer_approval_api_accepts_only_the_assigned_requester(self):
+        with SessionLocal() as db:
+            before_transfer_movements = db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.event_type.like("site_transfer_%")
+            ).count()
+        transfer_id = self._create_assigned()
+
+        def require_roles(request, *roles):
+            user = request.state.current_user
+            if user.role not in roles:
+                raise HTTPException(status_code=403, detail="Role not allowed")
+            return user
+
+        router = site_transfer_api.build_site_transfer_router(
+            lambda: None, normalize_program, require_roles,
+            lambda request: request.state.current_user.name,
+            enabled_fn=lambda _program: True,
+            admin_write_enabled_fn=lambda _name: True,
+        )
+        endpoint = next(route.endpoint for route in router.routes
+                        if route.path == "/api/warehouse/site-transfers/{transfer_id}/approve")
+        payload = site_transfer_api.SiteTransferDecisionIn(program="FTTH")
+        request = Request({"type": "http", "headers": [], "query_string": b""})
+        request.state.session_program = "FTTH"
+        request.state.current_user = SimpleNamespace(
+            id=self.other_manager_user_id, role="Requester", program="FTTH", name="Other Manager",
+        )
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as denied:
+                endpoint(transfer_id, payload, request, db)
+            self.assertEqual(denied.exception.status_code, 403)
+
+        request.state.current_user = SimpleNamespace(
+            id=self.manager_user_id, role="Requester", program="FTTH", name="Regional Manager",
+        )
+        with SessionLocal() as db:
+            result = endpoint(transfer_id, payload, request, db)
+            self.assertEqual(result["transfer"]["status"], "approved")
+            self.assertEqual(result["transfer"]["approval"]["decided_by_user_id"], self.manager_user_id)
+            self.assertEqual(db.query(SiteMaterialMovement).filter(
+                SiteMaterialMovement.event_type.like("site_transfer_%")
+            ).count(), before_transfer_movements)
 
     def test_creation_validates_numeric_sites_program_product_uom_and_positive_quantity(self):
         with self.assertRaises(HTTPException) as same_site:
@@ -488,6 +659,7 @@ class SiteTransferTests(unittest.TestCase):
         )
         payload = site_transfer_api.SiteTransferCreate(
             program="FTTH", from_site_id=1, to_site_id=2,
+            approver_user_id=1,
             items=[site_transfer_api.TransferLineCreate(product_id=1, quantity=1, uom="M")],
             request_token="api-feature-disabled-token-0001",
         )
@@ -532,6 +704,7 @@ class SiteTransferTests(unittest.TestCase):
         request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
         create_data = site_transfer_api.SiteTransferCreate(
             program="FTTH", from_site_id=1, to_site_id=2,
+            approver_user_id=1,
             items=[site_transfer_api.TransferLineCreate(product_id=1, quantity=1, uom="M")],
             request_token="admin-write-transfer-create-0001",
         )

@@ -56,7 +56,7 @@
     return /disabled until Site Inventory cutover is explicitly enabled/i.test(errorMessage(error));
   }
 
-  function createController({ api, getProgram, isAdmin, onChange, confirm }) {
+  function createController({ api, getProgram, isAdmin, isRequester = () => false, getUserId = () => 0, onChange, confirm }) {
     const state = {
       gate: 'idle',
       gateMessage: '',
@@ -64,6 +64,7 @@
       message: '',
       sites: [],
       products: [],
+      approvers: [],
       transfers: [],
       page: 1,
       pageSize: PAGE_SIZE,
@@ -72,7 +73,7 @@
       status: '',
       loading: false,
       busy: false,
-      form: { fromSiteId: '', toSiteId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' },
+      form: { fromSiteId: '', toSiteId: '', approverUserId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' },
       receipt: null,
       program: '',
     };
@@ -115,10 +116,16 @@
       state.products = Array.isArray(data.products) ? data.products : [];
     }
 
+    async function fetchApprovers() {
+      const data = await api(url('/api/warehouse/site-transfers/approvers'));
+      state.approvers = Array.isArray(data.items) ? data.items : [];
+    }
+
     async function open() {
-      if (!isAdmin()) {
+      const canUseInbox = isRequester() && program() === 'FTTH';
+      if (!isAdmin() && !canUseInbox) {
         state.gate = 'denied';
-        state.gateMessage = 'Admin access is required.';
+        state.gateMessage = 'Admin or an assigned FTTH regional manager account is required.';
         publish();
         return false;
       }
@@ -128,8 +135,9 @@
         state.program = nextProgram;
         state.sites = [];
         state.products = [];
+        state.approvers = [];
         state.transfers = [];
-        state.form = { fromSiteId: '', toSiteId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' };
+        state.form = { fromSiteId: '', toSiteId: '', approverUserId: '', lines: [newTransferLine('line-1')], reference: '', notes: '' };
       }
       state.gate = 'checking';
       state.gateMessage = 'Checking transfer readiness…';
@@ -141,7 +149,10 @@
         await fetchList(1);
         state.gate = 'enabled';
         state.gateMessage = '';
-        if (!state.sites.length || !state.products.length) await fetchOptions();
+        if (isAdmin()) {
+          if (!state.sites.length || !state.products.length) await fetchOptions();
+          await fetchApprovers();
+        }
         state.loading = false;
         publish();
         if (state.form.fromSiteId) await refreshAllAvailability();
@@ -226,7 +237,7 @@
     }
 
     function updateForm(field, value) {
-      if (!['fromSiteId', 'toSiteId'].includes(field)) return;
+      if (!['fromSiteId', 'toSiteId', 'approverUserId'].includes(field) || !isAdmin()) return;
       state.form[field] = value;
       state.error = '';
       publish();
@@ -281,12 +292,18 @@
     }
 
     async function createTransfer(values = {}) {
-      if (state.busy || state.gate !== 'enabled') return false;
+      if (state.busy || state.gate !== 'enabled' || !isAdmin()) return false;
       const form = { ...state.form, ...values };
       const lines = (values.lines || state.form.lines).map(line => ({ ...line }));
       const siteIds = new Set(state.sites.map(row => String(row.id)));
       if (!siteIds.has(String(form.fromSiteId)) || !siteIds.has(String(form.toSiteId))) {
         state.error = 'Select both sites from the loaded options.';
+        publish();
+        return false;
+      }
+      const approver = state.approvers.find(row => String(row.id) === String(form.approverUserId));
+      if (!approver) {
+        state.error = 'Select an active regional manager from the loaded Requester accounts.';
         publish();
         return false;
       }
@@ -339,6 +356,7 @@
             program: program(),
             from_site_id: Number(form.fromSiteId),
             to_site_id: Number(form.toSiteId),
+            approver_user_id: Number(approver.id),
             items: lines.map(line => {
               const product = state.products.find(row => String(row.id) === String(line.productId));
               return { product_id: Number(product.id), quantity: line.quantity, uom: product.uom };
@@ -348,8 +366,9 @@
             request_token: requestToken(),
           }),
         });
-        state.message = `Transfer #${data.transfer?.id ?? ''} created as Draft.`;
+        state.message = `Transfer #${data.transfer?.id ?? ''} sent to ${approver.name} for approval.`;
         state.form.lines = [newTransferLine(`line-${nextLineId++}`)];
+        state.form.approverUserId = '';
         state.form.reference = '';
         state.form.notes = '';
         await refreshAfterAction();
@@ -390,6 +409,16 @@
 
     async function approve(transferId) {
       return performAction(transferId, 'approve');
+    }
+
+    async function reject(transferId, note) {
+      const reason = String(note || '').trim();
+      if (!reason) {
+        state.error = 'A rejection note is required.';
+        publish();
+        return false;
+      }
+      return performAction(transferId, 'reject', { note: reason });
     }
 
     async function dispatch(transferId) {
@@ -484,7 +513,7 @@
 
     return {
       state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine, refreshAllAvailability,
-      createTransfer, approve, dispatch, openReceipt, closeReceipt, receive, reverseDispatch,
+      createTransfer, approve, reject, dispatch, openReceipt, closeReceipt, receive, reverseDispatch,
     };
   }
 
@@ -506,7 +535,7 @@
     return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: 6 }) : escapeHtml(value);
   }
 
-  function attach({ api, getProgram, isAdmin, confirm }) {
+  function attach({ api, getProgram, isAdmin, isRequester, getUserId, confirm, prompt }) {
     const root = document.getElementById('siteTransferView');
     if (!root) return null;
 
@@ -536,6 +565,11 @@
       const linesRoot = element('siteTransferLines');
       if (!from || !to || !linesRoot) return;
       from.innerHTML = optionList(state.sites, state.form.fromSiteId, 'Select source site', row => row.name);
+      const approverSelect = element('siteTransferApprover');
+      if (approverSelect) {
+        approverSelect.innerHTML = optionList(state.approvers, state.form.approverUserId, 'Select regional manager', row => `${row.name} · ${row.username}`);
+        approverSelect.disabled = state.busy || !state.approvers.length;
+      }
       to.innerHTML = `<option value="">Select destination site</option>${state.sites.map(row =>
         `<option value="${Number(row.id)}"${String(row.id) === String(state.form.toSiteId) ? ' selected' : ''}${String(row.id) === String(state.form.fromSiteId) ? ' disabled' : ''}>${escapeHtml(row.name)}</option>`
       ).join('')}`;
@@ -560,7 +594,7 @@
       const addButton = element('siteTransferAddLine');
       if (addButton) addButton.disabled = state.busy || state.form.lines.length >= MAX_TRANSFER_LINES;
       const submit = element('siteTransferCreateButton');
-      if (submit) submit.disabled = state.busy || !state.form.fromSiteId || !state.form.toSiteId || state.form.lines.some(line => !line.productId || line.availabilityLoading || !line.availabilityLoaded);
+      if (submit) submit.disabled = state.busy || !state.form.fromSiteId || !state.form.toSiteId || !state.form.approverUserId || state.form.lines.some(line => !line.productId || line.availabilityLoading || !line.availabilityLoaded);
     }
 
     function renderRows(state) {
@@ -573,14 +607,21 @@
           const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
           return items.map((item, index) => {
             const group = (content) => index === 0 ? `<td rowspan="${items.length}">${content}</td>` : '';
+            const assignedApproval = transfer.approval;
+            const assignedToMe = assignedApproval && Number(assignedApproval.approver_user_id) === Number(getUserId?.());
             const actions = index === 0
-              ? transfer.status === 'draft'
-                ? `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`
-                : transfer.status === 'approved'
-                  ? `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`
-                  : ''
+              ? !isAdmin() && assignedToMe && assignedApproval.status === 'pending' && transfer.status === 'draft'
+                ? `<button class="btn primary" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button><button class="btn danger" type="button" data-site-transfer-action="reject" data-transfer-id="${Number(transfer.id)}">Reject</button>`
+                : isAdmin() && transfer.status === 'draft'
+                  ? assignedApproval?.status === 'pending'
+                    ? `<span class="site-transfer-hint">Awaiting ${escapeHtml(assignedApproval.approver_name || 'regional manager')}</span>`
+                    : assignedApproval ? `<span class="site-transfer-hint">${escapeHtml(displayStatus(assignedApproval.status))}</span>`
+                      : `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`
+                  : isAdmin() && transfer.status === 'approved'
+                    ? `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`
+                    : ''
               : '';
-            const receive = ['in_transit', 'partially_received'].includes(transfer.status)
+            const receive = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
               ? `<button class="btn soft" type="button" data-site-transfer-action="receive" data-transfer-id="${Number(transfer.id)}" data-item-id="${Number(item.id)}">Receive</button>`
               : '';
             const created = transfer.created_at ? new Date(transfer.created_at).toLocaleString() : '—';
@@ -592,7 +633,7 @@
               <td>${displayQuantity(item.received_qty)} ${escapeHtml(item.uom)}</td>
               <td>${displayQuantity(item.in_transit_qty)} ${escapeHtml(item.uom)}</td>
               ${group(`<span class="site-transfer-status status-${escapeHtml(transfer.status)}">${escapeHtml(displayStatus(transfer.status))}</span>`)}
-              ${group(escapeHtml(transfer.created_by))}${group(escapeHtml(created))}
+              ${group(`${escapeHtml(transfer.created_by)}${assignedApproval ? `<small class="site-transfer-cell-sub">Manager: ${escapeHtml(assignedApproval.approver_name || assignedApproval.approver_username)}</small>` : ''}`)}${group(escapeHtml(created))}
               ${index === 0 ? `<td rowspan="${items.length}" class="site-transfer-actions">${actions}</td>` : ''}
               <td>${receive}</td>
             </tr>`;
@@ -668,12 +709,13 @@
       root.querySelectorAll('[data-site-transfer-action]').forEach(button => { button.disabled = state.busy || state.loading; });
     }
 
-    const controller = createController({ api, getProgram, isAdmin, onChange: render, confirm });
+    const controller = createController({ api, getProgram, isAdmin, isRequester, getUserId, onChange: render, confirm });
 
     root.addEventListener('change', event => {
       const target = event.target;
       if (target.id === 'siteTransferFromSite') controller.updateForm('fromSiteId', target.value);
       else if (target.id === 'siteTransferToSite') controller.updateForm('toSiteId', target.value);
+      else if (target.id === 'siteTransferApprover') controller.updateForm('approverUserId', target.value);
       else if (target.dataset.siteTransferLineField === 'productId') controller.updateLine(target.dataset.lineId, 'productId', target.value);
       else if (target.id === 'siteTransferStatusFilter') controller.setStatus(target.value);
       else if (target.id === 'siteTransferCorrectionSelect') renderCorrections(controller.state);
@@ -718,6 +760,11 @@
         event.preventDefault();
         const id = Number(button.dataset.transferId);
         if (button.dataset.siteTransferAction === 'approve') await controller.approve(id);
+        else if (button.dataset.siteTransferAction === 'reject') {
+          const ask = typeof prompt === 'function' ? prompt : globalThis.prompt;
+          const note = typeof ask === 'function' ? ask('Enter a reason for rejecting this transfer:') : '';
+          if (note !== null) await controller.reject(id, note);
+        }
         else if (button.dataset.siteTransferAction === 'dispatch') await controller.dispatch(id);
         else if (button.dataset.siteTransferAction === 'receive') controller.openReceipt(id, Number(button.dataset.itemId));
         return;

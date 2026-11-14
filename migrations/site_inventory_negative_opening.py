@@ -18,6 +18,7 @@ PREVIOUS_VERSIONS = (
     "site-inventory-transfers-v1",
     "site-inventory-site-activation-v1",
 )
+LATER_VERSIONS = ("site-inventory-transfer-approval-v1",)
 LEGACY_CHECKS = {
     "site_balances": ("ck_site_balance_nonnegative", "on_hand_qty"),
     "site_opening_balance_requests": ("ck_site_opening_quantity_nonnegative", "quantity"),
@@ -73,8 +74,11 @@ def migrate(bind, schema: str | None = None) -> dict:
                 )
             versions = set(connection.execute(text(f"SELECT version FROM {version_table}")).scalars())
             already_applied = VERSION in versions
-            expected = set(PREVIOUS_VERSIONS) | ({VERSION} if already_applied else set())
-            if versions != expected:
+            expected_before = set(PREVIOUS_VERSIONS)
+            expected_after = expected_before | {VERSION}
+            allowed = ({frozenset(expected_after), frozenset(expected_after | set(LATER_VERSIONS))}
+                       if already_applied else {frozenset(expected_before)})
+            if frozenset(versions) not in allowed:
                 raise RuntimeError("Negative-opening migration requires exactly the four prior Site Inventory versions")
             present = _legacy_checks(connection, schema_name)
             all_legacy = {name for name, _ in LEGACY_CHECKS.values()}

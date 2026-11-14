@@ -1,4 +1,4 @@
-"""Admin-only API for Site-to-Site transfers; hidden until explicit cutover enablement."""
+"""Admin-managed Site-to-Site transfers with assigned Requester approval."""
 
 from decimal import Decimal
 
@@ -7,14 +7,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import SiteMaterialMovement
+from models import SiteMaterialMovement, SiteTransferApproval
 from site_inventory_config import feature_flag_enabled, integration_enabled
 from site_transfer_service import (
     approve_transfer,
     create_transfer,
+    decide_transfer_approval,
     dispatch_transfer,
     get_transfer,
     list_transfers,
+    list_transfer_approvers,
     receive_transfer,
     reverse_transfer_dispatch,
     reverse_transfer_receipt,
@@ -35,6 +37,7 @@ class SiteTransferCreate(BaseModel):
     program: str = "FTTH"
     from_site_id: int = Field(gt=0)
     to_site_id: int = Field(gt=0)
+    approver_user_id: int = Field(gt=0)
     items: list[TransferLineCreate] = Field(min_length=1, max_length=100)
     reference: str = Field(default="", max_length=200)
     notes: str = Field(default="", max_length=4000)
@@ -43,6 +46,10 @@ class SiteTransferCreate(BaseModel):
 
 class SiteTransferAction(BaseModel):
     program: str = "FTTH"
+
+
+class SiteTransferDecisionIn(SiteTransferAction):
+    note: str = Field(default="", max_length=1000)
 
 
 class SiteTransferDispatchIn(SiteTransferAction):
@@ -82,6 +89,19 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
             )
         return actor_fn(request)
 
+    def authorize_view(request: Request, program: str):
+        user = require_roles_fn(request, "Admin", "Requester")
+        program_key = normalize_program_fn(program)
+        session_program = normalize_program_fn(getattr(request.state, "session_program", getattr(user, "program", "")))
+        if program_key != session_program or normalize_program_fn(getattr(user, "program", program_key)) != program_key:
+            raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
+        if not gate(program_key):
+            raise HTTPException(
+                status_code=503,
+                detail="Site-to-Site transfers are disabled until Site Inventory cutover is explicitly enabled for this program",
+            )
+        return user
+
     def authorize_and_write_gate(request: Request, program: str) -> str:
         actor = authorize_and_gate(request, program)
         if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
@@ -102,6 +122,8 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
                     from_site_id=data.from_site_id,
                     to_site_id=data.to_site_id,
                     items=[item.dict() for item in data.items],
+                    approver_user_id=data.approver_user_id,
+                    actor_user_id=int(request.state.current_user.id),
                     reference=data.reference,
                     notes=data.notes,
                     actor=actor,
@@ -120,9 +142,34 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         page_size: int = Query(default=50, ge=1, le=100),
         db: Session = Depends(db_dependency),
     ):
-        authorize_and_gate(request, program)
-        result = list_transfers(db, program, page=page, page_size=page_size, status=status)
+        user = authorize_view(request, program)
+        approver_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
+        result = list_transfers(db, program, page=page, page_size=page_size, status=status,
+                                approver_user_id=approver_user_id)
         return {"success": True, **result}
+
+    @router.get("/api/warehouse/site-transfers/approvers")
+    def site_transfer_approvers(
+        request: Request,
+        program: str = "FTTH",
+        db: Session = Depends(db_dependency),
+    ):
+        authorize_and_gate(request, program)
+        return {"success": True, "items": list_transfer_approvers(db, normalize_program_fn(program))}
+
+    @router.get("/api/warehouse/site-transfers/inbox-count")
+    def site_transfer_inbox_count(
+        request: Request,
+        program: str = "FTTH",
+        db: Session = Depends(db_dependency),
+    ):
+        user = authorize_view(request, program)
+        if str(user.role or "").strip().lower() != "requester":
+            return {"success": True, "count": 0}
+        count = db.query(SiteTransferApproval).filter_by(
+            program=normalize_program_fn(program), approver_user_id=int(user.id), status="pending"
+        ).count()
+        return {"success": True, "count": count}
 
     @router.get("/api/warehouse/site-transfers/{transfer_id}")
     def site_transfer_detail(
@@ -131,23 +178,67 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         program: str = "FTTH",
         db: Session = Depends(db_dependency),
     ):
-        authorize_and_gate(request, program)
-        return {"success": True, "transfer": get_transfer(db, transfer_id, program)}
+        user = authorize_view(request, program)
+        approver_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
+        return {"success": True, "transfer": get_transfer(db, transfer_id, program,
+                                                             approver_user_id=approver_user_id)}
 
     @router.post("/api/warehouse/site-transfers/{transfer_id}/approve")
     def site_transfer_approve(
         transfer_id: int,
-        data: SiteTransferAction,
+        data: SiteTransferDecisionIn,
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_write_gate(request, data.program)
+        user = require_roles_fn(request, "Admin", "Requester")
+        program_key = normalize_program_fn(data.program)
+        session_program = normalize_program_fn(getattr(request.state, "session_program", getattr(user, "program", "")))
+        if program_key != session_program or normalize_program_fn(getattr(user, "program", program_key)) != program_key:
+            raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
+        if not gate(program_key):
+            raise HTTPException(status_code=503, detail="Site-to-Site transfers are disabled for this program")
+        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
+            raise HTTPException(status_code=503, detail="Site Inventory administrative writes are disabled")
+        actor = actor_fn(request)
         try:
             with db.begin():
-                row = approve_transfer(db, transfer_id, data.program, actor)
+                if str(user.role or "").strip().lower() == "requester":
+                    row = decide_transfer_approval(
+                        db, transfer_id, data.program, user_id=int(user.id), actor=actor,
+                        decision="approved", note=data.note,
+                    )
+                else:
+                    row = approve_transfer(db, transfer_id, data.program, actor)
             return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
         except IntegrityError as exc:
             raise HTTPException(status_code=409, detail="Transfer changed concurrently; reload and retry") from exc
+
+    @router.post("/api/warehouse/site-transfers/{transfer_id}/reject")
+    def site_transfer_reject(
+        transfer_id: int,
+        data: SiteTransferDecisionIn,
+        request: Request,
+        db: Session = Depends(db_dependency),
+    ):
+        user = require_roles_fn(request, "Requester")
+        program_key = normalize_program_fn(data.program)
+        session_program = normalize_program_fn(getattr(request.state, "session_program", getattr(user, "program", "")))
+        if program_key != session_program or normalize_program_fn(getattr(user, "program", program_key)) != program_key:
+            raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
+        if not gate(program_key):
+            raise HTTPException(status_code=503, detail="Site-to-Site transfers are disabled for this program")
+        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
+            raise HTTPException(status_code=503, detail="Site Inventory administrative writes are disabled")
+        actor = actor_fn(request)
+        try:
+            with db.begin():
+                row = decide_transfer_approval(
+                    db, transfer_id, data.program, user_id=int(user.id), actor=actor,
+                    decision="rejected", note=data.note,
+                )
+            return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Transfer decision changed concurrently; reload and retry") from exc
 
     @router.post("/api/warehouse/site-transfers/{transfer_id}/dispatch")
     def site_transfer_dispatch(

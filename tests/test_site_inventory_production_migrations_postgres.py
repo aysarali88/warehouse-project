@@ -19,7 +19,7 @@ from migrations.run_site_inventory_production import (
     preflight_database,
 )
 from migrations.site_inventory_transfers import TRANSFER_TABLES
-from models import AuditLog, Product, Site
+from models import AppUser, AuditLog, Product, Site, SiteTransferApproval
 
 
 EXPECTED_TEST_REF = "kdzhcizesmjseadwegvd"
@@ -85,7 +85,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
                 connection.exec_driver_sql(
                     f'INSERT INTO "{cls.schema}"."sites" (program, name) VALUES (\'FTTH\', \'Pre-existing Site\')'
                 )
-                for table in (Product.__table__, AuditLog.__table__):
+                for table in (Product.__table__, AuditLog.__table__, AppUser.__table__):
                     table.create(bind=translated)
                 connection.exec_driver_sql(
                     f'CREATE TABLE "{cls.schema}"."rollout_records" ('
@@ -169,7 +169,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
     def test_migrations_are_additive_versioned_and_rerunnable_in_target_schema(self):
         self.assertEqual(self.clean_preflight["state"], "clean")
         self.assertEqual(self.dry_run_results, [])
-        self.assertEqual(self.before_negative_preflight["state"], "prefix-4-of-5")
+        self.assertEqual(self.before_negative_preflight["state"], "prefix-4-of-6")
         self.assertEqual([result["version"] for result in self.migration_results], list(MIGRATION_ORDER))
         self.assertEqual(self.complete_preflight["state"], "complete")
         self.assertTrue(all(result["already_applied"] for result in self.repeat_results))
@@ -177,6 +177,7 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
         inspector = inspect(self.engine)
         tables = set(inspector.get_table_names(schema=self.schema))
         self.assertTrue(set(TRANSFER_TABLES).issubset(tables))
+        self.assertIn("site_transfer_approvals", tables)
         self.assertTrue({
             "site_aliases", "site_balances", "site_material_movements",
             "site_opening_balance_requests", "site_inventory_schema_versions",
@@ -220,7 +221,26 @@ class ProductionLayoutMigrationPostgreSQLTests(unittest.TestCase):
             "site-inventory-transfers-v1",
             "site-inventory-site-activation-v1",
             "site-inventory-negative-opening-v1",
+            "site-inventory-transfer-approval-v1",
         }.issubset(versions))
+        approval_columns = {column["name"] for column in inspector.get_columns(
+            "site_transfer_approvals", schema=self.schema,
+        )}
+        self.assertTrue({
+            "program", "transfer_id", "created_by_user_id", "approver_user_id",
+            "status", "decision_note", "decided_by_user_id", "created_at", "decided_at",
+        }.issubset(approval_columns))
+        with self.engine.connect() as connection:
+            rls_enabled = connection.execute(text(
+                "SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname=:schema AND c.relname='site_transfer_approvals'"
+            ), {"schema": self.schema}).scalar_one()
+            public_roles_absent = connection.execute(text(
+                "SELECT NOT has_table_privilege('anon', :table_name, 'SELECT') "
+                "AND NOT has_table_privilege('authenticated', :table_name, 'SELECT')"
+            ), {"table_name": f"{self.schema}.site_transfer_approvals"}).scalar_one()
+        self.assertTrue(rls_enabled)
+        self.assertTrue(public_roles_absent)
         self.assertEqual(outside_after, self.tables_before)
 
     def test_legacy_rollout_rows_remain_unstamped_and_ineligible_by_default(self):

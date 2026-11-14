@@ -18,7 +18,10 @@ PREVIOUS_VERSIONS = (
     "site-inventory-rollout-cutover-v1",
     "site-inventory-transfers-v1",
 )
-LATER_VERSIONS = ("site-inventory-negative-opening-v1",)
+LATER_VERSIONS = (
+    "site-inventory-negative-opening-v1",
+    "site-inventory-transfer-approval-v1",
+)
 
 
 def _column_definition(connection, schema: str | None) -> dict | None:
@@ -54,11 +57,15 @@ def _check_prior_versions(connection, schema: str | None, *, activation_applied:
         raise RuntimeError("Unexpected Site Inventory migration version table")
     table = qualified(connection, schema, "site_inventory_schema_versions") if schema else "site_inventory_schema_versions"
     recorded = set(connection.execute(text(f"SELECT version FROM {table}")).scalars())
-    expected = set(PREVIOUS_VERSIONS)
+    expected_before = set(PREVIOUS_VERSIONS)
+    expected_after = expected_before | {VERSION}
+    allowed_states = {frozenset(expected_before)}
     if activation_applied:
-        expected.add(VERSION)
-        expected.update(LATER_VERSIONS)
-    if recorded != expected:
+        allowed_states = {
+            frozenset(expected_after | set(LATER_VERSIONS[:count]))
+            for count in range(len(LATER_VERSIONS) + 1)
+        }
+    if frozenset(recorded) not in allowed_states:
         raise RuntimeError("Site activation migration requires the complete expected prior migration state")
 
 

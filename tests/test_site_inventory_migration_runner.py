@@ -5,12 +5,18 @@ import io
 import re
 import unittest
 from pathlib import Path
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
+
+from migrations.site_inventory_transfer_approval import PREVIOUS_VERSIONS, migrate as migrate_transfer_approval
+from models import AppUser, Site, SiteTransfer
 
 from migrations.run_site_inventory_production import (
     FOUNDATION_TABLE_SET,
     MIGRATION_ORDER,
     PRODUCTION_PROJECT_REF,
     TRANSFER_TABLE_SET,
+    TRANSFER_APPROVAL_TABLE_SET,
     WAREHOUSE_TEST_PROJECT_REF,
     MigrationPreflightError,
     execute_migrations,
@@ -30,6 +36,74 @@ def production_url(*, host=None, username=None, database="postgres", port=5432):
 
 
 class ProductionMigrationRunnerTests(unittest.TestCase):
+    def test_transfer_approval_migration_is_additive_idempotent_and_append_only_on_sqlite(self):
+        test_engine = create_engine("sqlite://")
+        try:
+            for table in (Site.__table__, AppUser.__table__, SiteTransfer.__table__):
+                table.create(bind=test_engine)
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TABLE site_inventory_schema_versions ("
+                    "version VARCHAR(100) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+                )
+                for version in PREVIOUS_VERSIONS:
+                    connection.execute(text(
+                        "INSERT INTO site_inventory_schema_versions (version) VALUES (:version)"
+                    ), {"version": version})
+
+            first = migrate_transfer_approval(test_engine)
+            second = migrate_transfer_approval(test_engine)
+            self.assertFalse(first["already_applied"])
+            self.assertTrue(second["already_applied"])
+            self.assertTrue(inspect(test_engine).has_table("site_transfer_approvals"))
+            with test_engine.connect() as connection:
+                versions = connection.execute(text(
+                    "SELECT version FROM site_inventory_schema_versions ORDER BY applied_at, version"
+                )).scalars().all()
+                self.assertEqual(versions.count("site-inventory-transfer-approval-v1"), 1)
+                triggers = connection.execute(text(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' "
+                    "AND name IN ('tr_site_transfer_approval_no_delete', 'tr_site_transfer_approval_transition')"
+                )).scalars().all()
+                self.assertEqual(len(triggers), 2)
+
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "INSERT INTO sites (id, program, name) VALUES (1, 'FTTH', 'Source'), (2, 'FTTH', 'Destination')"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO app_users (id, program, username, name, role, password_hash, status, "
+                    "area_builder_access, can_request_materials) VALUES "
+                    "(1, 'FTTH', 'creator', 'Creator', 'Admin', 'synthetic', 'active', 0, 0), "
+                    "(2, 'FTTH', 'manager', 'Manager', 'Requester', 'synthetic', 'active', 0, 0), "
+                    "(3, 'FTTH', 'other', 'Other', 'Requester', 'synthetic', 'active', 0, 0)"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO site_transfers (id, program, from_site_id, to_site_id, status, reference, notes, "
+                    "created_by, request_token_hash) VALUES (1, 'FTTH', 1, 2, 'draft', '', '', 'Creator', 'token')"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO site_transfer_approvals (program, transfer_id, created_by_user_id, approver_user_id) "
+                    "VALUES ('FTTH', 1, 1, 2)"
+                )
+
+            with self.assertRaises(IntegrityError):
+                with test_engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        "UPDATE site_transfer_approvals SET status='approved', decided_by_user_id=3, "
+                        "decided_at=CURRENT_TIMESTAMP WHERE transfer_id=1"
+                    )
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "UPDATE site_transfer_approvals SET status='approved', decided_by_user_id=2, "
+                    "decided_at=CURRENT_TIMESTAMP WHERE transfer_id=1"
+                )
+            with self.assertRaises(IntegrityError):
+                with test_engine.begin() as connection:
+                    connection.exec_driver_sql("DELETE FROM site_transfer_approvals WHERE transfer_id=1")
+        finally:
+            test_engine.dispose()
+
     def test_accepts_only_the_expected_production_database_identity(self):
         identity = production_url_identity(production_url())
         self.assertTrue(identity["project_ref_match"])
@@ -115,10 +189,12 @@ class ProductionMigrationRunnerTests(unittest.TestCase):
                     existing_managed_tables=(
                         (set(FOUNDATION_TABLE_SET) if count >= 1 else set())
                         | (set(TRANSFER_TABLE_SET) if count >= 3 else set())
+                        | (set(TRANSFER_APPROVAL_TABLE_SET) if count >= 6 else set())
                     ),
                     has_rollout_cutover_column=count >= 2,
                     has_site_activation_column=count >= 4,
                     negative_opening_check_state="relaxed" if count >= 5 else "legacy",
+                    has_transfer_approval_table=count >= 6,
                 )
                 expected = "complete" if count == len(MIGRATION_ORDER) else f"prefix-{count}-of-{len(MIGRATION_ORDER)}"
                 self.assertEqual(state, expected)
