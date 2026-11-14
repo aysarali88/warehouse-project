@@ -5,8 +5,12 @@ import vm from 'node:vm';
 
 const html = readFileSync(new URL('../static/materials_inventory.html', import.meta.url), 'utf8');
 const helper = html.match(/function applyFiberMapReference\(data\)\{[\s\S]*?\n\}/)?.[0];
+const areaHelpers = html.split(/\r?\n/).filter(line => /^function (normalizeText|canonicalRolloutArea|displayRolloutArea|sameRolloutDashboardArea|rolloutDashboardAreaOptions)\(/.test(line)).join('\n');
+const planHelper = html.match(/function rolloutPlanFor\(city,area\)\{[\s\S]*?\n\}/)?.[0];
 
 assert.ok(helper, 'fiber-map dashboard reference merger should be present');
+assert.ok(areaHelpers.includes('function rolloutDashboardAreaOptions('), 'dashboard area option builder should be present');
+assert.ok(planHelper, 'dashboard plan lookup helper should be present');
 
 function mergedPlan(dynamic, { city = 'Tripoli', area = 'Mansoura', cableTargetOverride = 39925, fixedCableTarget = false } = {}) {
   const context = vm.createContext({
@@ -85,4 +89,23 @@ test('a fixed completed-area cable target survives dynamic map refresh', () => {
   assert.equal(plan.targetHubBox, 32);
   assert.equal(plan.targetXbox, 2);
   assert.equal(plan.targetUsers, 2704);
+});
+
+test('Mansoura aliases render as one Al-Mansoura option and match the same dashboard plan', () => {
+  const context = vm.createContext({
+    ROLLOUT_DASHBOARD_AREAS: { Tripoli: ['Al-Mansoura'] },
+    ROLLOUT_DASHBOARD_PLAN: [{ city: 'Tripoli', area: 'Al-Mansoura', targetCableMeters: 39925 }],
+  });
+  vm.runInContext([areaHelpers, planHelper].join('\n'), context);
+
+  const options = JSON.parse(vm.runInContext(`JSON.stringify(rolloutDashboardAreaOptions('Tripoli', [
+    { city: 'Tripoli', Area: 'Mansoura' },
+    { city: 'Tripoli', Area: 'Al-Mansoura' },
+    { city: 'Misurata', Area: 'Mansoura' }
+  ]))`, context));
+
+  assert.deepEqual(options, ['Al-Mansoura']);
+  assert.equal(vm.runInContext("sameRolloutDashboardArea('Mansoura', 'Al-Mansoura')", context), true);
+  assert.equal(vm.runInContext("rolloutPlanFor('Tripoli', 'Mansoura').area", context), 'Al-Mansoura');
+  assert.match(html, /const ROLLOUT_DASHBOARD_AREAS=\{Tripoli:\[[^\]]*'Al-Mansoura'\]/);
 });
