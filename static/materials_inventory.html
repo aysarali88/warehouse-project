@@ -1954,18 +1954,19 @@ const FIELD_TEAM_LEADERS=[
   'مصطفى يوسف الهبالي',
   'محمد رجب دعمان'
 ];
-function canonicalRolloutArea(value){const raw=String(value||'').trim();const key=normalizeText(raw);if(['awladaboshaalah','awladabushala'].includes(key))return'Awlad Abushala';if(['berawtaleem','albera'].includes(key))return'albera';return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':raw}
+function canonicalRolloutArea(value){const raw=String(value||'').trim();const key=normalizeText(raw);if(['awladaboshaalah','awladabushala'].includes(key))return'Awlad Abushala';if(['berawtaleem','albera'].includes(key))return'albera';if(['mansoura','almansoura'].includes(key))return'Al-Mansoura';return ['awladbaeo','awladbaeoo','awladbauo','awladbaeou'].includes(key)?'awladbaeoo':raw}
 function displayRolloutArea(value){const raw=normalizeText(value);if(raw==='berawtaleem')return'Bera W Taleem';const area=canonicalRolloutArea(value);return area==='awladbaeoo'?'Awlad Baeoo':area==='albera'?'Albera':area}
 function isMaqawbaRolloutArea(value){return normalizeText(canonicalRolloutArea(value))==='maqawba'}
 function rolloutDashboardRows(rows){return(rows||[]).filter(row=>normalizeText(row.Area||row.area||'')!=='albera')}
 function sameRolloutDashboardArea(a,b){return normalizeText(canonicalRolloutArea(a))===normalizeText(canonicalRolloutArea(b))}
-const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3','Al-Dhel Street','Mansoura'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
+function rolloutDashboardAreaOptions(city,rows){const mapped=(ROLLOUT_DASHBOARD_AREAS[city]||[]).map(displayRolloutArea).filter(Boolean);const fromRecords=(rows||[]).filter(row=>!city||normalizeText(row.city||row.City)===normalizeText(city)).map(row=>displayRolloutArea(row.Area||row.area||'')).filter(Boolean);return[...new Set([...mapped,...fromRecords])]}
+const ROLLOUT_DASHBOARD_AREAS={Tripoli:['Hay Demashq','Hay Al Andalus Zone 2','Hay Al Andalus Zone 3','Al-Dhel Street','Al-Mansoura'],Misurata:['Maqawba','Ras A Tota','Awlad Baeoo']};
 const ROLLOUT_DASHBOARD_PLAN=[
   {city:'Tripoli',area:'Hay Demashq',start:'2026-05-13',end:'2026-06-22',targetSubEndBox:186,targetHubBox:15,targetXbox:2,targetCableMeters:22690,targetUsers:1500,note:'Planned: 13 May - 22 June. Actual completion: 8 July. Delay due to cable delivery constraints.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 2',start:'2026-07-06',end:'2026-08-10',targetSubEndBox:290,targetHubBox:23,targetXbox:2,targetCableMeters:32350,targetUsers:2320,dashboardSubEndOffset:-1,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-280,adjustmentSubEndBox:-2,note:'X4 map update: net -280 m cable and -2 SUB / END boxes. X5 is the only installed XBOX.'},
   {city:'Tripoli',area:'Hay Al Andalus Zone 3',start:'2026-08-12',end:'2026-08-31',targetSubEndBox:363,targetHubBox:27,targetXbox:3,targetCableMeters:41595,targetUsers:2904,dashboardSubEndOffset:-4,dashboardSingleCoreOffset:-1,adjustmentCableMeters:-750,adjustmentSubEndBox:-5,note:'Completed: 41,595 m cable, 363 SUB / END boxes, 27 HUB boxes, 3 XBOXes, and 363 single-core cables (2,904 users). Previous X9 scope removals remain documented.'},
   {city:'Tripoli',area:'Al-Dhel Street',start:'2026-11-01',end:'2026-12-08',targetSubEndBox:809,targetHubBox:61,targetXbox:5,targetCableMeters:76560,targetUsers:5328,dashboardCableTargetOverride:76560,dashboardSubEndTargetOverride:809,dashboardHubTargetOverride:61,dashboardXboxTargetOverride:5,dashboardSingleCoreTargetOverride:809,dashboardUsersTargetOverride:5328},
-  {city:'Tripoli',area:'Mansoura',start:'2026-11-01',end:'2026-11-21',targetSubEndBox:415,targetHubBox:31,targetXbox:2,targetCableMeters:39925,targetUsers:3320,dashboardCableTargetOverride:39925,dashboardSubEndTargetOverride:415,dashboardHubTargetOverride:31,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:415,dashboardUsersTargetOverride:3320},
+  {city:'Tripoli',area:'Al-Mansoura',start:'2026-11-01',end:'2026-11-21',targetSubEndBox:415,targetHubBox:31,targetXbox:2,targetCableMeters:39925,targetUsers:3320,dashboardCableTargetOverride:39925,dashboardSubEndTargetOverride:415,dashboardHubTargetOverride:31,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:415,dashboardUsersTargetOverride:3320},
   {city:'Misurata',area:'Bera W Taleem',targetSubEndBox:213,targetHubBox:17,targetXbox:2,targetCableMeters:27780,targetUsers:1704,dashboardCableTargetOverride:27780,dashboardSubEndTargetOverride:213,dashboardHubTargetOverride:17,dashboardXboxTargetOverride:2,dashboardSingleCoreTargetOverride:213,dashboardUsersTargetOverride:1704,dashboardCableMetersOverride:27780,dashboardSubEndOverride:213,dashboardSingleCoreOverride:213,note:'Completed: 27,780 m cable, 213 SUB / END boxes, 17 HUB boxes, 2 XBOXes, and 213 single-core cables (1,704 users).'},
   {city:'Misurata',area:'Ras Ali',dashboardCableTargetOverride:22520,dashboardCableTargetOverrideFixed:true},
   {city:'Tripoli',area:'Hay Al Andalus Z1',dashboardCableTargetOverride:75445,dashboardCableTargetOverrideFixed:true},
@@ -3387,7 +3388,7 @@ function wfmDesignTargetFor(area){
 }
 function rolloutPlanFor(city,area){
   if(normalizeText(area)==='allareas')return null;
-  return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&normalizeText(p.area)===normalizeText(area))||ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.area)===normalizeText(area))||null;
+  return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&sameRolloutDashboardArea(p.area,area))||ROLLOUT_DASHBOARD_PLAN.find(p=>sameRolloutDashboardArea(p.area,area))||null;
 }
 function rolloutTargetFor(city,area){
   const plan=rolloutPlanFor(city,area)||{};
@@ -3595,9 +3596,7 @@ const selectedDates=rolloutDashboardSelectedDates().filter(date=>dateOptions.inc
 rolloutDashboardFilters.date=selectedDates;
 const cityOptions=[...new Set([...Object.keys(ROLLOUT_DASHBOARD_AREAS),...rows.map(r=>String(r.city||r.City||'').trim()).filter(Boolean)])];
 if(!cityOptions.includes(rolloutDashboardFilters.city))rolloutDashboardFilters.city=cityOptions[0]||'Tripoli';
-const mappedAreas=ROLLOUT_DASHBOARD_AREAS[rolloutDashboardFilters.city]||[];
-const dataAreas=[...new Set(rows.filter(r=>!rolloutDashboardFilters.city||normalizeText(r.city||r.City)===normalizeText(rolloutDashboardFilters.city)).map(r=>displayRolloutArea(r.Area||r.area||'')).filter(Boolean))];
-const areaOptions=[...new Set([...mappedAreas,...dataAreas])];
+const areaOptions=rolloutDashboardAreaOptions(rolloutDashboardFilters.city,rows);
 if(!areaOptions.includes(rolloutDashboardFilters.area)&&normalizeText(rolloutDashboardFilters.area)!=='allareas')rolloutDashboardFilters.area=areaOptions[0]||'All Areas';
 const scopedRows=rows.filter(r=>{
   const rowDate=String(r.Date||'').slice(0,10);
