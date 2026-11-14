@@ -1642,9 +1642,9 @@ body.sr-program .login-logo img{
       <div class="hidden" id="siteTransferWorkspace">
         <div class="site-transfer-message site-transfer-message-error hidden" id="siteTransferError" role="alert"></div>
         <div class="site-transfer-message site-transfer-message-success hidden" id="siteTransferSuccess" role="status" aria-live="polite"></div>
-        <div class="site-transfer-admin-only">
+        <div class="site-transfer-create-only hidden">
         <section class="card site-transfer-create">
-          <div class="site-transfer-section-head"><div><h3>New Transfer</h3></div></div>
+          <div class="site-transfer-section-head"><div><h3>New Transfer Request</h3></div></div>
           <form class="site-transfer-form" id="siteTransferCreateForm">
             <div class="field"><label for="siteTransferFromSite">From Site</label><select id="siteTransferFromSite" required><option value="">Select source site</option></select></div>
             <div class="field"><label for="siteTransferToSite">To Site</label><select id="siteTransferToSite" required><option value="">Select destination site</option></select></div>
@@ -1655,7 +1655,7 @@ body.sr-program .login-logo img{
             </div>
             <div class="field"><label for="siteTransferReference">Reference</label><input id="siteTransferReference" name="reference" type="text" maxlength="200"></div>
             <div class="field"><label for="siteTransferNotes">Notes</label><input id="siteTransferNotes" name="notes" type="text" maxlength="4000"></div>
-            <div class="site-transfer-form-actions"><button class="btn primary" id="siteTransferCreateButton" type="submit" disabled>Submit Transfer</button></div>
+            <div class="site-transfer-form-actions"><button class="btn primary" id="siteTransferCreateButton" type="submit" disabled>Submit Transfer Request</button></div>
           </form>
         </section>
         </div>
@@ -2266,7 +2266,7 @@ function applyRequesterOnlyVisibility(){document.querySelectorAll('.requester-on
 const applyPermissionsWithRequesterOnly=applyPermissions;
 applyPermissions=function(){applyPermissionsWithRequesterOnly();applyRequesterOnlyVisibility();const setupButton=document.querySelector('.nav button[data-view="setup"]');if(setupButton)setupButton.classList.toggle('hidden',!canViewSetup());document.querySelectorAll('.map-manager-access').forEach(el=>el.classList.toggle('hidden',!canManageFiberMap()));document.querySelectorAll('.area-builder-access').forEach(el=>el.classList.toggle('hidden',!canAccessAreaBuilder()));document.querySelectorAll('.requester-hide').forEach(el=>el.classList.toggle('hidden',canManageFiberMap()&&!isAdmin()));if(canManageFiberMap()&&!isAdmin())setSetupWorkspace('mapManager');else if(!isAdmin()&&!canViewSetup())setSetupWorkspace('inventory');if(!canViewSetup()&&document.querySelector('.view.active')?.id==='setup')switchView('dashboard');const button=document.getElementById('returnSubmitBtn');if(button)button.textContent=roleKey()==='requester'?'Submit Return for Approval':'حفظ الإرجاع'}
 const applySiteTransferPermissions=applyPermissions;
-applyPermissions=function(){applySiteTransferPermissions();const visible=isAdmin()||(!isSingleRan()&&roleKey()==='requester');document.querySelectorAll('.site-transfer-access').forEach(el=>el.classList.toggle('hidden',!visible));document.querySelectorAll('.site-transfer-admin-only').forEach(el=>el.classList.toggle('hidden',!isAdmin()));const title=document.getElementById('siteTransferListTitle');if(title)title.textContent=isAdmin()?'Transfers':'Transfers assigned to me'}
+applyPermissions=function(){applySiteTransferPermissions();const requester=!isSingleRan()&&roleKey()==='requester';const visible=isAdmin()||requester;document.querySelectorAll('.site-transfer-access').forEach(el=>el.classList.toggle('hidden',!visible));document.querySelectorAll('.site-transfer-admin-only').forEach(el=>el.classList.toggle('hidden',!isAdmin()));document.querySelectorAll('.site-transfer-create-only').forEach(el=>el.classList.toggle('hidden',!visible));const title=document.getElementById('siteTransferListTitle');if(title)title.textContent=isAdmin()?'Transfers':'My Requests & Assigned Transfers'}
 function restoreUiState(){const state=uiState();switchView(state.view||'dashboard',false);setBalanceTab(state.balanceTab||'stockBalances',false);setMrMode(state.mrMode||'mrForm',false);switchRolloutDailyTab(state.rolloutDailyTab||'kpi',false)}
 function applyAuthState(){if(!session){document.getElementById('programScreen').classList.remove('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.add('hidden');document.documentElement.classList.remove('auth-restoring');return}document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');document.documentElement.classList.remove('auth-restoring');setCurrentUserFromSession();applyPermissions();if(location.hash)applyPageLink();else restoreUiState();if(roleKey()==='admin'){loadUsers();loadActiveUsers()}sendPresenceHeartbeat();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}

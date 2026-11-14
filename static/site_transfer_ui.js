@@ -80,6 +80,7 @@
 
     const publish = () => onChange(state);
     const program = () => String(getProgram() || 'FTTH').trim().toUpperCase();
+    const canCreate = () => isAdmin() || (isRequester() && program() === 'FTTH');
     const url = (path, params = {}) => {
       const query = new URLSearchParams({ program: program(), ...params });
       return `${path}?${query.toString()}`;
@@ -149,7 +150,7 @@
         await fetchList(1);
         state.gate = 'enabled';
         state.gateMessage = '';
-        if (isAdmin()) {
+        if (canCreate()) {
           if (!state.sites.length || !state.products.length) await fetchOptions();
           await fetchApprovers();
         }
@@ -237,7 +238,7 @@
     }
 
     function updateForm(field, value) {
-      if (!['fromSiteId', 'toSiteId', 'approverUserId'].includes(field) || !isAdmin()) return;
+      if (!['fromSiteId', 'toSiteId', 'approverUserId'].includes(field) || !canCreate()) return;
       state.form[field] = value;
       state.error = '';
       publish();
@@ -292,7 +293,7 @@
     }
 
     async function createTransfer(values = {}) {
-      if (state.busy || state.gate !== 'enabled' || !isAdmin()) return false;
+      if (state.busy || state.gate !== 'enabled' || !canCreate()) return false;
       const form = { ...state.form, ...values };
       const lines = (values.lines || state.form.lines).map(line => ({ ...line }));
       const siteIds = new Set(state.sites.map(row => String(row.id)));
@@ -366,7 +367,7 @@
             request_token: requestToken(),
           }),
         });
-        state.message = `Transfer #${data.transfer?.id ?? ''} sent to ${approver.name} for approval.`;
+        state.message = `Transfer request #${data.transfer?.id ?? ''} submitted to ${approver.name} for approval.`;
         state.form.lines = [newTransferLine(`line-${nextLineId++}`)];
         state.form.approverUserId = '';
         state.form.reference = '';
@@ -408,10 +409,20 @@
     }
 
     async function approve(transferId) {
+      if (!isAdmin()) {
+        const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
+        const approval = transfer?.approval;
+        if (!isRequester() || program() !== 'FTTH' || transfer?.status !== 'draft'
+          || approval?.status !== 'pending' || Number(approval.approver_user_id) !== Number(getUserId?.())) return false;
+      }
       return performAction(transferId, 'approve');
     }
 
     async function reject(transferId, note) {
+      const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
+      const approval = transfer?.approval;
+      if (!isRequester() || program() !== 'FTTH' || transfer?.status !== 'draft'
+        || approval?.status !== 'pending' || Number(approval.approver_user_id) !== Number(getUserId?.())) return false;
       const reason = String(note || '').trim();
       if (!reason) {
         state.error = 'A rejection note is required.';
@@ -422,11 +433,12 @@
     }
 
     async function dispatch(transferId) {
+      if (!isAdmin()) return false;
       return performAction(transferId, 'dispatch', { request_token: requestToken() });
     }
 
     function openReceipt(transferId, itemId) {
-      if (state.busy || state.gate !== 'enabled') return false;
+      if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
       const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
       const item = transfer?.items?.find(row => Number(row.id) === Number(itemId));
       if (!transfer || !item || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
@@ -447,7 +459,7 @@
     }
 
     async function receive(input = state.receipt) {
-      if (state.busy || !input || state.gate !== 'enabled') return false;
+      if (!isAdmin() || state.busy || !input || state.gate !== 'enabled') return false;
       const validation = validateReceiptQuantity(input.quantity, input.remaining);
       if (validation) {
         state.error = validation;
@@ -483,7 +495,7 @@
     }
 
     async function reverseDispatch(transferId, { note, confirmPhysicalReturn } = {}) {
-      if (state.busy || state.gate !== 'enabled') return false;
+      if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
       if (!String(note || '').trim()) {
         state.error = 'A correction note is required.';
         publish();
@@ -604,7 +616,7 @@
         table.innerHTML = '<div class="empty">No transfers on this page.</div>';
       } else {
         const rows = state.transfers.map(transfer => {
-          const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
+          const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', requested_qty: '0', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
           return items.map((item, index) => {
             const group = (content) => index === 0 ? `<td rowspan="${items.length}">${content}</td>` : '';
             const assignedApproval = transfer.approval;
@@ -629,6 +641,7 @@
               ${group(`<strong>#${Number(transfer.id)}</strong>`)}
               ${group(escapeHtml(transfer.from_site))}${group(escapeHtml(transfer.to_site))}
               <td>${escapeHtml(item.product)}${item.sku ? `<small class="site-transfer-cell-sub">${escapeHtml(item.sku)}</small>` : ''}</td>
+              <td>${displayQuantity(item.requested_qty)} ${escapeHtml(item.uom)}</td>
               <td>${displayQuantity(item.sent_qty)} ${escapeHtml(item.uom)}</td>
               <td>${displayQuantity(item.received_qty)} ${escapeHtml(item.uom)}</td>
               <td>${displayQuantity(item.in_transit_qty)} ${escapeHtml(item.uom)}</td>
@@ -640,7 +653,7 @@
           }).join('');
         }).join('');
         table.innerHTML = `<div class="table-wrap site-transfer-table-wrap"><table class="site-transfer-table"><thead><tr>
-          <th>Transfer ID</th><th>From Site</th><th>To Site</th><th>Product</th><th>Sent Qty</th><th>Received Qty</th><th>In Transit Qty</th><th>Status</th><th>Created By</th><th>Created Date</th><th colspan="2">Actions</th>
+          <th>Transfer ID</th><th>From Site</th><th>To Site</th><th>Product</th><th>Requested Qty</th><th>Sent Qty</th><th>Received Qty</th><th>In Transit Qty</th><th>Status</th><th>Created By</th><th>Created Date</th><th colspan="2">Actions</th>
         </tr></thead><tbody>${rows}</tbody></table></div>`;
       }
       const meta = element('siteTransferPageMeta');

@@ -103,7 +103,8 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
 
     @router.post("/api/warehouse/site-transfers")
     def site_transfer_create(data: SiteTransferCreate, request: Request, db: Session = Depends(db_dependency)):
-        actor = authorize_and_gate(request, data.program)
+        authorize_view(request, data.program)
+        actor = actor_fn(request)
         try:
             with db.begin():
                 row = create_transfer(
@@ -133,9 +134,9 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         db: Session = Depends(db_dependency),
     ):
         user = authorize_view(request, program)
-        approver_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
+        requester_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
         result = list_transfers(db, program, page=page, page_size=page_size, status=status,
-                                approver_user_id=approver_user_id)
+                                requester_user_id=requester_user_id)
         return {"success": True, **result}
 
     @router.get("/api/warehouse/site-transfers/approvers")
@@ -144,8 +145,11 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         program: str = "FTTH",
         db: Session = Depends(db_dependency),
     ):
-        authorize_and_gate(request, program)
-        return {"success": True, "items": list_transfer_approvers(db, normalize_program_fn(program))}
+        user = authorize_view(request, program)
+        exclude_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
+        return {"success": True, "items": list_transfer_approvers(
+            db, normalize_program_fn(program), exclude_user_id=exclude_user_id,
+        )}
 
     @router.get("/api/warehouse/site-transfers/inbox-count")
     def site_transfer_inbox_count(
@@ -169,9 +173,9 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         db: Session = Depends(db_dependency),
     ):
         user = authorize_view(request, program)
-        approver_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
+        requester_user_id = int(user.id) if str(user.role or "").strip().lower() == "requester" else None
         return {"success": True, "transfer": get_transfer(db, transfer_id, program,
-                                                             approver_user_id=approver_user_id)}
+                                                             requester_user_id=requester_user_id)}
 
     @router.post("/api/warehouse/site-transfers/{transfer_id}/approve")
     def site_transfer_approve(

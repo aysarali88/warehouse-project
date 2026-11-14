@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import aliased
 
 from database import normalize_program
@@ -262,13 +262,16 @@ def _active_requester(db, program: str, user_id: int, *, lock: bool = False) -> 
     return user
 
 
-def list_transfer_approvers(db, program: str) -> list[dict]:
+def list_transfer_approvers(db, program: str, *, exclude_user_id: int | None = None) -> list[dict]:
     program_key = normalize_program(program)
-    rows = db.query(AppUser).filter(
+    query = db.query(AppUser).filter(
         AppUser.program == program_key,
         func.lower(AppUser.role) == "requester",
         func.lower(AppUser.status) == "active",
-    ).order_by(func.lower(AppUser.name), func.lower(AppUser.username), AppUser.id).all()
+    )
+    if exclude_user_id is not None:
+        query = query.filter(AppUser.id != int(exclude_user_id))
+    rows = query.order_by(func.lower(AppUser.name), func.lower(AppUser.username), AppUser.id).all()
     return [{"id": row.id, "name": row.name or row.username, "username": row.username} for row in rows]
 
 
@@ -734,25 +737,42 @@ def reverse_transfer_dispatch(db, transfer_id: int, program: str, actor: str, no
     return correction
 
 
-def get_transfer(db, transfer_id: int, program: str, *, approver_user_id: int | None = None) -> dict:
+def get_transfer(db, transfer_id: int, program: str, *, approver_user_id: int | None = None,
+                 requester_user_id: int | None = None) -> dict:
     row = _transfer(db, transfer_id, program)
-    if approver_user_id is not None and db.query(SiteTransferApproval.id).filter_by(
+    approval_query = db.query(SiteTransferApproval.id).filter_by(
         program=normalize_program(program), transfer_id=row.id,
-        approver_user_id=int(approver_user_id),
-    ).first() is None:
+    )
+    if requester_user_id is not None:
+        user_id = int(requester_user_id)
+        approval_query = approval_query.filter(or_(
+            SiteTransferApproval.created_by_user_id == user_id,
+            SiteTransferApproval.approver_user_id == user_id,
+        ))
+    elif approver_user_id is not None:
+        approval_query = approval_query.filter(SiteTransferApproval.approver_user_id == int(approver_user_id))
+    if (requester_user_id is not None or approver_user_id is not None) and approval_query.first() is None:
         raise HTTPException(status_code=404, detail="Site transfer not found")
     return _transfer_view(db, row)
 
 
 def list_transfers(db, program: str, *, page: int = 1, page_size: int = 50, status: str = "",
-                   approver_user_id: int | None = None) -> dict:
+                   approver_user_id: int | None = None, requester_user_id: int | None = None) -> dict:
     program_key = normalize_program(program)
     query = db.query(SiteTransfer).filter_by(program=program_key)
-    if approver_user_id is not None:
+    if requester_user_id is not None or approver_user_id is not None:
         query = query.join(SiteTransferApproval, SiteTransferApproval.transfer_id == SiteTransfer.id).filter(
             SiteTransferApproval.program == program_key,
-            SiteTransferApproval.approver_user_id == int(approver_user_id),
         )
+        if requester_user_id is not None:
+            user_id = int(requester_user_id)
+            query = query.filter(or_(
+                SiteTransferApproval.created_by_user_id == user_id,
+                SiteTransferApproval.approver_user_id == user_id,
+            ))
+        else:
+            query = query.filter(SiteTransferApproval.approver_user_id == int(approver_user_id))
+        query = query.distinct()
     status_value = str(status or "").strip().lower()
     if status_value:
         allowed = {"draft", "approved", "in_transit", "partially_received", "received", "cancelled"}
