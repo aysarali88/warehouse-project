@@ -23,27 +23,35 @@ from migrations.site_inventory_site_activation import COLUMN as SITE_ACTIVATION_
 from migrations.site_inventory_site_activation import VERSION as SITE_ACTIVATION_VERSION, migrate as migrate_site_activation
 from migrations.site_inventory_negative_opening import LEGACY_CHECKS
 from migrations.site_inventory_negative_opening import VERSION as NEGATIVE_OPENING_VERSION, _legacy_checks, migrate as migrate_negative_opening
+from migrations.site_inventory_transfer_approval import TABLE as TRANSFER_APPROVAL_TABLE
+from migrations.site_inventory_transfer_approval import VERSION as TRANSFER_APPROVAL_VERSION, migrate as migrate_transfer_approval
 from migrations.site_inventory_migration_utils import qualified, validate_model_table
 
 
 PRODUCTION_PROJECT_REF = "ndhccmrxpujpqhyewoac"
 WAREHOUSE_TEST_PROJECT_REF = "kdzhcizesmjseadwegvd"
-MIGRATION_ORDER = (FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION, SITE_ACTIVATION_VERSION, NEGATIVE_OPENING_VERSION)
+MIGRATION_ORDER = (
+    FOUNDATION_VERSION, ROLLOUT_VERSION, TRANSFERS_VERSION, SITE_ACTIVATION_VERSION,
+    NEGATIVE_OPENING_VERSION, TRANSFER_APPROVAL_VERSION,
+)
 MIGRATION_SPECS = (
     (FOUNDATION_VERSION, migrate_foundation),
     (ROLLOUT_VERSION, migrate_rollout_cutover),
     (TRANSFERS_VERSION, migrate_transfers),
     (SITE_ACTIVATION_VERSION, migrate_site_activation),
     (NEGATIVE_OPENING_VERSION, migrate_negative_opening),
+    (TRANSFER_APPROVAL_VERSION, migrate_transfer_approval),
 )
 FOUNDATION_TABLE_SET = frozenset(FOUNDATION_TABLES)
 TRANSFER_TABLE_SET = frozenset(TRANSFER_TABLES)
-MANAGED_TABLES = FOUNDATION_TABLE_SET | TRANSFER_TABLE_SET
+TRANSFER_APPROVAL_TABLE_SET = frozenset({TRANSFER_APPROVAL_TABLE})
+MANAGED_TABLES = FOUNDATION_TABLE_SET | TRANSFER_TABLE_SET | TRANSFER_APPROVAL_TABLE_SET
 REQUIRED_COLUMNS = {
     "sites": {"id", "program", "name"},
     "products": {"id", "program", "unit"},
     "audit_logs": {"id", "action", "entity_type", "entity_id", "actor", "details", "created_at"},
     "rollout_records": {"id", "record_id", "date", "entry_time", "status", "area"},
+    "app_users": {"id", "program", "username", "name", "role", "status"},
 }
 ALLOWED_DATABASE_URL_ENV_NAMES = frozenset({
     "DATABASE_URL",
@@ -145,9 +153,10 @@ def validate_migration_state(
     has_rollout_cutover_column: bool,
     has_site_activation_column: bool,
     negative_opening_check_state: str = "legacy",
+    has_transfer_approval_table: bool = False,
 ) -> str:
     if not version_table_exists:
-        if recorded_versions or existing_managed_tables or has_rollout_cutover_column or has_site_activation_column:
+        if recorded_versions or existing_managed_tables or has_rollout_cutover_column or has_site_activation_column or has_transfer_approval_table:
             raise MigrationPreflightError("Unversioned or partial Site Inventory schema detected; no migration was run")
         return "clean"
 
@@ -163,12 +172,18 @@ def validate_migration_state(
     applied_count = len(recorded_versions)
     expected_foundation = set(FOUNDATION_TABLE_SET) if applied_count >= 1 else set()
     expected_transfers = set(TRANSFER_TABLE_SET) if applied_count >= 3 else set()
+    expected_transfer_approval = applied_count >= 6
     actual_foundation = existing_managed_tables & FOUNDATION_TABLE_SET
     actual_transfers = existing_managed_tables & TRANSFER_TABLE_SET
+    actual_transfer_approval = existing_managed_tables & TRANSFER_APPROVAL_TABLE_SET
     if actual_foundation != expected_foundation:
         raise MigrationPreflightError("Foundation migration version does not match its table state")
     if actual_transfers != expected_transfers:
         raise MigrationPreflightError("Transfer migration version does not match its table state")
+    if actual_transfer_approval != (TRANSFER_APPROVAL_TABLE_SET if expected_transfer_approval else set()):
+        raise MigrationPreflightError("Transfer approval version does not match its table state")
+    if has_transfer_approval_table != expected_transfer_approval:
+        raise MigrationPreflightError("Transfer approval migration version does not match its table state")
     if has_rollout_cutover_column != (applied_count >= 2):
         raise MigrationPreflightError("Rollout cutover version does not match its column state")
     if has_site_activation_column != (applied_count >= 4):
@@ -291,6 +306,7 @@ def preflight_database(engine, schema: str) -> dict:
             site_columns = {
                 column["name"] for column in inspector.get_columns("sites", schema=schema)
             }
+            has_transfer_approval_table = inspector.has_table(TRANSFER_APPROVAL_TABLE, schema=schema)
             legacy_checks = _legacy_checks(connection, schema) if version_table_exists else set()
             expected_legacy_checks = {name for name, _ in LEGACY_CHECKS.values()}
             state = validate_migration_state(
@@ -301,6 +317,7 @@ def preflight_database(engine, schema: str) -> dict:
                 existing_managed_tables=existing_managed,
                 has_rollout_cutover_column=ROLLOUT_CUTOFF_COLUMN in rollout_columns,
                 has_site_activation_column=SITE_ACTIVATION_COLUMN in site_columns,
+                has_transfer_approval_table=has_transfer_approval_table,
                 negative_opening_check_state=(
                     "legacy" if not version_table_exists or legacy_checks == expected_legacy_checks
                     else "relaxed" if not legacy_checks else "partial"
@@ -328,6 +345,7 @@ def preflight_database(engine, schema: str) -> dict:
                         SiteTransferItem,
                         SiteTransferReceipt,
                         SiteTransferReceiptItem,
+                        SiteTransferApproval,
                     )
 
                     expected_tables = []
@@ -342,6 +360,8 @@ def preflight_database(engine, schema: str) -> dict:
                             SiteTransferReceipt.__table__, SiteTransferReceiptItem.__table__,
                             SiteTransferCorrection.__table__,
                         ))
+                    if len(recorded_versions) >= 6:
+                        expected_tables.append(SiteTransferApproval.__table__)
                     for table in expected_tables:
                         validate_model_table(connection, schema, table)
             transaction.commit()

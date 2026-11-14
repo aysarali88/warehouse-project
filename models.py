@@ -248,6 +248,7 @@ SITE_INVENTORY_FOUNDATION_TABLES = frozenset({
     "site_transfer_receipts",
     "site_transfer_receipt_items",
     "site_transfer_corrections",
+    "site_transfer_approvals",
 })
 
 
@@ -385,6 +386,37 @@ class SiteTransferCorrection(Base):
 
     transfer = relationship("SiteTransfer")
     receipt_item = relationship("SiteTransferReceiptItem")
+
+
+class SiteTransferApproval(Base):
+    __tablename__ = "site_transfer_approvals"
+    __table_args__ = (
+        UniqueConstraint("program", "transfer_id", name="uq_site_transfer_approval_transfer"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_site_transfer_approval_status"),
+        CheckConstraint("created_by_user_id <> approver_user_id", name="ck_site_transfer_distinct_approver"),
+        CheckConstraint(
+            "(status = 'pending' AND decided_by_user_id IS NULL AND decided_at IS NULL) OR "
+            "(status IN ('approved', 'rejected') AND decided_by_user_id IS NOT NULL AND decided_at IS NOT NULL)",
+            name="ck_site_transfer_approval_decision",
+        ),
+        Index("ix_site_transfer_approval_inbox", "program", "approver_user_id", "status", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    program = Column(String(32), nullable=False, index=True)
+    transfer_id = Column(Integer, ForeignKey("site_transfers.id", ondelete="RESTRICT"), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("app_users.id", ondelete="RESTRICT"), nullable=False)
+    approver_user_id = Column(Integer, ForeignKey("app_users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending", server_default="pending")
+    decision_note = Column(Text, nullable=False, default="", server_default="")
+    decided_by_user_id = Column(Integer, ForeignKey("app_users.id", ondelete="RESTRICT"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    transfer = relationship("SiteTransfer")
+    creator = relationship("AppUser", foreign_keys=[created_by_user_id])
+    approver = relationship("AppUser", foreign_keys=[approver_user_id])
+    decider = relationship("AppUser", foreign_keys=[decided_by_user_id])
 
 
 class AppUser(Base):

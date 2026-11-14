@@ -1071,7 +1071,7 @@ body.sr-program .login-logo img{
     <button data-view="mrHistory">MR History</button>
     <button data-view="receive">Receive Inventory</button>
     <button data-view="balances">Inventory</button>
-    <button class="admin-only" data-view="siteTransfers">Site to Site Transfer</button>
+    <button class="site-transfer-access hidden" data-view="siteTransfers">Site to Site Transfer</button>
     <button data-view="rolloutDaily">Rollout Progress</button>
     <button data-view="scans">Scan History</button>
     <button data-view="audit">Movements</button>
@@ -1633,7 +1633,7 @@ body.sr-program .login-logo img{
     </div>
   </section>
 
-  <section class="view admin-only site-transfer-view" id="siteTransfers">
+  <section class="view site-transfer-view" id="siteTransfers">
     <div id="siteTransferView">
       <div class="site-transfer-gate" id="siteTransferGate" role="status" aria-live="polite">
         <div><strong>Transfer readiness</strong><p id="siteTransferGateText">Checking transfer readiness…</p></div>
@@ -1642,11 +1642,13 @@ body.sr-program .login-logo img{
       <div class="hidden" id="siteTransferWorkspace">
         <div class="site-transfer-message site-transfer-message-error hidden" id="siteTransferError" role="alert"></div>
         <div class="site-transfer-message site-transfer-message-success hidden" id="siteTransferSuccess" role="status" aria-live="polite"></div>
+        <div class="site-transfer-admin-only">
         <section class="card site-transfer-create">
           <div class="site-transfer-section-head"><div><h3>New Transfer</h3></div></div>
           <form class="site-transfer-form" id="siteTransferCreateForm">
             <div class="field"><label for="siteTransferFromSite">From Site</label><select id="siteTransferFromSite" required><option value="">Select source site</option></select></div>
             <div class="field"><label for="siteTransferToSite">To Site</label><select id="siteTransferToSite" required><option value="">Select destination site</option></select></div>
+            <div class="field"><label for="siteTransferApprover">Regional manager (Requester)</label><select id="siteTransferApprover" required><option value="">Select manager</option></select></div>
             <div class="site-transfer-lines-wrap">
               <div class="site-transfer-lines-head"><strong>Materials</strong><button class="btn soft" id="siteTransferAddLine" type="button" data-site-transfer-command="add-line">Add material</button></div>
               <div id="siteTransferLines" class="site-transfer-lines"></div>
@@ -1656,10 +1658,11 @@ body.sr-program .login-logo img{
             <div class="site-transfer-form-actions"><button class="btn primary" id="siteTransferCreateButton" type="submit" disabled>Submit Transfer</button></div>
           </form>
         </section>
+        </div>
 
         <section class="card site-transfer-list-card">
           <div class="site-transfer-section-head">
-            <div><h3>Transfers</h3><div class="site-transfer-hint" id="siteTransferPageMeta">Page 1</div></div>
+            <div><h3 id="siteTransferListTitle">Transfers</h3><div class="site-transfer-hint" id="siteTransferPageMeta">Page 1</div></div>
             <div class="site-transfer-list-tools">
               <div class="field"><label for="siteTransferStatusFilter">Status</label><select id="siteTransferStatusFilter"><option value="">All statuses</option><option value="draft">Draft</option><option value="approved">Approved</option><option value="in_transit">In Transit</option><option value="partially_received">Partially Received</option><option value="received">Received</option><option value="cancelled">Cancelled / Reversed</option></select></div>
               <button class="btn soft" id="siteTransferRefresh" type="button" data-site-transfer-command="refresh">Refresh</button>
@@ -1669,7 +1672,7 @@ body.sr-program .login-logo img{
           <div class="site-transfer-pagination"><button class="btn soft" id="siteTransferPrevious" type="button" data-site-transfer-command="previous" disabled>Previous</button><button class="btn soft" id="siteTransferNext" type="button" data-site-transfer-command="next" disabled>Next</button></div>
         </section>
 
-        <details class="card site-transfer-corrections">
+        <details class="card site-transfer-corrections site-transfer-admin-only">
           <summary>Advanced corrections</summary>
           <form id="siteTransferCorrectionForm" class="site-transfer-correction-form">
             <div class="field"><label for="siteTransferCorrectionSelect">Transfer in transit</label><select id="siteTransferCorrectionSelect" required><option value="">Select transfer</option></select></div>
@@ -2247,7 +2250,7 @@ function updatePageLink(){const next=pageLinkState();if(location.hash!==next)his
 function applyPageLink(){const raw=location.hash.replace(/^#/,'');if(!raw)return;const [view,query='']=raw.split('?');const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return;const params=new URLSearchParams(query);if(view==='rolloutDaily'){warehouseFiberSelectedArea=params.get('area')||'';warehouseFiberSelectedScope=params.get('xbox')||''}switchView(view,false,false);if(view==='rolloutDaily'&&!isSingleRan()){const tab=params.get('tab');if(['kpi','overview','compare','map','report','operations','entry'].includes(tab))switchRolloutDailyTab(tab,false,false);if((tab||'kpi')==='map')renderRolloutMapPanel()}}
 async function switchProgram(program){if(!isAdmin()){toast('Admin only');return}const next=normalizeProgram(program);currentProgram=next;localStorage.setItem('warehouseProgram',next);clearWarehouseBootstrapCache();currentEditingMrId=null;currentEditingTransferId=null;const mrLinesBox=document.getElementById('mrLines');if(mrLinesBox)mrLinesBox.innerHTML='';const transferLinesBox=document.getElementById('transferLines');if(transferLinesBox)transferLinesBox.innerHTML='';setCurrentUserFromSession();applyPermissions();toast('Loading '+programLabel()+' warehouse...');await loadWarehouse();warehouseFiberReference=null;switchView('dashboard')}
 function switchView(view,persist=true,syncLink=true){if(view==='setup'&&!canViewSetup())view='dashboard';if(view==='rolloutDaily'&&isSingleRan()){clearSingleRanRolloutState(false);view='dashboard'}const btn=[...document.querySelectorAll('.nav button')].find(x=>x.dataset.view===view);if(!btn||btn.classList.contains('hidden'))return false;document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(view).classList.add('active');pageTitle.textContent=titles[view][0];pageSub.textContent=titles[view][1];if(persist)saveUiState({view});if(syncLink)updatePageLink();if(view==='receive')refreshReceiptsFast();if(view==='mr')refreshMrsFast();if(view==='mrHistory')loadMrHistory(false);if(view==='scans')historyScanFocus();if(view==='rolloutDaily'){ensureRolloutDashboardDesignReference();refreshRolloutDailyProgress(false)}return true}
-const siteTransferController=window.SiteTransferUI?.attach({api,getProgram:()=>normalizeProgram(currentProgram),isAdmin,confirm:message=>window.confirm(message)})||null;
+const siteTransferController=window.SiteTransferUI?.attach({api,getProgram:()=>normalizeProgram(currentProgram),isAdmin,isRequester:()=>roleKey()==='requester',getUserId:()=>Number(session?.id||0),confirm:message=>window.confirm(message)})||null;
 const switchViewWithSiteTransfers=switchView;
 switchView=function(view,persist=true,syncLink=true){const result=switchViewWithSiteTransfers(view,persist,syncLink);if(result&&view==='siteTransfers')void siteTransferController?.open();return result};
 function roleKey(){return normalizeText(userRole())}
@@ -2262,6 +2265,8 @@ function applyPermissions(){document.body.classList.remove('awaiting-program');a
 function applyRequesterOnlyVisibility(){document.querySelectorAll('.requester-only').forEach(el=>el.classList.toggle('hidden',!['requester','admin'].includes(roleKey())))}
 const applyPermissionsWithRequesterOnly=applyPermissions;
 applyPermissions=function(){applyPermissionsWithRequesterOnly();applyRequesterOnlyVisibility();const setupButton=document.querySelector('.nav button[data-view="setup"]');if(setupButton)setupButton.classList.toggle('hidden',!canViewSetup());document.querySelectorAll('.map-manager-access').forEach(el=>el.classList.toggle('hidden',!canManageFiberMap()));document.querySelectorAll('.area-builder-access').forEach(el=>el.classList.toggle('hidden',!canAccessAreaBuilder()));document.querySelectorAll('.requester-hide').forEach(el=>el.classList.toggle('hidden',canManageFiberMap()&&!isAdmin()));if(canManageFiberMap()&&!isAdmin())setSetupWorkspace('mapManager');else if(!isAdmin()&&!canViewSetup())setSetupWorkspace('inventory');if(!canViewSetup()&&document.querySelector('.view.active')?.id==='setup')switchView('dashboard');const button=document.getElementById('returnSubmitBtn');if(button)button.textContent=roleKey()==='requester'?'Submit Return for Approval':'حفظ الإرجاع'}
+const applySiteTransferPermissions=applyPermissions;
+applyPermissions=function(){applySiteTransferPermissions();const visible=isAdmin()||(!isSingleRan()&&roleKey()==='requester');document.querySelectorAll('.site-transfer-access').forEach(el=>el.classList.toggle('hidden',!visible));document.querySelectorAll('.site-transfer-admin-only').forEach(el=>el.classList.toggle('hidden',!isAdmin()));const title=document.getElementById('siteTransferListTitle');if(title)title.textContent=isAdmin()?'Transfers':'Transfers assigned to me'}
 function restoreUiState(){const state=uiState();switchView(state.view||'dashboard',false);setBalanceTab(state.balanceTab||'stockBalances',false);setMrMode(state.mrMode||'mrForm',false);switchRolloutDailyTab(state.rolloutDailyTab||'kpi',false)}
 function applyAuthState(){if(!session){document.getElementById('programScreen').classList.remove('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.add('hidden');document.documentElement.classList.remove('auth-restoring');return}document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');document.documentElement.classList.remove('auth-restoring');setCurrentUserFromSession();applyPermissions();if(location.hash)applyPageLink();else restoreUiState();if(roleKey()==='admin'){loadUsers();loadActiveUsers()}sendPresenceHeartbeat();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}
@@ -2330,7 +2335,7 @@ function renderActiveUsers(){const count=document.getElementById('activeUsersCou
 async function loadActiveUsers(){if(!isAdmin())return;try{const data=await api('/api/auth/active-users');activeUsers=data.users||[];renderActiveUsers()}catch(e){}}
 async function sendPresenceHeartbeat(){if(!session)return;try{await api('/api/auth/heartbeat',{method:'POST',body:'{}'})}catch(e){}}
 function toggleActiveUsers(){const menu=document.getElementById('activeUsersMenu');if(!menu||!isAdmin())return;const open=menu.classList.contains('hidden');menu.classList.toggle('hidden',!open);if(open)loadActiveUsers()}
-async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='Workflow needs attention'}else if(canApprove()){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New request waiting for approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(currentWarehouseKey()));count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='Warehouse workflow needs attention'}else{count=pendingForRequester();label='pending';msg='Your request is pending'}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
+async function pollNotifications(showToast=true){try{let count=0,label='notifications',msg='';if(roleKey()==='admin'){const d=await api('/api/warehouse/notifications?user=');count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='Workflow needs attention'}else if(canApprove()){const d=await api('/api/warehouse/notifications?user=');count=d.approval_count||0;label='MR';msg='New request waiting for approval'}else if(roleKey()==='warehousemanager'){const d=await api('/api/warehouse/notifications?user='+encodeURIComponent(currentWarehouseKey()));count=(d.approval_count||0)+(d.warehouse_queue_count||0);label='workflow';msg='Warehouse workflow needs attention'}else{count=pendingForRequester();label='pending';msg='Your request is pending';if(!isSingleRan()){try{const transferInbox=await api('/api/warehouse/site-transfers/inbox-count?program='+encodeURIComponent(normalizeProgram(currentProgram)));const approvals=Number(transferInbox.count||0);count+=approvals;if(approvals)msg='A site transfer needs your approval'}catch(e){}}}setApprovalBadge(count,label);if(showToast&&Number(count)>lastApprovalCount)toast(msg);lastApprovalCount=Number(count)}catch(e){}}
 function workflowActions(req,type){if(type==='approval'){return `<div class="row-actions"><button class="btn primary" onclick="approveMr(${req.id})">Approve</button><button class="btn soft" onclick="returnMrForEdit(${req.id})">Return to requester</button><button class="btn danger" onclick="rejectMr(${req.id})">Reject</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}return `<div class="row-actions"><button class="btn soft" onclick="returnMrForEdit(${req.id})">Return</button><button class="btn primary" onclick="openScanMaterial(${req.id})">Scan</button><button class="btn primary" onclick="issueApprovedMr(${req.id})">Issue</button><button class="btn soft" onclick="showMrById(${req.id})">View</button></div>`}
 function transferActions(row,type){const view=`<button class="btn soft" onclick="showTransferById(${row.id})">View</button>`;if(type==='approval')return `<div class="row-actions"><button class="btn primary" onclick="approveTransfer(${row.id})">Approve</button><button class="btn soft" onclick="returnTransferForEdit(${row.id})">Return to requester</button><button class="btn danger" onclick="rejectTransfer(${row.id})">Reject</button>${view}</div>`;if(type==='warehouse')return `<div class="row-actions"><button class="btn primary" onclick="confirmTransfer(${row.id})">Confirm Transfer</button><button class="btn soft" onclick="returnTransferByDestination(${row.id})">Return</button>${view}</div>`;return view}
 function renderWorkflowQueues(){
