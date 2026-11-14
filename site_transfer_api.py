@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import SiteMaterialMovement, SiteTransferApproval
-from site_inventory_config import feature_flag_enabled, integration_enabled
+from site_inventory_config import integration_enabled
 from site_transfer_service import (
     approve_transfer,
     create_transfer,
@@ -74,10 +74,9 @@ class SiteTransferCorrectionIn(SiteTransferDispatchIn):
 
 
 def build_site_transfer_router(db_dependency, normalize_program_fn, require_roles_fn, actor_fn,
-                               enabled_fn=None, admin_write_enabled_fn=None):
+                               enabled_fn=None):
     router = APIRouter()
     gate = enabled_fn or (lambda program: site_transfer_enabled(program, normalize_program_fn))
-    admin_write_gate = admin_write_enabled_fn or feature_flag_enabled
 
     def authorize_and_gate(request: Request, program: str) -> str:
         require_roles_fn(request, "Admin")
@@ -102,18 +101,9 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
             )
         return user
 
-    def authorize_and_write_gate(request: Request, program: str) -> str:
-        actor = authorize_and_gate(request, program)
-        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
-            raise HTTPException(
-                status_code=503,
-                detail="Site Inventory administrative writes are disabled",
-            )
-        return actor
-
     @router.post("/api/warehouse/site-transfers")
     def site_transfer_create(data: SiteTransferCreate, request: Request, db: Session = Depends(db_dependency)):
-        actor = authorize_and_write_gate(request, data.program)
+        actor = authorize_and_gate(request, data.program)
         try:
             with db.begin():
                 row = create_transfer(
@@ -197,8 +187,6 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
             raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
         if not gate(program_key):
             raise HTTPException(status_code=503, detail="Site-to-Site transfers are disabled for this program")
-        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
-            raise HTTPException(status_code=503, detail="Site Inventory administrative writes are disabled")
         actor = actor_fn(request)
         try:
             with db.begin():
@@ -227,8 +215,6 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
             raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
         if not gate(program_key):
             raise HTTPException(status_code=503, detail="Site-to-Site transfers are disabled for this program")
-        if not admin_write_gate("SITE_INVENTORY_ADMIN_WRITE_ENABLED"):
-            raise HTTPException(status_code=503, detail="Site Inventory administrative writes are disabled")
         actor = actor_fn(request)
         try:
             with db.begin():
@@ -247,7 +233,7 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_write_gate(request, data.program)
+        actor = authorize_and_gate(request, data.program)
         try:
             with db.begin():
                 row = dispatch_transfer(db, transfer_id, data.program, actor, data.request_token)
@@ -262,7 +248,7 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_write_gate(request, data.program)
+        actor = authorize_and_gate(request, data.program)
         try:
             with db.begin():
                 receipt = receive_transfer(
@@ -288,7 +274,7 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_write_gate(request, data.program)
+        actor = authorize_and_gate(request, data.program)
         try:
             with db.begin():
                 correction = reverse_transfer_receipt(
@@ -315,7 +301,7 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_write_gate(request, data.program)
+        actor = authorize_and_gate(request, data.program)
         try:
             with db.begin():
                 correction = reverse_transfer_dispatch(
