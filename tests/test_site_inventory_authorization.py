@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 
 import main
 import site_inventory_api
-from models import Product, Site, SiteOpeningBalanceRequest
+from models import Product, Site, SiteBalance, SiteOpeningBalanceRequest
 
 
 class DummySession:
@@ -162,6 +162,94 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
         admin = self.make_request("Admin")
         result = endpoint(admin, program="FTTH", db=OptionsDB())
         self.assertEqual(len(result["pending_openings"]), 1)
+
+    def test_requester_balance_read_is_limited_to_one_active_site_and_product(self):
+        endpoint = self.endpoints["/api/warehouse/site-inventory"]
+        site = SimpleNamespace(id=8, program="FTTH", name="Active FTTH", site_inventory_enabled=True)
+        product = SimpleNamespace(id=21, program="FTTH", sku="TEST-21", name="Synthetic cable", status="active", unit="M")
+        balance = SimpleNamespace(
+            program="FTTH", site_id=8, site=site, product_id=21, product=product,
+            on_hand_qty=7, updated_at=None,
+        )
+        other_balance = SimpleNamespace(
+            program="FTTH", site_id=14,
+            site=SimpleNamespace(id=14, program="FTTH", name="Other FTTH", site_inventory_enabled=True),
+            product_id=22,
+            product=SimpleNamespace(id=22, program="FTTH", sku="TEST-22", name="Other material", unit="PCS"),
+            on_hand_qty=99, updated_at=None,
+        )
+        queried_models = []
+
+        class BalanceQuery:
+            def __init__(self, model, site_row=site):
+                self.model = model
+                self.site_row = site_row
+                self.criteria = {}
+                queried_models.append(model)
+
+            def filter_by(self, **kwargs):
+                if self.model is Site and kwargs.get("site_inventory_enabled") is True:
+                    if not self.site_row.site_inventory_enabled:
+                        return EmptyQuery(self.model)
+                if self.model is Product and kwargs.get("status") == "active":
+                    if product.status != "active":
+                        return EmptyQuery(self.model)
+                return self
+
+            def filter(self, *expressions):
+                for expression in expressions:
+                    self.criteria[expression.left.key] = expression.right.value
+                return self
+
+            def order_by(self, *_args):
+                return self
+
+            def first(self):
+                if self.model is Site:
+                    return self.site_row
+                if self.model is Product:
+                    return product
+                return None
+
+            def all(self):
+                if self.model is not SiteBalance:
+                    return []
+                rows = [balance, other_balance]
+                return [
+                    row for row in rows
+                    if all(getattr(row, key) == value for key, value in self.criteria.items())
+                ]
+
+        class BalanceDB:
+            def __init__(self, site_row=site):
+                self.site_row = site_row
+
+            def query(self, model):
+                return BalanceQuery(model, self.site_row)
+
+        class EmptyQuery:
+            def __init__(self, model):
+                self.model = model
+
+            def first(self):
+                return None
+
+        requester = self.make_request("Requester")
+        requester.state.current_user.program = "FTTH"
+        requester.state.session_program = "FTTH"
+        with self.assertRaises(HTTPException) as broad_read:
+            endpoint(requester, program="FTTH", site_id=None, product_id=None, db=BalanceDB())
+        self.assertEqual(broad_read.exception.status_code, 400)
+
+        result = endpoint(requester, program="FTTH", site_id=8, product_id=21, db=BalanceDB())
+        self.assertEqual(result["items"][0]["on_hand_qty"], "7")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(queried_models, [Site, Product, SiteBalance])
+
+        inactive_site = SimpleNamespace(id=8, program="FTTH", name="Inactive", site_inventory_enabled=False)
+        with self.assertRaises(HTTPException) as inactive:
+            endpoint(requester, program="FTTH", site_id=8, product_id=21, db=BalanceDB(inactive_site))
+        self.assertEqual(inactive.exception.status_code, 404)
 
     def test_site_inventory_activation_is_admin_only_and_uses_the_existing_write_gate(self):
         update = self.endpoints["/api/warehouse/site-inventory/sites/{site_id}"]
