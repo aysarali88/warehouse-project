@@ -169,6 +169,10 @@ class SiteTransferTests(unittest.TestCase):
             before_movements = db.query(SiteMaterialMovement).count()
 
         transfer_id = self._create_assigned()
+        requester_transfer_id = self._create_assigned(
+            actor_user_id=self.other_manager_user_id,
+            approver_user_id=self.manager_user_id,
+        )
         with SessionLocal() as db:
             approval = db.query(SiteTransferApproval).filter_by(transfer_id=transfer_id).one()
             self.assertEqual(approval.status, "pending")
@@ -176,10 +180,22 @@ class SiteTransferTests(unittest.TestCase):
             self.assertEqual(approval.created_by_user_id, self.admin_user_id)
             self.assertEqual(transfers.list_transfers(
                 db, "FTTH", approver_user_id=self.manager_user_id,
-            )["total"], 1)
+            )["total"], 2)
             self.assertEqual(transfers.list_transfers(
                 db, "FTTH", approver_user_id=self.other_manager_user_id,
             )["total"], 0)
+            self.assertEqual(transfers.list_transfers(
+                db, "FTTH", requester_user_id=self.other_manager_user_id,
+            )["total"], 1)
+            self.assertEqual(transfers.list_transfers(
+                db, "FTTH", requester_user_id=self.manager_user_id,
+            )["total"], 2)
+            with self.assertRaises(HTTPException) as hidden_creator_scope:
+                transfers.get_transfer(db, transfer_id, "FTTH", requester_user_id=self.other_manager_user_id)
+            self.assertEqual(hidden_creator_scope.exception.status_code, 404)
+            self.assertEqual(transfers.get_transfer(
+                db, requester_transfer_id, "FTTH", requester_user_id=self.other_manager_user_id,
+            )["id"], requester_transfer_id)
             with self.assertRaises(HTTPException) as hidden:
                 transfers.get_transfer(db, transfer_id, "FTTH", approver_user_id=self.other_manager_user_id)
             self.assertEqual(hidden.exception.status_code, 404)
@@ -647,7 +663,7 @@ class SiteTransferTests(unittest.TestCase):
                 with db.begin():
                     db.query(SiteTransfer).filter_by(id=transfer_id).delete(synchronize_session=False)
 
-    def test_transfer_api_is_admin_only_and_cutover_gate_defaults_closed(self):
+    def test_transfer_creation_allows_ftth_requester_but_keeps_other_roles_and_dormant_gate_closed(self):
         router = site_transfer_api.build_site_transfer_router(
             lambda: None, normalize_program, main.require_roles, main.request_actor,
             enabled_fn=lambda _program: True,
@@ -662,7 +678,7 @@ class SiteTransferTests(unittest.TestCase):
             items=[site_transfer_api.TransferLineCreate(product_id=1, quantity=1, uom="M")],
             request_token="api-feature-disabled-token-0001",
         )
-        for role in (None, "Requester", "Technician", "Warehouse Manager", "Management", "Approval"):
+        for role in (None, "Technician", "Warehouse Manager", "Management", "Approval"):
             request = Request({"type": "http", "headers": [], "query_string": b""})
             if role:
                 request.state.current_user = SimpleNamespace(role=role, name=role, username=role.lower())
@@ -671,6 +687,35 @@ class SiteTransferTests(unittest.TestCase):
                     endpoint(payload, request, SimpleNamespace(begin=nullcontext))
                 self.assertEqual(error.exception.status_code, 401 if role is None else 403)
                 create.assert_not_called()
+
+        requester_request = Request({"type": "http", "headers": [], "query_string": b""})
+        requester_request.state.current_user = SimpleNamespace(
+            id=88, role="Requester", name="FTTH Requester", username="requester", program="FTTH",
+        )
+        requester_request.state.session_program = "FTTH"
+        db = SimpleNamespace(begin=lambda: nullcontext())
+        with patch.object(site_transfer_api, "create_transfer", return_value=SimpleNamespace(id=41, program="FTTH")) as create, \
+             patch.object(site_transfer_api, "get_transfer", return_value={"id": 41}):
+            response = endpoint(payload, requester_request, db)
+        self.assertTrue(response["success"])
+        self.assertEqual(create.call_args.kwargs["actor_user_id"], 88)
+
+        approvers_endpoint = next(route.endpoint for route in router.routes
+                                  if route.path == "/api/warehouse/site-transfers/approvers")
+        with patch.object(site_transfer_api, "list_transfer_approvers", return_value=[]) as approvers:
+            approvers_endpoint(requester_request, "FTTH", SimpleNamespace())
+        self.assertEqual(approvers.call_args.kwargs["exclude_user_id"], 88)
+
+        dispatch_endpoint = next(route.endpoint for route in router.routes
+                                  if route.path == "/api/warehouse/site-transfers/{transfer_id}/dispatch")
+        dispatch_data = site_transfer_api.SiteTransferDispatchIn(
+            program="FTTH", request_token="requester-cannot-dispatch-token-001",
+        )
+        with patch.object(site_transfer_api, "dispatch_transfer") as dispatch:
+            with self.assertRaises(HTTPException) as denied_dispatch:
+                dispatch_endpoint(41, dispatch_data, requester_request, db)
+            self.assertEqual(denied_dispatch.exception.status_code, 403)
+            dispatch.assert_not_called()
 
         dormant_router = site_transfer_api.build_site_transfer_router(
             lambda: None, normalize_program, main.require_roles, main.request_actor,

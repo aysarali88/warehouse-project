@@ -45,7 +45,7 @@ function responseForTransfer(transfer) {
   };
 }
 
-function makeApi({ disabled = false, failCreate = false, delayCreate = 0 } = {}) {
+function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creatorUserId = 7 } = {}) {
   const calls = [];
   const transfer = { id: null, from_site_id: 7, to_site_id: 9, status: 'draft', dispatched: false, items: [] };
   let createCount = 0;
@@ -78,7 +78,7 @@ function makeApi({ disabled = false, failCreate = false, delayCreate = 0 } = {})
       transfer.to_site_id = body.to_site_id;
       transfer.status = 'draft';
       transfer.dispatched = false;
-      transfer.approval = { status: 'pending', approver_user_id: body.approver_user_id, approver_name: 'Regional Manager', approver_username: 'reg.manager' };
+      transfer.approval = { status: 'pending', created_by_user_id: creatorUserId, approver_user_id: body.approver_user_id, approver_name: 'Regional Manager', approver_username: 'reg.manager' };
       transfer.items = body.items.map((item, index) => ({
         id: 51 + index,
         product_id: item.product_id,
@@ -140,7 +140,8 @@ async function readyRequesterController(api, userId = 101) {
     const data = await api(url, options);
     const parsed = new URL(url, 'https://warehouse.test');
     if (parsed.pathname === '/api/warehouse/site-transfers' && !options?.method) {
-      data.items = (data.items || []).filter(row => Number(row.approval?.approver_user_id) === Number(userId));
+      data.items = (data.items || []).filter(row => Number(row.approval?.approver_user_id) === Number(userId)
+        || Number(row.approval?.created_by_user_id) === Number(userId));
       data.total = data.items.length;
       data.total_pages = data.total ? 1 : 0;
     }
@@ -170,7 +171,7 @@ test('create, approve, dispatch, and repeated partial receipts follow backend st
   assert.equal(line.availableQty, '100');
   await controller.updateLine(line.id, 'quantity', '30');
   assert.equal(await controller.createTransfer({ reference: 'REQ-1', notes: 'Stage 1' }), true);
-  assert.equal(controller.state.message, 'Transfer #41 sent to Regional Manager for approval.');
+  assert.equal(controller.state.message, 'Transfer request #41 submitted to Regional Manager for approval.');
   const manager = await readyRequesterController(mock.api);
   assert.equal(manager.state.transfers.length, 1);
   assert.equal(manager.state.transfers[0].approval.approver_user_id, 101);
@@ -285,21 +286,50 @@ test('selected Requester receives only assigned transfers and can approve or rej
   assert.equal(rejectCall.body.note, 'Site quantities need review');
 });
 
-test('requester cannot submit a transfer or reject without a reason', async () => {
+test('Requester can submit a request to another manager but cannot dispatch or receive', async () => {
+  const mock = makeApi({ creatorUserId: 202 });
+  const requester = await readyRequesterController(mock.api, 202);
+  await requester.updateForm('fromSiteId', '7');
+  await requester.updateForm('toSiteId', '9');
+  await requester.updateForm('approverUserId', '101');
+  const line = requester.state.form.lines[0];
+  await requester.updateLine(line.id, 'productId', '31');
+  await requester.updateLine(line.id, 'quantity', '5');
+  assert.equal(await requester.createTransfer(), true);
+  assert.equal(mock.createCount, 1);
+  assert.equal(requester.state.transfers.length, 1, 'creator sees their own submitted request');
+  assert.equal(requester.state.transfers[0].approval.created_by_user_id, 202);
+  assert.equal(requester.state.transfers[0].items[0].requested_qty, '5');
+  assert.equal(requester.state.transfers[0].items[0].sent_qty, '0');
+  assert.equal(await requester.dispatch(41), false);
+  assert.equal(requester.openReceipt(41, 51), false);
+  assert.equal(await requester.receive(), false);
+  assert.equal(mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/dispatch')).length, 0);
+});
+
+test('requester cannot approve an unassigned request or reject without a reason', async () => {
   const mock = makeApi();
-  const manager = await readyRequesterController(mock.api);
-  assert.equal(await manager.createTransfer(), false);
-  assert.equal(await manager.reject(41, '  '), false);
-  assert.match(manager.state.error, /rejection note is required/i);
-  assert.equal(mock.createCount, 0);
+  const admin = await readyController(mock.api);
+  await admin.updateLine(admin.state.form.lines[0].id, 'quantity', '5');
+  assert.equal(await admin.createTransfer(), true);
+  const otherRequester = await readyRequesterController(mock.api, 202);
+  assert.equal(await otherRequester.approve(41), false);
+  const assignedRequester = await readyRequesterController(mock.api, 101);
+  assert.equal(await assignedRequester.reject(41, '  '), false);
+  assert.match(assignedRequester.state.error, /rejection note is required/i);
+  assert.equal(mock.createCount, 1);
 });
 
 test('page keeps transfer controls hidden until readiness and restricts navigation to Admin', async () => {
   const html = await readFile(new URL('../static/materials_inventory.html', import.meta.url), 'utf8');
+  const ui = await readFile(new URL('../static/site_transfer_ui.js', import.meta.url), 'utf8');
   assert.match(html, /<button class="site-transfer-access hidden" data-view="siteTransfers">Site to Site Transfer<\/button>/);
   assert.match(html, /<section class="view site-transfer-view" id="siteTransfers">/);
   assert.match(html, /id="siteTransferApprover" required/);
-  assert.match(html, /Transfers assigned to me/);
+  assert.match(html, /My Requests &amp; Assigned Transfers|My Requests & Assigned Transfers/);
+  assert.match(ui, /<th>Requested Qty<\/th>/);
+  assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
+  assert.match(html, /site-transfer-create-only hidden/);
   assert.match(html, /<div class="hidden" id="siteTransferWorkspace">/);
   assert.match(html, /id="siteTransferLines" class="site-transfer-lines"/);
   assert.match(html, /data-site-transfer-command="add-line">Add material/);
