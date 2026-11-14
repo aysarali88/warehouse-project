@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 import main
 import site_inventory_api
+from models import Product, Site, SiteOpeningBalanceRequest
 
 
 class DummySession:
@@ -104,6 +105,63 @@ class SiteInventoryAuthorizationTests(unittest.TestCase):
             with self.subTest(role=role):
                 result = endpoint(self.make_request(role), db=DummySession())
                 self.assertEqual(result, {"success": True, "items": []})
+
+    def test_requester_can_read_transfer_options_without_opening_balance_details(self):
+        endpoint = self.endpoints["/api/warehouse/site-inventory/options"]
+        active_site = SimpleNamespace(id=8, name="Active FTTH", program="FTTH", site_inventory_enabled=True)
+        inactive_site = SimpleNamespace(id=9, name="Historical FTTH", program="FTTH", site_inventory_enabled=False)
+        product = SimpleNamespace(id=21, sku="TEST-21", name="Synthetic cable", program="FTTH", status="active", unit="M")
+        pending = SimpleNamespace(
+            id=31, program="FTTH", status="pending_approval", site_id=8,
+            site=SimpleNamespace(name=active_site.name), product_id=21,
+            product=SimpleNamespace(name=product.name), quantity=4, uom="M",
+            effective_date="2026-11-14", reference="OPEN-TEST", note="private detail",
+            entered_by="Admin",
+        )
+        queried_models = []
+
+        class OptionsQuery:
+            def __init__(self, model):
+                self.model = model
+                self.filters = {}
+                queried_models.append(model)
+
+            def filter_by(self, **kwargs):
+                self.filters.update(kwargs)
+                return self
+
+            def order_by(self, *_args):
+                return self
+
+            def all(self):
+                rows = {
+                    Site: [active_site, inactive_site],
+                    Product: [product],
+                    SiteOpeningBalanceRequest: [pending],
+                }[self.model]
+                return [row for row in rows if all(getattr(row, key) == value for key, value in self.filters.items())]
+
+        class OptionsDB:
+            def query(self, model):
+                return OptionsQuery(model)
+
+        requester = self.make_request("Requester")
+        requester.state.current_user.program = "FTTH"
+        requester.state.session_program = "FTTH"
+        result = endpoint(requester, program="FTTH", db=OptionsDB())
+        self.assertEqual([row["id"] for row in result["sites"]], [8])
+        self.assertEqual([row["id"] for row in result["products"]], [21])
+        self.assertEqual(result["pending_openings"], [])
+        self.assertNotIn(SiteOpeningBalanceRequest, queried_models)
+
+        requester.state.session_program = "SINGLE_RAN"
+        with self.assertRaises(HTTPException) as wrong_program:
+            endpoint(requester, program="SINGLE_RAN", db=OptionsDB())
+        self.assertEqual(wrong_program.exception.status_code, 403)
+
+        admin = self.make_request("Admin")
+        result = endpoint(admin, program="FTTH", db=OptionsDB())
+        self.assertEqual(len(result["pending_openings"]), 1)
 
     def test_site_inventory_activation_is_admin_only_and_uses_the_existing_write_gate(self):
         update = self.endpoints["/api/warehouse/site-inventory/sites/{site_id}"]

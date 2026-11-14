@@ -110,11 +110,22 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         program: str = "FTTH",
         db: Session = Depends(db_dependency),
     ):
-        authorize(request, "Admin", "Management", "Approval")
         program_key = normalize_program_fn(program)
-        sites = db.query(Site).filter_by(program=program_key).order_by(Site.name).all()
+        user = require_roles_fn(request, "Admin", "Management", "Approval", "Requester")
+        requester = str(user.role or "").strip().lower() == "requester"
+        if requester:
+            session_program = normalize_program_fn(
+                getattr(request.state, "session_program", getattr(user, "program", ""))
+            )
+            user_program = normalize_program_fn(getattr(user, "program", ""))
+            if program_key != session_program or program_key != user_program:
+                raise HTTPException(status_code=403, detail="Site Inventory options belong to a different program")
+        site_query = db.query(Site).filter_by(program=program_key)
+        if requester:
+            site_query = site_query.filter_by(site_inventory_enabled=True)
+        sites = site_query.order_by(Site.name).all()
         products = db.query(Product).filter_by(program=program_key, status="active").order_by(Product.name).all()
-        pending = db.query(SiteOpeningBalanceRequest).filter_by(
+        pending = [] if requester else db.query(SiteOpeningBalanceRequest).filter_by(
             program=program_key, status="pending_approval"
         ).order_by(SiteOpeningBalanceRequest.id).all()
         return {
