@@ -89,6 +89,16 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         require_roles_fn(request, *roles)
         return actor_fn(request)
 
+    def require_requester_program(request: Request, user, program: str) -> None:
+        if str(user.role or "").strip().lower() != "requester":
+            return
+        session_program = normalize_program_fn(
+            getattr(request.state, "session_program", getattr(user, "program", ""))
+        )
+        user_program = normalize_program_fn(getattr(user, "program", ""))
+        if program != session_program or program != user_program:
+            raise HTTPException(status_code=403, detail="Site Inventory data belongs to a different program")
+
     def require_admin_writes_enabled() -> None:
         if not site_inventory_admin_write_enabled():
             raise HTTPException(
@@ -113,13 +123,7 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         program_key = normalize_program_fn(program)
         user = require_roles_fn(request, "Admin", "Management", "Approval", "Requester")
         requester = str(user.role or "").strip().lower() == "requester"
-        if requester:
-            session_program = normalize_program_fn(
-                getattr(request.state, "session_program", getattr(user, "program", ""))
-            )
-            user_program = normalize_program_fn(getattr(user, "program", ""))
-            if program_key != session_program or program_key != user_program:
-                raise HTTPException(status_code=403, detail="Site Inventory options belong to a different program")
+        require_requester_program(request, user, program_key)
         site_query = db.query(Site).filter_by(program=program_key)
         if requester:
             site_query = site_query.filter_by(site_inventory_enabled=True)
@@ -194,8 +198,22 @@ def build_site_inventory_router(db_dependency, normalize_program_fn, require_rol
         product_id: int | None = Query(default=None, gt=0),
         db: Session = Depends(db_dependency),
     ):
-        authorize(request, "Admin", "Management", "Approval")
-        query = db.query(SiteBalance).filter(SiteBalance.program == normalize_program_fn(program))
+        program_key = normalize_program_fn(program)
+        user = require_roles_fn(request, "Admin", "Management", "Approval", "Requester")
+        requester = str(user.role or "").strip().lower() == "requester"
+        require_requester_program(request, user, program_key)
+        if requester:
+            if site_id is None or product_id is None:
+                raise HTTPException(status_code=400, detail="Requesters must request one site's balance for one product")
+            site = db.query(Site).filter_by(
+                id=site_id, program=program_key, site_inventory_enabled=True,
+            ).first()
+            product = db.query(Product).filter_by(
+                id=product_id, program=program_key, status="active",
+            ).first()
+            if site is None or product is None:
+                raise HTTPException(status_code=404, detail="Active Site Inventory balance target not found")
+        query = db.query(SiteBalance).filter(SiteBalance.program == program_key)
         if site_id is not None:
             query = query.filter(SiteBalance.site_id == site_id)
         if product_id is not None:
