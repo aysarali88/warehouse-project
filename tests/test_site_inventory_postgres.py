@@ -470,6 +470,47 @@ class SiteInventoryPostgreSQLValidation(TestCase):
         with self.Session() as db:
             self.assertEqual(db.query(SiteMaterialMovement).filter_by(site_id=self.site_id).count(), 0)
 
+    def test_negative_open_field_reconciliation_is_scoped_and_outbound_remains_blocked(self):
+        with self.Session() as db:
+            with db.begin():
+                inventory.post_site_movement(
+                    db,
+                    program="FTTH", site_id=self.site_id, product_id=self.product_id,
+                    movement_type="adjustment", event_type="open_field_reconciliation",
+                    quantity_delta=Decimal("-3"), uom="M",
+                    document_type="open_field_snapshot", document_id="a" * 64,
+                    document_line_id=f"{self.site_id}:{self.product_id}",
+                    reference="OPEN-FIELD-PG-NEGATIVE",
+                    note="Synthetic verified Open in Field reconciliation",
+                    created_by="test-admin", approved_by="test-admin",
+                    effective_date="2026-11-14",
+                    request_token=f"open-field-pg-{uuid4().hex}",
+                    reconciliation_target_qty=Decimal("-3"),
+                )
+        self.assertEqual(self._balance(), Decimal("-3.000000"))
+
+        with self.assertRaises(HTTPException) as outbound:
+            self._post(amount="1", movement_type="outgoing", doc_id="OPEN-FIELD-NEGATIVE-OUT")
+        self.assertEqual(outbound.exception.status_code, 409)
+        self.assertEqual(self._balance(), Decimal("-3.000000"))
+
+        with self.assertRaises(HTTPException) as wrong_scope:
+            with self.Session() as db:
+                with db.begin():
+                    inventory.post_site_movement(
+                        db,
+                        program="FTTH", site_id=self.site_id, product_id=self.product_id,
+                        movement_type="outgoing", event_type="normal_outbound",
+                        quantity_delta=Decimal("-1"), uom="M",
+                        document_type="pg_test", document_id="wrong-scope-negative",
+                        document_line_id="1", reference="WRONG-SCOPE-NEGATIVE",
+                        note="Should not receive reconciliation exception",
+                        created_by="test-user", approved_by="test-user",
+                        effective_date="2026-11-14", request_token=f"wrong-scope-{uuid4().hex}",
+                        reconciliation_target_qty=Decimal("-4"),
+                    )
+        self.assertEqual(wrong_scope.exception.status_code, 400)
+
     def test_negative_initial_opening_and_recovery_are_atomic_on_postgres(self):
         with self.Session() as db:
             with db.begin():
