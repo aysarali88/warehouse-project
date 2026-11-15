@@ -35,7 +35,7 @@ from openpyxl import Workbook, load_workbook
 from email.message import EmailMessage
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import String, case, func, or_, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload, undefer
 
 from database import Base, SessionLocal, all_engines, all_sessionmakers, engine, get_sessionmaker, sr_engine
@@ -62,6 +62,8 @@ from models import (
     RolloutEntryCounter,
     RolloutRecord,
     Site,
+    SiteAlias,
+    SiteBalance,
     SiteMaterialMovement,
     SrMaterialRequisitionSignedCopy,
     SrMaterialReturnStatus,
@@ -78,9 +80,11 @@ from site_transfer_api import build_site_transfer_router
 from site_inventory_config import (
     integration_enabled as site_inventory_integration_enabled,
     parse_cutover_timestamp,
+    site_inventory_admin_write_enabled,
     validate_rollout_cutover_eligibility,
 )
 from site_inventory_service import (
+    post_site_movement,
     post_material_requisition_site_movement,
     post_material_return_site_movement,
     post_rollout_consumption_site_movement,
@@ -8827,6 +8831,424 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         "stock_by_warehouse": stock_by_warehouse,
         "events": events[:1000],
     }
+
+
+class SiteInventoryOpenFieldReconciliationRequest(BaseModel):
+    program: str = "FTTH"
+    apply: bool = False
+    expected_digest: str = ""
+
+
+def _open_field_decimal(value) -> Decimal:
+    try:
+        amount = Decimal(str(value or 0))
+        if not amount.is_finite():
+            raise ValueError("non-finite")
+        normalized = amount.quantize(Decimal("0.000001"))
+        if normalized != amount:
+            raise ValueError("precision")
+        return normalized
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Open in Field contains a non-numeric quantity") from exc
+
+
+def _open_field_site_id(raw_area: str, site_keys: dict[str, set[int]], active_ids: set[int], blockers: list[dict]):
+    key = normalize_usage_key(canonical_rollout_usage_area(raw_area))
+    candidates = site_keys.get(key, set())
+    if not candidates or not (candidates & active_ids):
+        return None
+    if len(candidates) != 1 or len(candidates & active_ids) != 1:
+        blockers.append({
+            "type": "ambiguous_site",
+            "area": raw_area,
+            "candidate_site_ids": sorted(candidates),
+        })
+        return None
+    return next(iter(candidates))
+
+
+def build_open_field_site_inventory_snapshot(db: Session, request: Request, program: str) -> dict:
+    """Calculate the existing Warehouse vs Field formula, resolved to active numeric inventory keys."""
+    program_key = normalize_program(program)
+    active_sites = db.query(Site).filter_by(
+        program=program_key, site_inventory_enabled=True,
+    ).order_by(Site.id).all()
+    active_ids = {site.id for site in active_sites}
+    if not active_sites:
+        raise HTTPException(status_code=409, detail="No active Sites are configured for Site Inventory")
+    all_sites = db.query(Site).filter_by(program=program_key).all()
+    site_keys: dict[str, set[int]] = {}
+    for site in all_sites:
+        key = normalize_usage_key(canonical_rollout_usage_area(site.name))
+        if key:
+            site_keys.setdefault(key, set()).add(site.id)
+    for alias in db.query(SiteAlias).filter_by(program=program_key).all():
+        key = normalize_usage_key(canonical_rollout_usage_area(alias.display_alias))
+        if key:
+            site_keys.setdefault(key, set()).add(alias.site_id)
+
+    products = db.query(Product).filter_by(program=program_key).all()
+    products_by_id = {product.id: product for product in products}
+    product_keys: dict[int, set[str]] = {}
+    products_by_material_key: dict[str, set[int]] = {}
+    for product in products:
+        keys = {
+            canonical_material_key(product_display_name(product)),
+            canonical_material_key(product.sku or ""),
+        }
+        keys.discard("")
+        product_keys[product.id] = keys
+        for key in keys:
+            products_by_material_key.setdefault(key, set()).add(product.id)
+
+    groups: dict[tuple[int, str], dict] = {}
+    blockers: list[dict] = []
+    out_of_scope_areas: set[str] = set()
+
+    def add_source(raw_area: str, material: str, qty, kind: str, product_id=None, uom="") -> None:
+        site_id = _open_field_site_id(raw_area, site_keys, active_ids, blockers)
+        if site_id is None:
+            if raw_area and not any(blocker.get("area") == raw_area for blocker in blockers):
+                out_of_scope_areas.add(str(raw_area).strip())
+            return
+        material_key = canonical_material_key(material)
+        if not material_key:
+            blockers.append({"type": "unmapped_material", "site_id": site_id, "material": material})
+            return
+        key = (site_id, material_key)
+        group = groups.setdefault(key, {
+            "site_id": site_id,
+            "material_key": material_key,
+            "issued": Decimal("0"),
+            "rollout": Decimal("0"),
+            "returned": Decimal("0"),
+            "source_product_ids": set(),
+            "source_uoms": set(),
+            "rollout_present": False,
+        })
+        group[kind] += _open_field_decimal(qty)
+        if product_id is not None:
+            group["source_product_ids"].add(int(product_id))
+        if kind == "rollout":
+            group["rollout_present"] = True
+        elif uom:
+            group["source_uoms"].add(str(uom).strip().upper())
+        else:
+            blockers.append({
+                "type": "missing_uom", "site_id": site_id,
+                "material": material, "source": kind,
+            })
+
+    allowed = allowed_warehouse_ids(request, db, program_key)
+    requisitions_query = (
+        db.query(MaterialRequisition)
+        .options(selectinload(MaterialRequisition.items).joinedload(MaterialRequisitionItem.product))
+        .filter(
+            MaterialRequisition.program == program_key,
+            MaterialRequisition.status.in_(["issued", "signed"]),
+        )
+        .order_by(MaterialRequisition.id.asc())
+    )
+    if allowed is not None:
+        requisitions_query = requisitions_query.filter(MaterialRequisition.warehouse_id.in_(allowed))
+    for requisition in requisitions_query.all():
+        raw_area = requisition.site_id or requisition.site_address or ""
+        for item in requisition.items:
+            quantity = _open_field_decimal(item.quantity)
+            if quantity <= 0:
+                continue
+            product = item.product
+            material = product_display_name(product) if product else str(item.description or "")
+            material = material or (product.sku if product else "")
+            material_key = canonical_material_key(material)
+            if not material_key:
+                continue
+            add_source(
+                raw_area, material, quantity, "issued",
+                product_id=item.product_id, uom=item.uom,
+            )
+
+    returns_query = (
+        db.query(MaterialReturn)
+        .options(selectinload(MaterialReturn.items).joinedload(MaterialReturnItem.product))
+        .filter(MaterialReturn.program == program_key, MaterialReturn.status == "confirmed")
+        .order_by(MaterialReturn.id.asc())
+    )
+    if allowed is not None:
+        returns_query = returns_query.filter(MaterialReturn.warehouse_id.in_(allowed))
+    for returned in returns_query.all():
+        raw_area = returned.site_id or returned.site_address or ""
+        for item in returned.items:
+            quantity = _open_field_decimal(item.quantity)
+            if quantity <= 0:
+                continue
+            product = item.product
+            material = product_display_name(product) if product else str(item.description or "")
+            material = material or (product.sku if product else "")
+            material_key = canonical_material_key(material)
+            if not material_key:
+                continue
+            add_source(
+                raw_area, material, quantity, "returned",
+                product_id=item.product_id, uom=item.uom,
+            )
+
+    rollout_rows, _ = rollout_material_usage_aggregate_rows(db)
+    for record in rollout_rows:
+        raw_area = str(record.get("Area") or record.get("area") or "").strip()
+        material = str(record.get("material type") or record.get("item") or "").strip()
+        status = normalize_usage_key(str(record.get("status") or record.get("staus") or ""))
+        if status and status not in {"done", "completed", "installed"}:
+            continue
+        actual = _open_field_decimal(record.get("actual"))
+        if actual <= 0 or not material:
+            continue
+        add_source(raw_area, material, actual, "rollout")
+
+    targets: dict[tuple[int, int], dict] = {}
+    for (site_id, material_key), group in groups.items():
+        source_ids = set(group["source_product_ids"])
+        catalog_candidates = products_by_material_key.get(material_key, set())
+        resolved_ids = set(source_ids)
+        if group["rollout_present"] or not resolved_ids:
+            if len(catalog_candidates) != 1:
+                blockers.append({
+                    "type": "unmapped_or_ambiguous_product",
+                    "site_id": site_id,
+                    "material_key": material_key,
+                    "candidate_product_ids": sorted(catalog_candidates),
+                })
+                continue
+            resolved_ids.update(catalog_candidates)
+        if len(resolved_ids) != 1:
+            blockers.append({
+                "type": "ambiguous_product_identity",
+                "site_id": site_id,
+                "material_key": material_key,
+                "candidate_product_ids": sorted(resolved_ids),
+            })
+            continue
+        product_id = next(iter(resolved_ids))
+        product = products_by_id.get(product_id)
+        if product is None or product.program != program_key:
+            blockers.append({
+                "type": "invalid_product_id", "site_id": site_id,
+                "product_id": product_id, "material_key": material_key,
+            })
+            continue
+        if material_key not in product_keys.get(product_id, set()):
+            blockers.append({
+                "type": "product_material_conflict", "site_id": site_id,
+                "product_id": product_id, "material_key": material_key,
+            })
+            continue
+        expected_uom = str(product.unit or "PCS").strip().upper()
+        if not expected_uom or any(unit != expected_uom for unit in group["source_uoms"]):
+            blockers.append({
+                "type": "uom_conflict", "site_id": site_id,
+                "product_id": product_id, "expected_uom": expected_uom,
+                "source_uoms": sorted(group["source_uoms"]),
+            })
+            continue
+        pair = (site_id, product_id)
+        row = targets.setdefault(pair, {
+            "site_id": site_id, "product_id": product_id, "uom": expected_uom,
+            "issued": Decimal("0"), "rollout": Decimal("0"),
+            "returned": Decimal("0"), "target": Decimal("0"),
+        })
+        row["issued"] += group["issued"]
+        row["rollout"] += group["rollout"]
+        row["returned"] += group["returned"]
+        row["target"] += group["issued"] - group["rollout"] - group["returned"]
+
+    site_by_id = {site.id: site for site in active_sites}
+    ledger_rows = db.query(
+        SiteMaterialMovement.site_id,
+        SiteMaterialMovement.product_id,
+        func.sum(SiteMaterialMovement.quantity_delta),
+    ).filter(
+        SiteMaterialMovement.program == program_key,
+        SiteMaterialMovement.status == "approved",
+        SiteMaterialMovement.site_id.in_(active_ids or {-1}),
+    ).group_by(SiteMaterialMovement.site_id, SiteMaterialMovement.product_id).all()
+    ledger = {(site_id, product_id): _open_field_decimal(qty) for site_id, product_id, qty in ledger_rows}
+    balance_rows = db.query(SiteBalance).filter(
+        SiteBalance.program == program_key,
+        SiteBalance.site_id.in_(active_ids or {-1}),
+    ).all()
+    balances = {
+        (row.site_id, row.product_id): _open_field_decimal(row.on_hand_qty)
+        for row in balance_rows
+    }
+    all_pairs = set(targets) | set(ledger) | set(balances)
+    rows = []
+    for site_id, product_id in sorted(all_pairs):
+        site = site_by_id.get(site_id)
+        product = products_by_id.get(product_id)
+        if site is None or product is None:
+            blockers.append({
+                "type": "invalid_existing_inventory_identity",
+                "site_id": site_id, "product_id": product_id,
+            })
+            continue
+        target = targets.get((site_id, product_id), {}).get("target", Decimal("0"))
+        ledger_qty = ledger.get((site_id, product_id), Decimal("0"))
+        balance_qty = balances.get((site_id, product_id), Decimal("0"))
+        if (site_id, product_id) not in targets and (ledger_qty != 0 or balance_qty != 0):
+            blockers.append({
+                "type": "inventory_without_open_field_source",
+                "site_id": site_id,
+                "product_id": product_id,
+                "ledger_qty": str(ledger_qty),
+                "balance_qty": str(balance_qty),
+            })
+        if ledger_qty != balance_qty:
+            blockers.append({
+                "type": "ledger_projection_mismatch", "site_id": site_id,
+                "product_id": product_id, "ledger_qty": str(ledger_qty),
+                "balance_qty": str(balance_qty),
+            })
+        rows.append({
+            "site_id": site_id,
+            "site": site.name,
+            "product_id": product_id,
+            "sku": product.sku,
+            "material": product_display_name(product),
+            "uom": targets.get((site_id, product_id), {}).get("uom", str(product.unit or "PCS").strip().upper()),
+            "mr_issued_qty": targets.get((site_id, product_id), {}).get("issued", Decimal("0")),
+            "rollout_actual_qty": targets.get((site_id, product_id), {}).get("rollout", Decimal("0")),
+            "confirmed_return_qty": targets.get((site_id, product_id), {}).get("returned", Decimal("0")),
+            "open_in_field_qty": target,
+            "ledger_qty": ledger_qty,
+            "balance_qty": balance_qty,
+            "delta": target - ledger_qty,
+        })
+
+    rows.sort(key=lambda row: (row["site_id"], row["product_id"]))
+    blockers = sorted(blockers, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    digest_payload = {
+        "program": program_key,
+        "rows": [{key: (str(value) if isinstance(value, Decimal) else value) for key, value in row.items()} for row in rows],
+        "blockers": blockers,
+    }
+    digest = hashlib.sha256(json.dumps(digest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return {
+        "program": program_key,
+        "digest": digest,
+        "items": rows,
+        "blockers": blockers,
+        "out_of_scope_area_names": sorted(out_of_scope_areas),
+        "counts": {
+            "rows": len(rows),
+            "changes": sum(1 for row in rows if row["delta"] != 0),
+            "positive_targets": sum(1 for row in rows if row["open_in_field_qty"] > 0),
+            "negative_targets": sum(1 for row in rows if row["open_in_field_qty"] < 0),
+            "zero_targets": sum(1 for row in rows if row["open_in_field_qty"] == 0),
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/api/warehouse/site-inventory/open-field-reconciliation")
+def site_inventory_open_field_reconciliation(
+    data: SiteInventoryOpenFieldReconciliationRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    actor = request_actor(request) if current_user(request).role.strip().lower() == "admin" else ""
+    if not actor:
+        raise HTTPException(status_code=403, detail="Only Admin can reconcile Site Inventory to Open in Field")
+    if data.apply and not site_inventory_admin_write_enabled():
+        raise HTTPException(status_code=503, detail="Site Inventory administrative writes are disabled")
+    if data.apply and len(data.expected_digest) != 64:
+        raise HTTPException(status_code=400, detail="A fresh preview digest is required before applying reconciliation")
+
+    try:
+        with db.begin():
+            if db.get_bind().dialect.name == "postgresql":
+                isolation = "SERIALIZABLE" if data.apply else "REPEATABLE READ READ ONLY"
+                db.execute(text(f"SET TRANSACTION ISOLATION LEVEL {isolation}"))
+            snapshot = build_open_field_site_inventory_snapshot(db, request, data.program)
+            if not data.apply:
+                result = {**snapshot, "mode": "preview", "applied": False}
+            else:
+                if snapshot["blockers"]:
+                    raise HTTPException(status_code=409, detail={
+                        "message": "Open in Field reconciliation has unresolved mapping or ledger blockers",
+                        "blockers": snapshot["blockers"],
+                    })
+                if snapshot["digest"] != data.expected_digest:
+                    raise HTTPException(status_code=409, detail="Source or Site Inventory state changed; run a fresh preview")
+                reference = f"OPEN-FIELD-{snapshot['digest'][:16].upper()}"
+                effective_date = datetime.now(timezone.utc).date().isoformat()
+                note = (
+                    "Controlled reconciliation to existing Open in Field formula: "
+                    "issued/signed MR - accepted Rollout actual - confirmed Returns. "
+                    f"Snapshot SHA-256={snapshot['digest']}"
+                )
+                posted = []
+                for row in snapshot["items"]:
+                    if row["delta"] == 0:
+                        continue
+                    movement = post_site_movement(
+                        db,
+                        program=data.program,
+                        site_id=row["site_id"],
+                        product_id=row["product_id"],
+                        movement_type="adjustment",
+                        event_type="open_field_reconciliation",
+                        quantity_delta=row["delta"],
+                        uom=row["uom"],
+                        document_type="open_field_snapshot",
+                        document_id=snapshot["digest"],
+                        document_line_id=f"{row['site_id']}:{row['product_id']}",
+                        reference=reference,
+                        note=note,
+                        created_by=actor,
+                        approved_by=actor,
+                        effective_date=effective_date,
+                        request_token=f"open-field-recon:{snapshot['digest']}:{row['site_id']}:{row['product_id']}",
+                        reconciliation_target_qty=row["open_in_field_qty"],
+                    )
+                    posted.append({
+                        "site_id": row["site_id"], "product_id": row["product_id"],
+                        "movement_id": movement.id, "delta": str(row["delta"]),
+                    })
+
+                verification = build_open_field_site_inventory_snapshot(db, request, data.program)
+                if verification["blockers"] or any(row["delta"] != 0 for row in verification["items"]):
+                    raise HTTPException(status_code=409, detail="Post-reconciliation ledger verification failed; transaction rolled back")
+                db.add(AuditLog(
+                    action="site_inventory_open_field_reconciliation_applied",
+                    entity_type="site_inventory",
+                    entity_id=normalize_program(data.program),
+                    actor=actor,
+                    details=json.dumps({
+                        "snapshot_digest": snapshot["digest"],
+                        "movement_count": len(posted),
+                        "site_product_rows": snapshot["counts"]["rows"],
+                        "negative_target_rows": snapshot["counts"]["negative_targets"],
+                    }, sort_keys=True),
+                ))
+                result = {
+                    **snapshot,
+                    "mode": "applied",
+                    "applied": True,
+                    "movement_count": len(posted),
+                    "movements": posted,
+                    "verified_digest": verification["digest"],
+                }
+    except DBAPIError as exc:
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None) or getattr(getattr(exc, "orig", None), "pgcode", None)
+        if sqlstate == "40001":
+            raise HTTPException(status_code=409, detail="Operational activity changed during reconciliation; run a fresh preview") from exc
+        raise
+    response = {**result}
+    response["items"] = [{
+        key: str(value) if isinstance(value, Decimal) else value
+        for key, value in row.items()
+    } for row in result["items"]]
+    return {"success": True, **response}
 
 
 @app.get("/api/warehouse/rollout-material-usage")

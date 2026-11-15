@@ -244,6 +244,7 @@ def post_site_movement(
     effective_date: str,
     request_token: str = "",
     reverses_movement_id: int | None = None,
+    reconciliation_target_qty=None,
 ) -> SiteMaterialMovement:
     _require_transaction(db)
     program_key = normalize_program(program)
@@ -257,10 +258,20 @@ def post_site_movement(
     actor = str(created_by or "").strip()
     approver = str(approved_by or "").strip()
     quantity = _decimal(quantity_delta)
+    reconciliation_target = (
+        _decimal(reconciliation_target_qty) if reconciliation_target_qty is not None else None
+    )
     if kind not in SUPPORTED_MOVEMENT_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported site movement type")
     if kind == "opening_balance" and (event != "opening_balance_approved" or document_kind != "site_opening_balance_request"):
         raise HTTPException(status_code=400, detail="Opening balances must be posted by an approved opening request")
+    if reconciliation_target is not None and not (
+        kind == "adjustment"
+        and event == "open_field_reconciliation"
+        and document_kind == "open_field_snapshot"
+        and len(document) == 64
+    ):
+        raise HTTPException(status_code=400, detail="A reconciliation target is valid only for a verified Open in Field adjustment")
     if kind == "incoming" and quantity <= 0:
         raise HTTPException(status_code=400, detail="Incoming movement quantity must be positive")
     if kind == "outgoing" and quantity >= 0:
@@ -314,6 +325,8 @@ def post_site_movement(
         return existing
 
     balance = _ensure_balance_row(db, program_key, site_id, product_id)
+    if reconciliation_target is not None and _decimal(balance.on_hand_qty) + quantity != reconciliation_target:
+        raise HTTPException(status_code=409, detail="Site balance changed while applying the Open in Field reconciliation")
     if kind == "opening_balance" and quantity < 0:
         has_history = db.query(SiteMaterialMovement.id).filter_by(
             program=program_key, site_id=site_id, product_id=product_id
@@ -373,7 +386,7 @@ def post_site_movement(
     ).one()
     _stage("after_movement")
     update_statement = update(SiteBalance).where(SiteBalance.id == balance.id)
-    if quantity < 0 and kind != "opening_balance":
+    if quantity < 0 and kind != "opening_balance" and reconciliation_target is None:
         update_statement = update_statement.where(SiteBalance.on_hand_qty + quantity >= 0)
     changed = db.execute(
         update_statement.values(on_hand_qty=SiteBalance.on_hand_qty + quantity, updated_at=func.now())
