@@ -8434,7 +8434,13 @@ def rollout_warehouse_key(record: dict) -> str:
 
 
 def canonical_material_key(value: str) -> str:
-    key = normalize_usage_key(value)
+    normalized_value = re.sub(
+        r"(\d+)\.0+m(?=[^A-Za-z0-9]|$)",
+        r"\1m",
+        str(value or ""),
+        flags=re.IGNORECASE,
+    )
+    key = normalize_usage_key(normalized_value)
     if not key:
         return ""
 
