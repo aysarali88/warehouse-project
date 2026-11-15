@@ -164,6 +164,30 @@ class SiteInventoryOpenFieldReconciliationTests(unittest.TestCase):
         self.assertEqual(movement_count, 1)
         self.assertEqual(audit_count, 1)
 
+    def test_decimal_zero_rollout_cable_length_maps_to_catalog_product(self):
+        rollout_product = Product(
+            program="FTTH", sku=f"OFR-150-{self.suffix}",
+            name="Single-Core Distribution Cable_150m", unit="PCS", status="active",
+        )
+        with self.Session() as db:
+            with db.begin():
+                db.add(rollout_product)
+                db.flush()
+                product_id = rollout_product.id
+                db.add(RolloutRecord(
+                    record_id=f"OFR-{self.suffix}-RO-DECIMAL",
+                    area=self.site_name,
+                    material_type="Single-Core Distribution Cable_150.0m",
+                    actual=1,
+                    status="Done",
+                ))
+
+        preview = self._snapshot()
+        row = next(item for item in preview["items"] if item["product_id"] == product_id)
+        self.assertEqual(row["rollout_actual_qty"], Decimal("1.000000"))
+        self.assertEqual(row["open_in_field_qty"], Decimal("-1.000000"))
+        self.assertEqual(preview["blockers"], [])
+
     def test_admin_write_gate_and_authorization_block_without_writes(self):
         self._add_sources(mr_qty=3)
         preview = self._snapshot()

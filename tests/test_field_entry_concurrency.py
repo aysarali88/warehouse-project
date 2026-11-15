@@ -162,6 +162,8 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
     def test_canonical_material_key_groups_cable_lengths_with_or_without_meter_suffix(self):
         equivalent_pairs = [
             ("Single-Core Distribution Cable_50m", "Single-Core Distribution Cable_50"),
+            ("Single-Core Distribution Cable_150m", "Single-Core Distribution Cable_150.0m"),
+            ("Single-Core Distribution Cable_80m", "Single-Core Distribution Cable_80.0m"),
             ("Single-Core Drop Cable_100m", "Single-Core Drop Cable_100"),
             ("4-coreCable_300m", "4-coreCable_300"),
         ]
@@ -175,6 +177,10 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertNotEqual(
             main.canonical_material_key("Single-Core Distribution Cable_50"),
             main.canonical_material_key("Single-Core Distribution Cable_80m"),
+        )
+        self.assertNotEqual(
+            main.canonical_material_key("Single-Core Distribution Cable_150.5m"),
+            main.canonical_material_key("Single-Core Distribution Cable_150m"),
         )
 
     def test_rollout_usage_merges_cable_materials_differing_only_by_meter_suffix(self):
