@@ -3929,7 +3929,7 @@ FIBER_MAP_MANAGER_LINE_CANDIDATES = {
 }
 
 
-FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS = {"mansoura", "aldhelstreet"}
+FIBER_MAP_MANAGER_DYNAMIC_LINE_AREAS = {fiber_map_manager_area_key("Mansoura"), "aldhelstreet"}
 
 
 def fiber_map_manager_area_topology(reference: dict, area: str) -> dict[str, dict[str, set[str]]]:
