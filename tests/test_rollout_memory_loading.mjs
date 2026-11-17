@@ -122,6 +122,10 @@ test('Maqawba ranking uses map-confirmed cable progress instead of raw cable tot
   assert.equal(score, 56);
 });
 
+test('Manqosh project timeline uses the existing start date and updated November 23 end date', () => {
+  assert.match(html, /\{city:'Misurata',area:'Manqosh',start:'2026-11-04',end:'2026-11-23'\}/);
+});
+
 test('area report XBOX pivot is calculated from its compact report rows', () => {
   const start = html.indexOf('function rolloutPivotData(');
   const end = html.indexOf('\n}', start);
