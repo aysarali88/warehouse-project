@@ -731,6 +731,7 @@ class FiberMapManagerTests(unittest.TestCase):
             ("berawtaleem", "X2", "H7", "L4"),
             ("berawtaleem", "X2", "H8", "L4"),
             ("berawtaleem", "X2", "H9", "L4"),
+            ("manqosh", "X1", "H10", "L4"),
         }
         actual = {
             (area, xbox, hub, line)
@@ -769,6 +770,63 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertTrue(disabled["changed"])
         updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == area["name"])
         self.assertFalse(next(row for row in updated["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H1" and row["line"] == "L4")["enabled"])
+
+    def test_manqosh_h10_l4_is_explicitly_activatable_for_s1_only(self):
+        boxes = []
+        for line in (1, 2, 3):
+            boxes.append({
+                "Area": "Manqosh",
+                "Zone": "Manqosh",
+                "City": "Misurata",
+                "Related to XBOX": "X1",
+                "XBOX": "X-BOX01",
+                "Part": "X1-Part01",
+                "Hub": "H10",
+                "Line": line,
+                "Splitter": 1,
+                "Box code": f"H10-L{line}-S1",
+                "Box type": "SUB BOX",
+                "Real length m": "",
+                "Cable length m": 50,
+                "Material type": "Single-Core Distribution Cable_50m",
+                "dB": "",
+            })
+        self.db.add(main.FiberMapArea(
+            program="FTTH",
+            area="Manqosh",
+            city="Misurata",
+            start_date="",
+            end_date="",
+            target_users=0,
+            design_data=json.dumps({"boxes": boxes, "routes": []}),
+            created_by="test",
+        ))
+        self.db.commit()
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Manqosh")
+        candidate = next(row for row in area["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H10" and row["line"] == "L4")
+        self.assertFalse(candidate["enabled"])
+        self.assertTrue(main.fiber_map_manager_can_add_empty_line("Manqosh", "X1", "H10", "L4"))
+        self.assertFalse(main.fiber_map_manager_can_add_empty_line("Manqosh", "X1", "H10", "L3"))
+        rollout_count = self.db.query(main.RolloutRecord).filter_by(area="Manqosh").count()
+
+        enabled = main.fiber_map_manager_toggle_line(main.FiberMapLineToggleIn(
+            area="Manqosh", xbox="X1", hub="H10", line="L4", expected_revision=area["revision"],
+        ), self.request, self.db)
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Manqosh")
+        self.assertTrue(next(row for row in area["line_candidates"] if row["xbox"] == "X1" and row["hub"] == "H10" and row["line"] == "L4")["enabled"])
+        self.assertIn("L4", next(row for row in next(row for row in area["topology"] if row["xbox"] == "X1")["hubs"] if row["hub"] == "H10")["lines"])
+
+        result = main.fiber_map_manager_change(main.FiberMapChangeIn(
+            area="Manqosh",
+            action="add",
+            selections=[{"xbox": "X1", "code": "H10-L4-S1", "box_type": "SUB BOX", "cable_length_m": 50}],
+            expected_revision=enabled["revision"],
+        ), self.request, self.db)
+        self.assertEqual(result["changed"], 1)
+        updated = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Manqosh")
+        self.assertIn(("X1", "H10L4S1"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]})
+        self.assertEqual(self.db.query(main.RolloutRecord).filter_by(area="Manqosh").count(), rollout_count)
 
     def test_mansoura_missing_lines_are_derived_from_current_hub_topology(self):
         boxes = []
