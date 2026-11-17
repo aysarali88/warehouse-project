@@ -28,7 +28,7 @@ os.environ["SESSION_SECRET"] = "isolated-memory-test-session-secret-32-character
 
 import main
 from database import SessionLocal
-from models import Product, ReceiveOrder, ReceiveOrderItem, Warehouse
+from models import MaterialReturn, MaterialReturnItem, Product, ReceiveOrder, ReceiveOrderItem, Warehouse
 
 
 def process_rss_bytes():
@@ -273,6 +273,55 @@ class WarehouseMemoryPhase1Tests(unittest.TestCase):
         self.assertEqual(result["summary"]["total_received"], 14)
         self.assertEqual(result["events"][0]["type"], "GRN")
         self.assertEqual(result["events"][0]["quantity"], 14)
+
+    def test_material_ledger_separates_good_and_damaged_returns_by_warehouse(self):
+        second_warehouse = Warehouse(program="FTTH", name=f"Memory test {uuid.uuid4().hex[:10]}")
+        self.db.add(second_warehouse)
+        self.db.flush()
+        returns = [
+            (self.warehouse_id, "RN-GOOD-DAMAGE-A", "confirmed", [(3, "Good"), (2, "Damaged")]),
+            (second_warehouse.id, "RN-GOOD-DAMAGE-B", "confirmed", [(4, "Good"), (1, "Damage")]),
+            (second_warehouse.id, "RN-PENDING-DAMAGE", "pending", [(6, "Damaged")]),
+        ]
+        for warehouse_id, return_number, status, lines in returns:
+            row = MaterialReturn(
+                program="FTTH",
+                return_number=return_number,
+                warehouse_id=warehouse_id,
+                status=status,
+                created_by="memory-test",
+            )
+            self.db.add(row)
+            self.db.flush()
+            for quantity, condition in lines:
+                self.db.add(MaterialReturnItem(
+                    return_id=row.id,
+                    product_id=self.product_id,
+                    quantity=quantity,
+                    condition=condition,
+                ))
+        self.db.commit()
+
+        with patch.object(main, "is_single_ran", return_value=True):
+            result = main.material_ledger(
+                self.request,
+                query="",
+                product_id=self.product_id,
+                force=True,
+                program="FTTH",
+                db=self.db,
+            )
+
+        rows = {row["warehouse_id"]: row for row in result["stock_by_warehouse"]}
+        self.assertEqual(result["summary"]["returned"], 10)
+        self.assertEqual(result["summary"]["returned_good"], 7)
+        self.assertEqual(result["summary"]["returned_damaged"], 3)
+        self.assertEqual(rows[self.warehouse_id]["returned"], 5)
+        self.assertEqual(rows[self.warehouse_id]["returned_good"], 3)
+        self.assertEqual(rows[self.warehouse_id]["returned_damaged"], 2)
+        self.assertEqual(rows[second_warehouse.id]["returned"], 5)
+        self.assertEqual(rows[second_warehouse.id]["returned_good"], 4)
+        self.assertEqual(rows[second_warehouse.id]["returned_damaged"], 1)
 
     def test_cache_is_bounded_lru_expires_and_reports_aggregate_metrics(self):
         main.clear_warehouse_cache()

@@ -8766,6 +8766,8 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         "tr_out": 0,
         "tr_in": 0,
         "returned": 0,
+        "returned_good": 0,
+        "returned_damaged": 0,
         "current_stock": 0,
     }
 
@@ -8792,6 +8794,8 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
             "tr_out": 0,
             "tr_in": 0,
             "returned": 0,
+            "returned_good": 0,
+            "returned_damaged": 0,
         }
         for row in balances
     ]
@@ -8811,6 +8815,8 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
                 "tr_out": 0,
                 "tr_in": 0,
                 "returned": 0,
+                "returned_good": 0,
+                "returned_damaged": 0,
             }
             stock_by_warehouse.append(warehouse_rows[warehouse_id])
         return warehouse_rows[warehouse_id]
@@ -8968,12 +8974,19 @@ def material_ledger(request: Request, query: str = "", product_id: int = 0, forc
         returns_query = returns_query.filter(MaterialReturn.warehouse_id.in_(allowed))
     returns = returns_query.all()
     for returned in returns:
-        qty = sum(float(item.quantity or 0) for item in returned.items if item.product_id == selected.id)
+        selected_items = [item for item in returned.items if item.product_id == selected.id]
+        damaged_qty = sum(float(item.quantity or 0) for item in selected_items if return_condition_is_damaged(item.condition))
+        good_qty = sum(float(item.quantity or 0) for item in selected_items if not return_condition_is_damaged(item.condition))
+        qty = good_qty + damaged_qty
         if returned.status == "confirmed":
             summary["returned"] += qty
+            summary["returned_good"] += good_qty
+            summary["returned_damaged"] += damaged_qty
             totals = warehouse_totals(returned.warehouse_id, returned.warehouse.name if returned.warehouse else "")
             if totals is not None:
                 totals["returned"] += qty
+                totals["returned_good"] += good_qty
+                totals["returned_damaged"] += damaged_qty
             events.append(
                 material_ledger_event(
                     date=returned.return_date or (returned.created_at.date().isoformat() if returned.created_at else ""),
