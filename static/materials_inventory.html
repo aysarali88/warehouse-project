@@ -661,6 +661,17 @@ body.sr-program .login-logo img{
 .rollout-city-ranking-bar{height:6px;overflow:hidden;border-radius:99px;background:rgba(255,255,255,.09)}
 .rollout-city-ranking-bar i{display:block;width:var(--progress);height:100%;border-radius:inherit;background:var(--status-color,#5b97ff)}
 .rollout-city-ranking-row strong{color:#e8e5dc;font-family:"IBM Plex Mono",Consolas,monospace;font-size:8px;text-align:right}
+.rollout-city-ranking-only{max-width:none;padding:28px 32px;border-radius:20px}
+.rollout-city-ranking-only h3{font-size:24px}
+.rollout-city-ranking-only>p{margin:5px 0 24px;font-size:14px}
+.rollout-city-ranking-only .rollout-city-ranking{gap:22px}
+.rollout-city-ranking-only .rollout-city-ranking-group{gap:14px}
+.rollout-city-ranking-only .rollout-city-ranking-group h4{font-size:15px}
+.rollout-city-ranking-only .rollout-city-ranking-group+.rollout-city-ranking-group{padding-top:22px}
+.rollout-city-ranking-only .rollout-city-ranking-row{grid-template-columns:minmax(120px,1fr) minmax(100px,1.45fr) 52px;gap:16px}
+.rollout-city-ranking-only .rollout-city-ranking-row>span,.rollout-city-ranking-only .rollout-city-ranking-row strong{font-size:15px}
+.rollout-city-ranking-only .rollout-city-ranking-bar{height:11px}
+@media(max-width:700px){.rollout-city-ranking-only{padding:20px 16px}.rollout-city-ranking-only h3{font-size:21px}.rollout-city-ranking-only>p{font-size:12px;margin-bottom:18px}.rollout-city-ranking-only .rollout-city-ranking{gap:18px}.rollout-city-ranking-only .rollout-city-ranking-group{gap:11px}.rollout-city-ranking-only .rollout-city-ranking-row{grid-template-columns:minmax(96px,1fr) minmax(72px,1.1fr) 42px;gap:9px}.rollout-city-ranking-only .rollout-city-ranking-row>span,.rollout-city-ranking-only .rollout-city-ranking-row strong{font-size:12px}.rollout-city-ranking-only .rollout-city-ranking-bar{height:9px}}
 .rollout-city-areas-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:0 2px}
 .rollout-city-areas-title h3{margin:0;color:#e8e5dc;font-family:"Fraunces",Georgia,serif;font-size:20px;font-weight:600}
 .rollout-city-areas-title p{margin:4px 0 0;color:#7f8ca2;font-size:10px}
@@ -1913,7 +1924,8 @@ let rolloutRefreshBusy=false;
 let rolloutReportLoadPromise=null,rolloutOperationsLoadPromise=null,rolloutReportRequestVersion=0,rolloutOperationsRequestVersion=0;
 let rolloutMapRequestVersion=0;
 let rolloutLastUpdated='';
-let rolloutCityOverviewState={city:'Tripoli',date:'',status:'All',visible:{Tripoli:6,Misurata:6}};
+let rolloutCityRankingState={program:'',records:[],loaded:false,loading:false,error:'',promise:null};
+let rolloutCityRankingRequestVersion=0;
 let fieldEntryState={reference:null,codes:[],latest:[],summary:{},loaded:false,busy:false,saving:false,submissionKey:'',recordQuery:'',recordCount:0,searchTimer:null,recordSearchController:null,recordSearchRequest:0};
 let fieldEntryEditState={record:null,codes:[]};
 const UI_STATE_KEY='warehouseUiState';
@@ -3229,7 +3241,7 @@ filtered.forEach(r=>{const supervisor=String(r['Supervisor Name']||r.supervisor_
 const data=[...groups.values()].sort((a,b)=>a.area.localeCompare(b.area)||a.supervisor.localeCompare(b.supervisor));const total={xbox:0,hub:0,sub:0,end:0,cable:0};data.forEach(g=>Object.keys(total).forEach(k=>total[k]+=g[k]));const num=v=>Number(v||0).toLocaleString('en-US');
 panel.innerHTML=`<div class="rollout-operations-panel"><div class="rollout-operations-toolbar"><div><h3 style="margin:0">Operations</h3><div class="muted">Supervisor progress by Date</div></div><div class="rollout-operations-filter"><label for="rolloutOperationsDate">Date</label><select id="rolloutOperationsDate" onchange="renderRolloutOperations()"><option value="">All dates</option>${dateOptions.map(d=>`<option value="${esc(d)}" ${d===activeDate?'selected':''}>${esc(d)}</option>`).join('')}</select></div></div><div class="rollout-operations-stats"><div class="rollout-operations-stat">Supervisors<strong>${num(data.length)}</strong></div><div class="rollout-operations-stat">Areas<strong>${num(new Set(data.map(g=>g.area)).size)}</strong></div><div class="rollout-operations-stat">Cable length<strong>${num(total.cable)} m</strong></div></div>${data.length?`<div class="rollout-operations-table-wrap"><table class="rollout-operations-table"><thead><tr><th>Supervisor Name</th><th>Area</th><th>XBOX</th><th>HUB BOX</th><th>SUB BOX</th><th>END BOX</th><th>Total Cable (m)</th></tr></thead><tbody>${data.map(g=>`<tr><td>${esc(g.supervisor)}</td><td>${esc(g.area)}</td><td class="num">${num(g.xbox)}</td><td class="num">${num(g.hub)}</td><td class="num">${num(g.sub)}</td><td class="num">${num(g.end)}</td><td class="num">${num(g.cable)}</td></tr>`).join('')}<tr class="total"><td colspan="2">Total</td><td class="num">${num(total.xbox)}</td><td class="num">${num(total.hub)}</td><td class="num">${num(total.sub)}</td><td class="num">${num(total.end)}</td><td class="num">${num(total.cable)}</td></tr></tbody></table></div>`:`<div class="rollout-operations-empty">No rollout records for the selected date.</div>`}</div>`;
 }
-function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){if(roleKey()==='warehousemanager'&&['compare','map','operations','entry'].includes(tab))tab='kpi';const current=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(current==='map'&&tab!=='map')saveWarehouseFiberScroll();if(current!=='map'&&tab==='map')warehouseFiberRestoringTab=true;document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));document.querySelector('#rolloutDaily>.card')?.classList.toggle('city-overview-active',tab==='overview');const panels={kpi:'rolloutDailyKpi',overview:'rolloutDailyCityOverview',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});const rolloutOpen=document.querySelector('.view.active')?.id==='rolloutDaily';if(rolloutOpen&&tab==='kpi'){refreshRolloutDailyProgress(false);ensureRolloutPoleSummary(false)}if(rolloutOpen&&tab==='overview'){renderRolloutCityOverview();refreshRolloutDailyProgress(false);ensureRolloutDashboardDesignReference().then(()=>{if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='overview')renderRolloutCityOverview()})}if(rolloutOpen&&tab==='compare')ensureRolloutUsage(false);if(rolloutOpen&&tab==='map')renderRolloutMapPanel();if(rolloutOpen&&tab==='report')ensureRolloutReportSummary(false).then(()=>renderRolloutAreaReportPanel());if(rolloutOpen&&tab==='operations')ensureRolloutOperationsSummary(false).then(()=>renderRolloutOperations());if(rolloutOpen&&tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
+function switchRolloutDailyTab(tab='kpi',persist=true,syncLink=true){if(roleKey()==='warehousemanager'&&['compare','map','operations','entry'].includes(tab))tab='kpi';const current=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(current==='map'&&tab!=='map')saveWarehouseFiberScroll();if(current!=='map'&&tab==='map')warehouseFiberRestoringTab=true;document.querySelectorAll('[data-rollout-daily-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.rolloutDailyTab===tab));document.querySelector('#rolloutDaily>.card')?.classList.toggle('city-overview-active',tab==='overview');const panels={kpi:'rolloutDailyKpi',overview:'rolloutDailyCityOverview',compare:'rolloutDailyCompare',map:'rolloutDailyMap',report:'rolloutDailyReport',operations:'rolloutDailyOperations',entry:'rolloutDailyEntry'};Object.entries(panels).forEach(([key,id])=>{const el=document.getElementById(id);if(el)el.style.display=key===tab?'block':'none'});if(persist)saveUiState({rolloutDailyTab:tab});const rolloutOpen=document.querySelector('.view.active')?.id==='rolloutDaily';if(rolloutOpen&&tab==='kpi'){refreshRolloutDailyProgress(false);ensureRolloutPoleSummary(false)}if(rolloutOpen&&tab==='overview'){renderRolloutCityOverview();refreshRolloutCityRanking(false)}if(rolloutOpen&&tab==='compare')ensureRolloutUsage(false);if(rolloutOpen&&tab==='map')renderRolloutMapPanel();if(rolloutOpen&&tab==='report')ensureRolloutReportSummary(false).then(()=>renderRolloutAreaReportPanel());if(rolloutOpen&&tab==='operations')ensureRolloutOperationsSummary(false).then(()=>renderRolloutOperations());if(rolloutOpen&&tab==='entry')loadFieldEntryReference(false);if(syncLink)updatePageLink()}
 function x4BranchElements(){
 const branchLengths={
 1:[[100,150,80],[50,100,50,100],[80,80,80,50]],2:[[250,50,150,100],[250,50,50,50],[5,80,80,80],[200,80,80,50]],
@@ -3349,7 +3361,7 @@ async function ensureRolloutOperationsSummary(showToast=false,force=false){if(is
 function rolloutMapScopeKey(area,xbox){return `${wfmMapAreaKey(area)}|${wfmXboxKey(xbox)}`}
 async function fetchRolloutMapProgress(area,xbox,force=false){let offset=0,total=Infinity,last={},records=[];do{const params=new URLSearchParams({limit:'500',offset:String(offset),area,xbox,map_only:'true'});if(force&&offset===0)params.set('refresh',String(Date.now()));last=await api(`/api/warehouse/rollout-daily-progress?${params.toString()}`);const pageRows=last.records||[];records.push(...pageRows);total=Number(last.count??records.length);if(!pageRows.length||records.length>=total)break;offset+=pageRows.length}while(records.length<total);return{...last,records,count:total}}
 async function ensureRolloutMapProgress(area,xbox,force=false,render=true){if(isSingleRan()||!area||!xbox)return[];const key=rolloutMapScopeKey(area,xbox);if(!force&&wh.rolloutMapScope===key)return wh.rolloutMapProgress||[];if(!force&&wh.rolloutMapPromise?.key===key)return wh.rolloutMapPromise.promise;const requestVersion=++rolloutMapRequestVersion,programAtRequest=normalizeProgram(currentProgram);wh.rolloutMapError='';wh.rolloutMapErrorScope='';const promise=(async()=>{try{const data=await fetchRolloutMapProgress(area,xbox,force);if(requestVersion!==rolloutMapRequestVersion||normalizeProgram(currentProgram)!==programAtRequest)return[];wh.rolloutMapProgress=data.records||[];wh.rolloutMapScope=key;wh.rolloutMapError='';setRolloutLastUpdated(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));if(render&&document.querySelector('.view.active')?.id==='rolloutDaily'&&document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='map')renderRolloutMapPanel();return wh.rolloutMapProgress}catch(error){if(requestVersion===rolloutMapRequestVersion){wh.rolloutMapError=error.message||'Request failed';wh.rolloutMapErrorScope=key;toast(`Could not load map Rollout data: ${wh.rolloutMapError}`);if(render)renderRolloutMapPanel()}return[]}finally{if(wh.rolloutMapPromise?.requestVersion===requestVersion)wh.rolloutMapPromise=null}})();wh.rolloutMapPromise={key,requestVersion,promise};return promise}
-async function manualRefreshRolloutData(){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab==='overview'){await refreshRolloutDailyProgress(true,true);if(!warehouseFiberReference)await ensureRolloutDashboardDesignReference();renderRolloutCityOverview();return}if(tab==='compare')return ensureRolloutUsage(true,true);if(tab==='map'){const scope=wfmScopesForArea(warehouseFiberSelectedArea||'').find(row=>row.id===warehouseFiberSelectedScope);if(scope)await ensureRolloutMapProgress(scope.area,scope.xbox,true);else await ensureRolloutDashboardDesignReference(true);renderRolloutMapPanel();return}if(tab==='report')return ensureRolloutReportSummary(true,true).then(()=>renderRolloutAreaReportPanel());if(tab==='operations')return ensureRolloutOperationsSummary(true,true).then(()=>renderRolloutOperations());if(tab==='entry'){setRolloutRefreshState(true);try{await loadFieldEntryReference(true);setRolloutLastUpdated(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}))}finally{setRolloutRefreshState(false)}return}await ensureRolloutPoleSummary(true);await ensureRolloutDashboardDesignReference(true);return refreshRolloutDailyProgress(true,true)}
+async function manualRefreshRolloutData(){const tab=document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab||'kpi';if(tab==='overview')return refreshRolloutCityRanking(true,true);if(tab==='compare')return ensureRolloutUsage(true,true);if(tab==='map'){const scope=wfmScopesForArea(warehouseFiberSelectedArea||'').find(row=>row.id===warehouseFiberSelectedScope);if(scope)await ensureRolloutMapProgress(scope.area,scope.xbox,true);else await ensureRolloutDashboardDesignReference(true);renderRolloutMapPanel();return}if(tab==='report')return ensureRolloutReportSummary(true,true).then(()=>renderRolloutAreaReportPanel());if(tab==='operations')return ensureRolloutOperationsSummary(true,true).then(()=>renderRolloutOperations());if(tab==='entry'){setRolloutRefreshState(true);try{await loadFieldEntryReference(true);setRolloutLastUpdated(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}))}finally{setRolloutRefreshState(false)}return}await ensureRolloutPoleSummary(true);await ensureRolloutDashboardDesignReference(true);return refreshRolloutDailyProgress(true,true)}
 function rolloutDashDateLabel(value){if(!value)return 'Latest data';const d=new Date(`${value}T00:00:00`);return isNaN(d)?value:d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
 function rolloutTimelineToday(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Tripoli',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const value=type=>parts.find(part=>part.type===type)?.value||'';return `${value('year')}-${value('month')}-${value('day')}`}
 function rolloutDaysInclusive(start,end){const a=new Date(`${start}T00:00:00`),b=new Date(`${end}T00:00:00`);if(isNaN(a)||isNaN(b))return 0;return Math.max(1,Math.round((b-a)/86400000)+1)}
@@ -3402,9 +3414,9 @@ function rolloutPlanFor(city,area){
   if(normalizeText(area)==='allareas')return null;
   return ROLLOUT_DASHBOARD_PLAN.find(p=>normalizeText(p.city)===normalizeText(city)&&sameRolloutDashboardArea(p.area,area))||ROLLOUT_DASHBOARD_PLAN.find(p=>sameRolloutDashboardArea(p.area,area))||null;
 }
-function rolloutTargetFor(city,area){
+function rolloutTargetFor(city,area,designOverride=null){
   const plan=rolloutPlanFor(city,area)||{};
-  const design=wfmDesignTargetFor(area);
+  const design=designOverride||wfmDesignTargetFor(area);
   const planValue=(key,fallback)=>plan[key]!==undefined&&plan[key]!==null&&plan[key]!==''&&Number.isFinite(Number(plan[key]))?Number(plan[key]):fallback;
   const users=planValue('dashboardUsersTargetOverride',Number(plan.targetUsers||0));
   const maqawbaCableTarget=Number(plan.dashboardCableMetersOverride);
@@ -3478,26 +3490,6 @@ function rolloutHomepassSummary(rows,dateFilter='',cityFilter='',areaFilter=''){
 }
 function rolloutOverviewCity(value){const key=normalizeText(value);if(key==='tripoli')return'Tripoli';if(['misurata','misrata'].includes(key))return'Misurata';return String(value||'').trim()}
 function rolloutOverviewArea(value){return normalizeText(value)==='albera'?'Bera W Taleem':displayRolloutArea(value)}
-function rolloutCityOverviewSetCity(city){rolloutCityOverviewState.city=city==='Both Cities'?'':city;renderRolloutCityOverview()}
-function rolloutCityOverviewSetDate(date){rolloutCityOverviewState.date=date||'';renderRolloutCityOverview()}
-function rolloutCityOverviewSetStatus(status){rolloutCityOverviewState.status=status||'All';renderRolloutCityOverview()}
-function rolloutCityOverviewShowMore(button){const panel=document.getElementById('rolloutDailyCityOverview'),section=button?.closest('.rollout-city-overview-city');if(!panel||!section)return;const city=section.dataset.citySection,total=Number(section.dataset.areaCount||0),current=Number(rolloutCityOverviewState.visible[city]||6);rolloutCityOverviewState.visible[city]=current>=total?6:Math.min(total,current+6);renderRolloutCityOverview()}
-function rolloutCityOverviewOpenArea(button){const city=rolloutOverviewCity(button?.dataset.rolloutCity),area=button?.dataset.rolloutArea;if(!city||!area)return;rolloutDashboardFilters.city=city;rolloutDashboardFilters.area=area;rolloutDashboardFilters.date=rolloutCityOverviewState.date?[rolloutCityOverviewState.date]:[];syncWarehouseFiberScope(area);switchRolloutDailyTab('kpi');renderRolloutDailyProgress()}
-function rolloutCityOverviewMetric(city,area,rows){
-  const areaRows=rows.filter(row=>rolloutOverviewCity(row.city||row.City)===city&&sameRolloutDashboardArea(row.Area||row.area,area));
-  const metricRows=rolloutDashboardMetricRows(areaRows,area),raw=rolloutMetricFromRows(metricRows),mapCable=rolloutMapCableProgressMetric(area,metricRows),plan=rolloutPlanFor(city,area)||{},target=rolloutTargetFor(city,area);
-  const isAwlad=canonicalRolloutArea(area)==='awladbaeoo';
-  const metric={...raw,cableMeters:isAwlad?raw.cableMeters:(mapCable?mapCable.installedMeters:raw.cableMeters)};
-  applyRolloutDashboardMetricOverrides(metric,plan);
-  const isMaqawba=isMaqawbaRolloutArea(area);
-  const targetCable=plan.dashboardCableTargetOverride!==undefined?Number(plan.dashboardCableTargetOverride):isAwlad||isMaqawba?target.cableMeters:(mapCable?mapCable.targetMeters:target.cableMeters);
-  const targetBoxes=Number(target.totalBoxes||0),targetUsers=Number(target.users||plan.targetUsers||0);
-  const configured=targetCable>0&&targetBoxes>0;
-  const cablePct=targetCable>0?Math.max(0,Math.min(100,metric.cableMeters/targetCable*100)):0;
-  const boxPct=targetBoxes>0?Math.max(0,Math.min(100,metric.totalBoxes/targetBoxes*100)):0;
-  return{...metric,plan,target:{...target,cableMeters:targetCable,totalBoxes:targetBoxes,users:targetUsers},cablePct,boxPct,usersPct:targetUsers>0?Math.max(0,Math.min(100,metric.actualUsers/targetUsers*100)):0,productivity:configured?(cablePct*.8+boxPct*.2):null};
-}
-function rolloutCityOverviewMetricHtml(label,done,target,pct){const value=target>0?`${fmt(done)} / ${fmt(target)}`:`${fmt(done)} / target not set`;return`<div class="rollout-city-metric"><div class="rollout-city-metric-label"><span>${label}</span><span>${value}</span></div><div class="rollout-city-meter"><i style="width:${target>0?pct:0}%"></i></div></div>`}
 function rolloutCityOverviewStatus(metric,asOf){
   const plan=metric.plan||{},productivity=Number(metric.productivity);
   if(metric.productivity!==null&&productivity>=100)return{key:'completed',label:'Completed',detail:'Targets reached'};
@@ -3511,79 +3503,61 @@ function rolloutCityOverviewStatus(metric,asOf){
   return{key:'on-track',label:'On track',detail:gap<-.10?'Ahead of plan':'On time'};
 }
 function rolloutCityCompactDate(value){if(!value)return'—';const date=new Date(`${value}T00:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
-function rolloutCityOverviewAggregate(items){
-  const total=items.reduce((sum,item)=>{const m=item.metric;sum.cable+=m.cableMeters;sum.cableTarget+=m.target.cableMeters;sum.boxes+=m.totalBoxes;sum.boxTarget+=m.target.totalBoxes;sum.users+=m.actualUsers;sum.userTarget+=m.target.users;sum.xbox+=m.xbox;sum.xboxTarget+=m.target.xbox;sum.hub+=m.hubBox;sum.hubTarget+=m.target.hubBox;sum.sub+=m.subEndBox;sum.subTarget+=m.target.subEndBox;return sum},{cable:0,cableTarget:0,boxes:0,boxTarget:0,users:0,userTarget:0,xbox:0,xboxTarget:0,hub:0,hubTarget:0,sub:0,subTarget:0});
-  const cablePct=total.cableTarget?Math.max(0,Math.min(100,total.cable/total.cableTarget*100)):0,boxPct=total.boxTarget?Math.max(0,Math.min(100,total.boxes/total.boxTarget*100)):0;
-  return{...total,cablePct,boxPct,userPct:total.userTarget?Math.max(0,Math.min(100,total.users/total.userTarget*100)):0,productivity:total.cableTarget&&total.boxTarget?cablePct*.8+boxPct*.2:null};
+async function refreshRolloutCityRanking(showToast=false,force=false){
+  if(isSingleRan()){rolloutCityRankingState={...rolloutCityRankingState,records:[],loaded:true,loading:false,error:''};renderRolloutCityOverview();return}
+  const program=normalizeProgram(currentProgram||'FTTH');
+  if(!force&&rolloutCityRankingState.loaded&&rolloutCityRankingState.program===program){renderRolloutCityOverview();return}
+  if(rolloutCityRankingState.promise&&rolloutCityRankingState.program===program)return rolloutCityRankingState.promise;
+  const requestVersion=++rolloutCityRankingRequestVersion;
+  rolloutCityRankingState={...rolloutCityRankingState,program,loading:true,error:''};renderRolloutCityOverview();setRolloutRefreshState(true);
+  const promise=(async()=>{
+    try{
+      const stamp=force?`?refresh=${Date.now()}`:'';
+      const data=await api(`/api/warehouse/rollout-city-ranking-summary${stamp}`);
+      if(requestVersion!==rolloutCityRankingRequestVersion)return;
+      if(normalizeProgram(currentProgram||'FTTH')!==program){rolloutCityRankingState={...rolloutCityRankingState,loading:false,promise:null};return}
+      rolloutCityRankingState={program,records:data.records||[],loaded:true,loading:false,error:'',promise:null};
+      setRolloutLastUpdated(data.fetched_at?new Date(data.fetched_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+      if(showToast)toast('Productivity ranking updated');
+    }catch(error){if(requestVersion===rolloutCityRankingRequestVersion){rolloutCityRankingState={...rolloutCityRankingState,loading:false,error:error.message||'Request failed',promise:null};if(showToast)toast(`Could not load productivity ranking: ${rolloutCityRankingState.error}`)}}
+    finally{if(requestVersion===rolloutCityRankingRequestVersion){setRolloutRefreshState(false);if(document.querySelector('[data-rollout-daily-tab].active')?.dataset.rolloutDailyTab==='overview')renderRolloutCityOverview()}}
+  })();
+  rolloutCityRankingState.promise=promise;
+  return promise;
 }
-function rolloutCityOverviewMetricBar(label,done,target,pct,unit=''){
-  const value=target>0?`${fmt(done)} / ${fmt(target)}${unit}`:`${fmt(done)}${unit} / target —`;
-  return`<div class="rollout-city-area-metric"><div class="rollout-city-area-metric-label"><span>${label}</span><strong>${value}</strong></div><div class="rollout-city-metric-bar"><i style="--progress:${target>0?Math.max(0,Math.min(100,pct)):0}%"></i></div></div>`;
+function rolloutCityOverviewMetricFromSummary(city,area,summary){
+  const row=summary||{},plan=rolloutPlanFor(city,area)||{},isMaqawba=isMaqawbaRolloutArea(area);
+  const metric={
+    cableMeters:isMaqawba&&row.map_cable_progress_available?Number(row.map_cable_meters||0):Number(row.cable_meters||0),
+    distributionQty:Number(row.distribution_qty||0),fourCoreQty:Number(row.four_core_qty||0),
+    subEndBox:Number(row.sub_end_box||0),hubBox:Number(row.hub_box||0),xbox:Number(row.xbox||0),
+  };
+  applyRolloutDashboardMetricOverrides(metric,plan);
+  const target=rolloutTargetFor(city,area,row.design_target||null);
+  const targetCable=plan.dashboardCableTargetOverride!==undefined?Number(plan.dashboardCableTargetOverride):target.cableMeters;
+  const targetBoxes=Number(target.totalBoxes||0),cablePct=targetCable>0?Math.max(0,Math.min(100,metric.cableMeters/targetCable*100)):0,boxPct=targetBoxes>0?Math.max(0,Math.min(100,(metric.subEndBox+metric.hubBox+metric.xbox)/targetBoxes*100)):0;
+  return{productivity:targetCable>0&&targetBoxes>0?cablePct*.8+boxPct*.2:null,plan,target:{...target,cableMeters:targetCable,totalBoxes:targetBoxes}};
 }
 function renderRolloutCityOverview(){
   const panel=document.getElementById('rolloutDailyCityOverview');if(!panel)return;
   if(isSingleRan()){panel.innerHTML='<div class="rollout-city-overview-empty">Rollout Progress is not available for Single RAN.</div>';return}
-  if(!warehouseFiberReference){panel.innerHTML=warehouseFiberReferenceLoading?'<div class="rollout-city-overview-empty">Loading area design reference...</div>':'<div class="rollout-city-overview-empty">Area design reference is unavailable. Use Refresh Data to try again.</div>';return}
-  const sourceRows=rolloutDashboardRows(wh.rolloutDailyProgress||[]);
-  if(!sourceRows.length){panel.innerHTML=rolloutRefreshBusy?'<div class="rollout-city-overview-empty">Loading rollout summary...</div>':'<div class="rollout-city-overview-empty">No rollout summary data is available.</div>';return}
-  const dates=[...new Set(sourceRows.map(row=>String(row.Date||'').slice(0,10)).filter(Boolean))].sort().reverse();
-  if(rolloutCityOverviewState.date&&!dates.includes(rolloutCityOverviewState.date))rolloutCityOverviewState.date='';
-  const rows=rolloutCityOverviewState.date?sourceRows.filter(row=>String(row.Date||'').slice(0,10)===rolloutCityOverviewState.date):sourceRows;
-  const mappedCities=Object.keys(ROLLOUT_DASHBOARD_AREAS).map(rolloutOverviewCity);
-  const dataCities=rows.map(row=>rolloutOverviewCity(row.city||row.City)).filter(Boolean);
+  if(rolloutCityRankingState.loading&&!rolloutCityRankingState.loaded){panel.innerHTML='<div class="rollout-city-overview-empty">Loading productivity ranking…</div>';return}
+  if(rolloutCityRankingState.error&&!rolloutCityRankingState.loaded){panel.innerHTML=`<div class="rollout-city-overview-empty">${esc(rolloutCityRankingState.error)} <button type="button" class="btn" onclick="refreshRolloutCityRanking(true,true)">Retry</button></div>`;return}
+  const records=rolloutCityRankingState.records||[],mappedCities=Object.keys(ROLLOUT_DASHBOARD_AREAS).map(rolloutOverviewCity),dataCities=records.map(row=>rolloutOverviewCity(row.city)).filter(Boolean);
   const cities=[...new Set([...mappedCities,...dataCities])].sort((a,b)=>({Tripoli:0,Misurata:1}[a]??2)-({Tripoli:0,Misurata:1}[b]??2)||a.localeCompare(b));
-  const summary=rolloutHomepassSummary(sourceRows,rolloutCityOverviewState.date);
-  const selected=rolloutCityOverviewState.city,asOf=rolloutCityOverviewState.date||rolloutTimelineToday();
-  const datesHtml=`<option value="">All dates</option>${dates.map(date=>`<option value="${esc(date)}" ${date===rolloutCityOverviewState.date?'selected':''}>${esc(rolloutDashDateLabel(date))}</option>`).join('')}`;
-  const topCards=[['Both Cities','Total Homepass / Actual Users',summary.total,'Both cities'],['Misurata','Misurata',summary.Misurata,'Homepass / actual users'],['Tripoli','Tripoli',summary.Tripoli,'Homepass / actual users']];
-  const cardsHtml=topCards.map(([city,label,value,note])=>`<button type="button" class="rollout-city-total-card" aria-pressed="${(city==='Both Cities'?!selected:selected===city)?'true':'false'}" onclick="rolloutCityOverviewSetCity('${city}')"><span>${esc(label)}</span><strong>${fmt(value)}</strong><small>${esc(note)}</small></button>`).join('');
-  const cityItems=cities.map(city=>{
-    const configuredAreas=ROLLOUT_DASHBOARD_AREAS[city]||[];
-    const dataAreas=rows.filter(row=>rolloutOverviewCity(row.city||row.City)===city).map(row=>rolloutOverviewArea(row.Area||row.area)).filter(Boolean);
-    const areaNames=[];
-    [...configuredAreas.map(rolloutOverviewArea),...dataAreas].forEach(area=>{if(normalizeText(area)==='albera')return;if(!areaNames.some(existing=>sameRolloutDashboardArea(existing,area)))areaNames.push(area)});
-    return{city,items:areaNames.map(area=>{const metric=rolloutCityOverviewMetric(city,area,rows);return{city,area,metric,status:rolloutCityOverviewStatus(metric,asOf)}})};
+  const ranking=new Map(records.map(row=>[`${normalizeText(rolloutOverviewCity(row.city))}|${normalizeText(canonicalRolloutArea(row.area))}`,row]));
+  const asOf=rolloutTimelineToday(),statusColors={completed:'#4fd6a3','on-track':'#5b97ff','at-risk':'#f2b24d',delayed:'#ff7a72',planned:'#b7a2ff'};
+  const groups=cities.map(city=>{
+    const dataAreas=records.filter(row=>rolloutOverviewCity(row.city)===city).map(row=>rolloutOverviewArea(row.area)).filter(Boolean),areas=[];
+    [...(ROLLOUT_DASHBOARD_AREAS[city]||[]).map(rolloutOverviewArea),...dataAreas].forEach(area=>{if(normalizeText(area)==='albera')return;if(!areas.some(value=>sameRolloutDashboardArea(value,area)))areas.push(area)});
+    const items=areas.map(area=>{const key=`${normalizeText(city)}|${normalizeText(canonicalRolloutArea(area))}`,metric=rolloutCityOverviewMetricFromSummary(city,area,ranking.get(key));return{area,metric,status:rolloutCityOverviewStatus(metric,asOf)}});
+    return{city,items};
   });
-  const visibleCities=cityItems.filter(group=>!selected||group.city===selected),allItems=visibleCities.flatMap(group=>group.items),aggregate=rolloutCityOverviewAggregate(allItems);
-  const statusOrder=['completed','on-track','at-risk','delayed','planned'];
-  const statusLabels={completed:'Completed', 'on-track':'On track','at-risk':'At risk',delayed:'Delayed',planned:'Planned'};
-  const statusCounts=statusOrder.map(status=>[status,allItems.filter(item=>item.status.key===status).length]).filter(([,count])=>count>0);
-  const statusClass=status=>status==='on-track'?'on-track':status;
-  const statusHtml=statusCounts.map(([status,count])=>`<span class="rollout-city-status-count ${statusClass(status)}">${count} ${statusLabels[status]}</span>`).join('');
-  const pct=value=>value===null?'—':`${Math.round(value)}%`;
-  const kpiCards=[
-    ['Overall productivity',pct(aggregate.productivity),'weighted','20% boxes + 80% cable progress',aggregate.productivity],
-    ['Cable progress',pct(aggregate.cablePct),`${fmt(aggregate.cable)} m`,`${fmt(aggregate.cable)} / ${fmt(aggregate.cableTarget)} m`,aggregate.cablePct],
-    ['Box deployment',pct(aggregate.boxTarget?Math.min(100,aggregate.boxes/aggregate.boxTarget*100):0),`${fmt(aggregate.boxes)} boxes`,`XBOX ${fmt(aggregate.xbox)}/${fmt(aggregate.xboxTarget)} · HUB ${fmt(aggregate.hub)}/${fmt(aggregate.hubTarget)} · SUB ${fmt(aggregate.sub)}/${fmt(aggregate.subTarget)}`,aggregate.boxTarget?Math.min(100,aggregate.boxes/aggregate.boxTarget*100):0],
-    ['Actual users',fmt(aggregate.users),`${fmt(aggregate.userTarget)} users`,`${aggregate.userTarget?Math.round(aggregate.userPct):0}% of target connected`,aggregate.userPct]
-  ];
-  const kpisHtml=kpiCards.map(([label,value,unit,detail,progress])=>`<article class="rollout-city-kpi"><span class="rollout-city-kpi-label">${esc(label)}</span><div class="rollout-city-kpi-value"><strong>${esc(value)}</strong><span>${esc(unit)}</span></div><small class="rollout-city-kpi-detail">${esc(detail)}</small><div class="rollout-city-kpi-bar"><i style="--progress:${progress===null?0:Math.max(0,Math.min(100,progress))}%"></i></div></article>`).join('');
-  const cityName=selected||'Both Cities',areaCount=allItems.length;
-  const filterOptions=[['All','All areas'],...statusOrder.map(status=>[status,statusLabels[status]])];
-  const filtersHtml=filterOptions.map(([status,label])=>`<button type="button" aria-pressed="${rolloutCityOverviewState.status===status?'true':'false'}" onclick="rolloutCityOverviewSetStatus('${status}')">${label}</button>`).join('');
-  const timelineItems=allItems.filter(item=>item.metric.plan?.start&&item.metric.plan?.end),startDate=timelineItems.map(item=>item.metric.plan.start).sort()[0],lastPlanDate=timelineItems.map(item=>item.metric.plan.end).sort().pop(),endDate=lastPlanDate&&lastPlanDate>asOf?lastPlanDate:asOf;
-  const axisStart=startDate?new Date(`${startDate}T00:00:00`).getTime():0,axisEnd=endDate?new Date(`${endDate}T00:00:00`).getTime():axisStart,totalTimelineDays=Math.max(1,Math.round((axisEnd-axisStart)/86400000)+1);
-  const timelinePosition=date=>Math.max(0,Math.min(100,((new Date(`${date}T00:00:00`).getTime()-axisStart)/86400000)/totalTimelineDays*100));
-  const timelineRows=timelineItems.map(({city,area,metric,status})=>{const plan=metric.plan,planStartOffset=(new Date(`${plan.start}T00:00:00`).getTime()-axisStart)/86400000,windowDays=rolloutDaysInclusive(plan.start,plan.end),windowWidth=windowDays/totalTimelineDays*100,productivity=Math.max(0,Math.min(100,Number(metric.productivity||0))),delayDays=status.key==='delayed'?Math.max(0,Math.floor((new Date(`${asOf}T00:00:00`).getTime()-new Date(`${plan.end}T00:00:00`).getTime())/86400000)):0,delayLeft=(planStartOffset+windowDays)/totalTimelineDays*100,delayWidth=delayDays/totalTimelineDays*100;return`<div class="rollout-city-timeline-row"><div class="rollout-city-timeline-name"><span>${esc(area)}</span><small>${esc(status.label)}</small></div><div class="rollout-city-timeline-track"><i class="rollout-city-timeline-window" style="left:${planStartOffset/totalTimelineDays*100}%;width:${windowWidth}%"></i><i class="rollout-city-timeline-progress" style="left:${planStartOffset/totalTimelineDays*100}%;width:${windowWidth*productivity/100}%"></i>${delayDays?`<i class="rollout-city-timeline-delay" style="left:${delayLeft}%;width:${delayWidth}%"></i>`:''}<i class="rollout-city-timeline-today" style="left:${timelinePosition(asOf)}%"></i></div></div>`}).join('');
-  const statusColors={completed:'#4fd6a3','on-track':'#5b97ff','at-risk':'#f2b24d',delayed:'#ff7a72',planned:'#b7a2ff'};
-  const rankingRows=visibleCities.map(({city,items})=>{
-    const cityRows=[...items].sort((a,b)=>Number(b.metric.productivity??-1)-Number(a.metric.productivity??-1)).map(({area,metric,status})=>`<div class="rollout-city-ranking-row"><span title="${esc(area)}">${esc(area)}</span><div class="rollout-city-ranking-bar" style="--status-color:${statusColors[status.key]||'#8996ab'}"><i style="--progress:${metric.productivity===null?0:Math.max(0,Math.min(100,metric.productivity))}%"></i></div><strong>${metric.productivity===null?'—':`${Math.round(metric.productivity)}%`}</strong></div>`).join('');
-    return`<section class="rollout-city-ranking-group"><h4>${esc(city)}</h4>${cityRows||'<div class="rollout-city-timeline-empty">No areas to rank.</div>'}</section>`;
+  const rankingRows=groups.map(({city,items})=>{
+    const rows=[...items].sort((a,b)=>Number(b.metric.productivity??-1)-Number(a.metric.productivity??-1)).map(({area,metric,status})=>`<div class="rollout-city-ranking-row"><span title="${esc(area)}">${esc(area)}</span><div class="rollout-city-ranking-bar" style="--status-color:${statusColors[status.key]||'#8996ab'}"><i style="--progress:${metric.productivity===null?0:Math.max(0,Math.min(100,metric.productivity))}%"></i></div><strong>${metric.productivity===null?'—':`${Math.round(metric.productivity)}%`}</strong></div>`).join('');
+    return`<section class="rollout-city-ranking-group"><h4>${esc(city)}</h4>${rows||'<div class="rollout-city-timeline-empty">No areas to rank.</div>'}</section>`;
   }).join('');
-  const sections=visibleCities.map(({city,items})=>{
-    const visible=Math.max(6,Number(rolloutCityOverviewState.visible[city]||6));
-    const filtered=rolloutCityOverviewState.status==='All'?items:items.filter(item=>item.status.key===rolloutCityOverviewState.status);
-    const shownAreas=filtered.slice(0,visible);
-    const areaCards=shownAreas.map(({area,metric,status})=>{
-      const productivity=metric.productivity===null?0:Math.max(0,Math.min(100,metric.productivity)),ringOffset=(169.65*(1-productivity/100)).toFixed(2);
-      const planLabel=metric.plan?.start&&metric.plan?.end?`${rolloutCityCompactDate(metric.plan.start)} → ${rolloutCityCompactDate(metric.plan.end)}`:'Plan dates not set';
-      return`<article class="rollout-city-area-card ${statusClass(status.key)}"><div class="rollout-city-area-head"><div><h4>${esc(area)}</h4><small>${esc(city)}</small></div><span class="rollout-city-status-pill ${statusClass(status.key)}">${esc(status.label)}</span></div><div class="rollout-city-ring" style="--ring-offset:${ringOffset}"><svg viewBox="0 0 64 64" aria-hidden="true"><circle class="track" cx="32" cy="32" r="27"></circle><circle class="value" cx="32" cy="32" r="27"></circle></svg><strong>${metric.productivity===null?'—':`${Math.round(productivity)}%`}</strong><small>Productivity</small></div><div class="rollout-city-area-metrics">${rolloutCityOverviewMetricBar('Cable',metric.cableMeters,metric.target.cableMeters,metric.cablePct,' m')}${rolloutCityOverviewMetricBar('Boxes',metric.totalBoxes,metric.target.totalBoxes,metric.boxPct)}${rolloutCityOverviewMetricBar('Users',metric.actualUsers,metric.target.users,metric.usersPct)}</div><div class="rollout-city-area-foot"><span>${esc(planLabel)}</span><strong>${esc(status.detail)}</strong><button type="button" class="btn" data-rollout-city="${esc(city)}" data-rollout-area="${esc(area)}" onclick="rolloutCityOverviewOpenArea(this)">Open dashboard</button></div></article>`;
-    }).join('');
-    const moreButton=filtered.length>6?`<button type="button" class="rollout-city-more" onclick="rolloutCityOverviewShowMore(this)">${visible>=filtered.length?'Show fewer areas':'Show 6 more areas'}</button>`:'';
-    const cards=areaCards?`<div class="rollout-city-area-grid">${areaCards}</div>`:'<div class="rollout-city-overview-empty">No areas match this status.</div>';
-    return`<section class="rollout-city-overview-city" data-city-section="${esc(city)}" data-area-count="${filtered.length}"><div class="rollout-city-areas-title"><h3>${esc(city)} areas</h3></div>${cards}${moreButton}</section>`;
-  }).join('');
-  panel.innerHTML=`<div class="rollout-city-overview"><header class="rollout-city-overview-head"><div class="rollout-city-brand"><span class="rollout-city-brand-mark">GTC</span><div><strong>Rollout Control</strong><small>CITIES · AREAS · PROGRESS</small></div></div><div class="rollout-city-controls"><div class="rollout-city-switch" role="group" aria-label="Select city">${[['Both Cities','Both Cities'],['Tripoli','Tripoli'],['Misurata','Misurata']].map(([city,label])=>`<button type="button" aria-pressed="${(!selected&&city==='Both Cities')||selected===city?'true':'false'}" onclick="rolloutCityOverviewSetCity('${city}')">${label}</button>`).join('')}</div><select class="rollout-city-control" aria-label="Filter by date" onchange="rolloutCityOverviewSetDate(this.value)">${datesHtml}</select><span class="rollout-city-control healthy"><i class="rollout-city-pulse"></i>System healthy</span></div></header><section class="rollout-city-total-grid" aria-label="Homepass totals">${cardsHtml}</section><section class="rollout-city-hero"><div class="rollout-city-hero-head"><div><div class="rollout-city-eyebrow">Live rollout command center</div><h2>${esc(cityName)} · ${areaCount} ${areaCount===1?'area':'areas'}</h2></div><div class="rollout-city-status-counts">${statusHtml}</div></div><div class="rollout-city-kpis">${kpisHtml}</div></section><section class="rollout-city-areas"><div class="rollout-city-areas-head"><div class="rollout-city-areas-title"><h3>${selected?`${esc(selected)} areas`:'City areas'}</h3><p>Each area is tracked with the same metrics · open a card for full details</p></div><div class="rollout-city-filters" role="group" aria-label="Filter areas by status">${filtersHtml}</div></div>${sections||'<div class="rollout-city-overview-empty">No areas are available for this selection.</div>'}</section><section class="rollout-city-lower-grid"><article class="rollout-city-lower-panel"><h3>Timeline vs Plan</h3><p>Planned windows, rollout progress, and overdue time</p>${timelineRows?`<div class="rollout-city-timeline-axis"><span>${esc(rolloutCityCompactDate(startDate))}</span><span>${esc(rolloutCityCompactDate(endDate))}</span></div><div class="rollout-city-timeline-rows">${timelineRows}</div>`:'<div class="rollout-city-timeline-empty">Plan dates are not available for these areas.</div>'}</article><article class="rollout-city-lower-panel"><h3>Productivity Ranking</h3><p>Areas ranked by the same weighted productivity score</p><div class="rollout-city-ranking">${rankingRows||'<div class="rollout-city-timeline-empty">No areas to rank.</div>'}</div></article></section></div>`;
+  panel.innerHTML=`<div class="rollout-city-overview"><article class="rollout-city-lower-panel rollout-city-ranking-only"><h3>Productivity Ranking</h3><p>Areas ranked by the same weighted productivity score</p><div class="rollout-city-ranking">${rankingRows||'<div class="rollout-city-timeline-empty">No areas to rank.</div>'}</div></article></div>`;
 }
 function renderRolloutDailyProgress(){
 const rows=rolloutDashboardRows(wh.rolloutDailyProgress||[]);

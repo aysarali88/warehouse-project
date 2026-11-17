@@ -1191,6 +1191,81 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertFalse({"rolloutRecords", "rolloutUsage", "rolloutDailyProgress", "rolloutSource"} & set(result))
         db.close()
 
+    def test_city_ranking_returns_compact_canonical_area_metrics(self):
+        self.assertEqual(main.rollout_city_ranking_area_identity("Bera W Taleem"), ("albera", "Bera W Taleem"))
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-RANK-M1", city="Tripoli", area="Mansoura", item="Single-Core Distribution Cable_50m", material_type="Single-Core Distribution Cable_50m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=1),
+            RolloutRecord(record_id="RDP-RANK-M2", city="Tripoli", area="Al-Mansoura", item="Single-Core Distribution Cable_50m", material_type="Single-Core Distribution Cable_50m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=2),
+            RolloutRecord(record_id="RDP-RANK-BOX", city="Tripoli", area="Al-Mansoura", item="SUB BOX", material_type="SUB BOX", related_to_xbox="X1", box_code="H1-L1-S1", actual=2),
+            RolloutRecord(record_id="RDP-RANK-XBOX", city="Tripoli", area="Al-Mansoura", item="XBOX", material_type="XBOX", related_to_xbox="X1", box_code="X1", actual=1),
+            RolloutRecord(record_id="RDP-RANK-MAQ", city="Misurata", area="Maqawba", item="Single-Core Distribution Cable_100m", material_type="Single-Core Distribution Cable_100m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=3),
+            RolloutRecord(record_id="RDP-RANK-MAQ-OTHER", city="Misurata", area="Maqawba", item="Single-Core Distribution Cable_100m", material_type="Single-Core Distribution Cable_100m", related_to_xbox="X1", cable_code="H2-L1-S1", actual=9),
+        ])
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(
+            current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""),
+            program="FTTH",
+        ))
+        original_reference = main.rollout_code_reference_rows
+        main.ROLLOUT_CODE_REFERENCE_CACHE.clear()
+        main.rollout_code_reference_rows = lambda db=None, program="FTTH": [
+            {"city": "Tripoli", "area": "Al-Mansoura", "xbox": "X1", "code": "H1-L1-S1", "type": "box", "source": "box", "box_type": "SUB BOX", "cable_length_m": 100},
+            {"city": "Tripoli", "area": "Al-Mansoura", "xbox": "X1", "code": "H1-L1-S1", "type": "cable", "source": "drop", "cable_length_m": 100},
+            {"city": "Tripoli", "area": "Al-Mansoura", "xbox": "X1", "code": "X1", "type": "box", "source": "xbox", "box_type": "XBOX"},
+            {"city": "Misurata", "area": "Maqawba", "xbox": "X1", "code": "H1-L1-S1", "type": "box", "source": "box", "box_type": "SUB BOX", "cable_length_m": 100},
+            {"city": "Misurata", "area": "Maqawba", "xbox": "X1", "code": "H1-L1-S1", "type": "cable", "source": "drop", "cable_length_m": 100},
+        ]
+        try:
+            result = main.rollout_city_ranking_summary(request, program="FTTH", db=db)
+        finally:
+            main.rollout_code_reference_rows = original_reference
+            main.ROLLOUT_CODE_REFERENCE_CACHE.clear()
+            db.close()
+
+        by_key = {(row["city"], row["area"]): row for row in result["records"]}
+        mansoura = by_key[("Tripoli", "Al-Mansoura")]
+        self.assertEqual(mansoura["cable_meters"], 150)
+        self.assertEqual(mansoura["distribution_qty"], 3)
+        self.assertEqual(mansoura["sub_end_box"], 2)
+        self.assertEqual(mansoura["xbox"], 1)
+        maqawba = by_key[("Misurata", "Maqawba")]
+        self.assertEqual(maqawba["cable_meters"], 300)
+        self.assertEqual(maqawba["map_cable_meters"], 100)
+        self.assertEqual(maqawba["map_cable_target_meters"], 100)
+        self.assertEqual(maqawba["distribution_qty"], 3)
+        self.assertLess(result["metrics"]["rows_returned"], result["metrics"]["source_rows_scanned"])
+        self.assertLess(result["metrics"]["estimated_payload_bytes"], 3000)
+
+    def test_city_ranking_respects_warehouse_scope_and_roles(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-RANK-TRIPOLI", city="Tripoli", area="Hay Demashq", item="SUB BOX", material_type="SUB BOX", actual=1),
+            RolloutRecord(record_id="RDP-RANK-MISURATA", city="Misurata", area="Ras Ali", item="SUB BOX", material_type="SUB BOX", actual=2),
+        ])
+        db.commit()
+        original_reference = main.rollout_code_reference_rows
+        main.rollout_code_reference_rows = lambda db=None, program="FTTH": []
+        manager_request = SimpleNamespace(state=SimpleNamespace(
+            current_user=SimpleNamespace(role="Warehouse Manager", name="Tripoli Manager", username="tripoli-manager", warehouse_name="Tripoli"),
+            program="FTTH",
+        ))
+        technician_request = SimpleNamespace(state=SimpleNamespace(
+            current_user=SimpleNamespace(role="Technician", name="Tech", username="tech", warehouse_name="Tripoli"),
+            program="FTTH",
+        ))
+        try:
+            result = main.rollout_city_ranking_summary(manager_request, program="FTTH", db=db)
+            with self.assertRaises(HTTPException):
+                main.rollout_city_ranking_summary(technician_request, program="FTTH", db=db)
+        finally:
+            main.rollout_code_reference_rows = original_reference
+            db.close()
+
+        self.assertEqual({row["city"] for row in result["records"]}, {"Tripoli"})
+
     def test_rollout_dashboard_summary_enforces_warehouse_scope_and_roles(self):
         db = SessionLocal()
         db.query(RolloutRecord).delete()

@@ -71,6 +71,57 @@ test('Operations view renders the compact operations projection', () => {
   assert.doesNotMatch(operations, /wh\.rolloutDailyProgress/);
 });
 
+test('City Overview loads only the compact ranking and does not fetch the large Rollout summary', () => {
+  const tabSwitch = html.match(/function switchRolloutDailyTab\([^\n]+/)?.[0];
+  const overviewBranch = tabSwitch?.match(/if\(rolloutOpen&&tab==='overview'\)\{([^}]*)\}/)?.[1] || '';
+  assert.match(overviewBranch, /refreshRolloutCityRanking\(false\)/);
+  assert.doesNotMatch(overviewBranch, /refreshRolloutDailyProgress|ensureRolloutDashboardDesignReference/);
+  const refresh = html.match(/async function refreshRolloutCityRanking\([\s\S]*?(?=\nfunction rolloutCityOverviewMetricFromSummary\()/)?.[0] || '';
+  assert.match(refresh, /rollout-city-ranking-summary/);
+  assert.doesNotMatch(refresh, /rollout-dashboard-summary|rollout-daily-progress|fiber-map-reference/);
+});
+
+test('City Overview contains only the Productivity Ranking panel', () => {
+  const renderer = html.match(/function renderRolloutCityOverview\(\)\{[\s\S]*?(?=\nfunction renderRolloutDailyProgress\()/)?.[0] || '';
+  assert.match(renderer, /Productivity Ranking/);
+  assert.match(renderer, /rollout-city-ranking-group/);
+  assert.doesNotMatch(renderer, /rollout-city-total-grid|rollout-city-hero|rollout-city-area-grid|Timeline vs Plan|Actual users/);
+});
+
+test('ranking score keeps the existing 80/20 cable and box weighting', () => {
+  const metricSource = html.match(/function rolloutCityOverviewMetricFromSummary\([\s\S]*?\n\}/)?.[0] || '';
+  assert.ok(metricSource);
+  const context = vm.createContext({
+    rolloutPlanFor: () => ({}),
+    isMaqawbaRolloutArea: () => false,
+    applyRolloutDashboardMetricOverrides: metric => metric,
+    rolloutTargetFor: () => ({ cableMeters: 100, totalBoxes: 10 }),
+    Math,
+  });
+  vm.runInContext(metricSource, context);
+  const score = vm.runInContext(`rolloutCityOverviewMetricFromSummary('Tripoli', 'Example', {
+    cable_meters: 100, sub_end_box: 5, hub_box: 2, xbox: 1
+  }).productivity`, context);
+  assert.equal(score, 96);
+});
+
+test('Maqawba ranking uses map-confirmed cable progress instead of raw cable totals', () => {
+  const metricSource = html.match(/function rolloutCityOverviewMetricFromSummary\([\s\S]*?\n\}/)?.[0] || '';
+  const context = vm.createContext({
+    rolloutPlanFor: () => ({}),
+    isMaqawbaRolloutArea: area => area === 'Maqawba',
+    applyRolloutDashboardMetricOverrides: metric => metric,
+    rolloutTargetFor: () => ({ cableMeters: 100, totalBoxes: 10 }),
+    Math,
+  });
+  vm.runInContext(metricSource, context);
+  const score = vm.runInContext(`rolloutCityOverviewMetricFromSummary('Misurata', 'Maqawba', {
+    cable_meters: 300, map_cable_meters: 50, map_cable_target_meters: 100,
+    map_cable_progress_available: true, sub_end_box: 5, hub_box: 2, xbox: 1
+  }).productivity`, context);
+  assert.equal(score, 56);
+});
+
 test('area report XBOX pivot is calculated from its compact report rows', () => {
   const start = html.indexOf('function rolloutPivotData(');
   const end = html.indexOf('\n}', start);

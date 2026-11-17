@@ -6367,6 +6367,259 @@ def rollout_dashboard_summary(request: Request, program: str = DEFAULT_PROGRAM, 
     return response
 
 
+def rollout_city_ranking_area_identity(value: str) -> tuple[str, str]:
+    raw = str(value or "").strip()
+    key = rollout_area_key(raw)
+    if rollout_norm(raw) in {"albera", "berawtaleem"}:
+        return "albera", "Bera W Taleem"
+    if key in {"awladabushala", "awladbaeoo", "almansoura"}:
+        labels = {"awladabushala": "Awlad Abushala", "awladbaeoo": "Awlad Baeoo", "almansoura": "Al-Mansoura"}
+        return key, labels[key]
+    return key, rollout_area_label(raw)
+
+
+def rollout_city_ranking_city_identity(value: str) -> tuple[str, str]:
+    raw = str(value or "").strip()
+    normalized = rollout_norm(raw)
+    if normalized == "tripoli":
+        return "tripoli", "Tripoli"
+    if normalized in {"misurata", "misrata"}:
+        return "misurata", "Misurata"
+    return normalized, raw
+
+
+def rollout_city_ranking_code_key(value: str) -> str:
+    text_value = re.sub(r"^X-?\d+[-_]", "", str(value or "").strip(), flags=re.IGNORECASE)
+    return rollout_code_key(text_value)
+
+
+def rollout_city_ranking_reference_index(reference_rows: list[dict]) -> dict:
+    index: dict[tuple[str, str], dict] = {}
+    for row in reference_rows:
+        city_key, _ = rollout_city_ranking_city_identity(row.get("city") or "")
+        area_key, _ = rollout_city_ranking_area_identity(row.get("area") or "")
+        xbox = rollout_xbox_key(row.get("xbox") or "")
+        code = rollout_city_ranking_code_key(row.get("code") or "")
+        code_type = rollout_norm(row.get("type") or "")
+        source = rollout_norm(row.get("source") or "")
+        if not area_key or not xbox or not code:
+            continue
+        item = index.setdefault((city_key, area_key), {
+            "xboxes": set(),
+            "box_codes": set(),
+            "hub_codes": set(),
+            "route_codes": set(),
+            "has_parts": False,
+            "design_boxes": set(),
+            "design_hubs": set(),
+            "design_xboxes": set(),
+            "design_cable_meters": 0.0,
+            "map_cables": {},
+        })
+        if code_type == "box":
+            item["xboxes"].add(xbox)
+            if source == "xbox":
+                item["design_xboxes"].add(xbox)
+            elif source == "hub":
+                item["hub_codes"].add((xbox, code))
+                item["design_hubs"].add((xbox, code))
+            else:
+                item["box_codes"].add((xbox, code))
+                item["design_boxes"].add((xbox, code))
+            if source in {"box", "map_override"}:
+                item["has_parts"] = True
+        if code_type == "cable":
+            if source == "route":
+                item["route_codes"].add((xbox, code))
+            elif source in {"drop", "map_override"}:
+                item["box_codes"].add((xbox, code))
+            if source in {"drop", "route", "map_override"}:
+                length = safe_float(row.get("cable_length_m")) or 0.0
+                if length > 0:
+                    kind = "fourcore" if source == "route" else "distribution"
+                    target_key = (xbox, kind, code)
+                    item["map_cables"][target_key] = length
+                    item["design_cable_meters"] += length
+        if code_type == "box" and source in {"box", "map_override"}:
+            box_type = rollout_norm(row.get("box_type") or "")
+            if "hub" not in box_type and "xbox" not in box_type:
+                item.setdefault("design_box_count", set()).add((xbox, code))
+    for (city_key, area_key), item in index.items():
+        item["has_parts"] = bool(item["design_boxes"] and item["design_hubs"])
+        item["design_target"] = {
+            "cableMeters": item["design_cable_meters"],
+            "subEndBox": len(item.get("design_box_count", set())),
+            "hubBox": len(item["design_hubs"]),
+            "xbox": len(item["design_xboxes"]),
+            "totalBoxes": len(item.get("design_box_count", set())) + len(item["design_hubs"]) + len(item["design_xboxes"]),
+        }
+    return index
+
+
+def rollout_city_ranking_keep_row(row, area_info: dict | None, city_key: str, area_key: str) -> bool:
+    if area_key != "maqawba" and (area_info is None or not area_info.get("has_parts")):
+        return True
+
+    material = rollout_norm(f"{row.item or ''} {row.material_type or ''}")
+    xbox = rollout_xbox_key(row.related_to_xbox or "")
+    box_code = rollout_city_ranking_code_key(row.box_code or "")
+    cable_code = rollout_city_ranking_code_key(row.cable_code or "")
+    box_codes = area_info["box_codes"] if area_info else set()
+    hub_codes = area_info["hub_codes"] if area_info else set()
+    route_codes = area_info["route_codes"] if area_info else set()
+    xbox_codes = area_info["xboxes"] if area_info else set()
+
+    if "hubbox" in material:
+        return (xbox, box_code) in hub_codes if area_key == "maqawba" else not box_code or (xbox, box_code) in hub_codes
+    if "xbox" in material:
+        return (xbox in xbox_codes and box_code == rollout_city_ranking_code_key(xbox)) if area_key == "maqawba" else not box_code or (xbox in xbox_codes and box_code == rollout_city_ranking_code_key(xbox))
+    if "subbox" in material or "endbox" in material:
+        return (xbox, box_code) in box_codes if area_key == "maqawba" else not box_code or (xbox, box_code) in box_codes
+    if "singlecoredistributioncable" in material or "distributioncable" in material:
+        return (xbox, cable_code) in box_codes if area_key == "maqawba" else not cable_code or (xbox, cable_code) in box_codes
+    if "4corecable" in material:
+        return (xbox, cable_code) in route_codes if area_key == "maqawba" else not cable_code or (xbox, cable_code) in route_codes
+    return True
+
+
+def rollout_city_ranking_map_cable_match(row, kind: str) -> bool:
+    material = " ".join(str(value or "") for value in (row.item, row.material_type)).strip()
+    if kind == "distribution":
+        return bool(re.search(r"single[\s-]*core\s+distribution\s+cable", material, re.IGNORECASE)) and rollout_cable_length_from_text(material) > 0
+    return bool(re.search(r"4[\s-]*core\s*cable", material, re.IGNORECASE)) and rollout_cable_length_from_text(material) > 0
+
+
+def rollout_cable_length_from_text(value: str) -> int:
+    text_value = str(value or "")
+    match = re.search(r"(\d+)\s*m\b", text_value, re.IGNORECASE) or re.search(r"_(\d+)\s*m?\b", text_value, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+@app.get("/api/warehouse/rollout-city-ranking-summary")
+def rollout_city_ranking_summary(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    if is_single_ran(program):
+        return {"success": True, "source": "disabled", "count": 0, "records": [], "summary_only": True}
+
+    reference = rollout_city_ranking_reference_index(rollout_code_reference_rows(db, program))
+    scoped_user = current_user(request)
+    is_warehouse_manager = scoped_user.role.strip().lower() == "warehouse manager"
+    warehouse_scope = scoped_user.warehouse_name or scoped_user.name or scoped_user.username
+    query = db.query(
+        RolloutRecord.record_id,
+        RolloutRecord.city,
+        RolloutRecord.area,
+        RolloutRecord.item,
+        RolloutRecord.material_type,
+        RolloutRecord.actual,
+        RolloutRecord.related_to_xbox,
+        RolloutRecord.cable_code,
+        RolloutRecord.box_code,
+    ).order_by(RolloutRecord.id.asc())
+
+    accumulators: dict[tuple[str, str], dict] = {}
+    installed_map_cables: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
+    scanned = 0
+    included = 0
+    for row in query.yield_per(500):
+        scanned += 1
+        if is_warehouse_manager and not (
+            warehouse_scope_matches(warehouse_scope, row.city or "")
+            or warehouse_scope_matches(warehouse_scope, row.area or "")
+        ):
+            continue
+        if rollout_norm(row.area or "") == "albera":
+            continue
+        city_key, city_label = rollout_city_ranking_city_identity(row.city or "")
+        area_key, area_label = rollout_city_ranking_area_identity(row.area or "")
+        if not area_key:
+            continue
+        ref_key = (city_key, area_key)
+        area_info = reference.get(ref_key)
+        if not rollout_city_ranking_keep_row(row, area_info, city_key, area_key):
+            continue
+        included += 1
+        metric = accumulators.setdefault(ref_key, {
+            "city": city_label,
+            "area": area_label,
+            "cable_meters": 0.0,
+            "distribution_qty": 0.0,
+            "four_core_qty": 0.0,
+            "sub_end_box": 0.0,
+            "hub_box": 0.0,
+            "xbox_refs": set(),
+            "unlinked_xbox_qty": 0.0,
+            "record_count": 0,
+        })
+        qty = safe_float(row.actual) or 0.0
+        material = str(row.material_type or row.item or "").strip()
+        material_key = rollout_norm(material)
+        cable_length = rollout_cable_length_from_text(material)
+        is_fourcore = "corecable" in material_key or "4corecable" in material_key
+        is_distribution = "singlecoredistributioncable" in material_key or "distributioncable" in material_key
+        is_core_cable = is_fourcore or is_distribution
+        is_sub_end = any(token in material_key for token in ("subbox", "subboxavec8userscapacit", "endbox", "endboxavec8userscapacit"))
+        is_hub = "hubbox" in material_key
+        is_xbox = "xbox" in material_key
+        metric["record_count"] += 1
+        if is_core_cable and cable_length > 0:
+            metric["cable_meters"] += qty * cable_length
+        if is_distribution:
+            metric["distribution_qty"] += qty
+        if is_fourcore:
+            metric["four_core_qty"] += qty
+        if is_sub_end:
+            metric["sub_end_box"] += qty
+        if is_hub:
+            metric["hub_box"] += qty
+        if qty > 0 and is_xbox:
+            related = str(row.related_to_xbox or "").strip().upper()
+            if related:
+                metric["xbox_refs"].add(related)
+            else:
+                metric["unlinked_xbox_qty"] += qty
+
+        if area_key == "maqawba" and area_info and rollout_city_ranking_map_cable_match(row, "distribution"):
+            xbox = rollout_xbox_key(row.related_to_xbox or "")
+            candidates = (row.cable_code or "", row.box_code or "")
+            targets = area_info["map_cables"]
+            for candidate in candidates:
+                code_key = rollout_city_ranking_code_key(candidate)
+                if code_key and (xbox, "distribution", code_key) in targets:
+                    installed_map_cables.setdefault(ref_key, set()).add((xbox, "distribution", code_key))
+        if area_key == "maqawba" and area_info and rollout_city_ranking_map_cable_match(row, "fourcore"):
+            xbox = rollout_xbox_key(row.related_to_xbox or "")
+            candidates = (row.cable_code or "", row.box_code or "")
+            targets = area_info["map_cables"]
+            for candidate in candidates:
+                code_key = rollout_city_ranking_code_key(candidate)
+                if code_key and (xbox, "fourcore", code_key) in targets:
+                    installed_map_cables.setdefault(ref_key, set()).add((xbox, "fourcore", code_key))
+
+    records = []
+    for key, metric in accumulators.items():
+        city_key, area_key = key
+        area_info = reference.get(key)
+        metric["map_cable_meters"] = sum(area_info["map_cables"].get(item, 0.0) for item in installed_map_cables.get(key, set())) if area_key == "maqawba" and area_info else 0.0
+        metric["map_cable_target_meters"] = sum(area_info["map_cables"].values()) if area_key == "maqawba" and area_info else 0.0
+        metric["map_cable_progress_available"] = bool(area_info and area_info.get("has_parts")) if area_key == "maqawba" else False
+        metric["xbox"] = len(metric.pop("xbox_refs")) + metric.pop("unlinked_xbox_qty")
+        metric["design_target"] = area_info.get("design_target") if area_info and area_info.get("has_parts") else None
+        metric.pop("record_count", None)
+        records.append(metric)
+    records.sort(key=lambda row: (str(row["city"]).casefold(), str(row["area"]).casefold()))
+    response = {
+        "success": True,
+        "source": "database",
+        "summary_only": True,
+        "count": included,
+        "records": records,
+        "metrics": {"source_rows_scanned": scanned, "rows_returned": len(records)},
+    }
+    response["metrics"]["estimated_payload_bytes"] = len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return response
+
+
 @app.get("/api/warehouse/rollout-pole-summary")
 def rollout_pole_summary(request: Request, force: bool = False, db: Session = Depends(db_session)):
     """Read pole receipt totals and installed pole counts for the rollout dashboard."""
