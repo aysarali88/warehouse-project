@@ -2,12 +2,14 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import close_all_sessions
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 TEST_DB_PATH = Path(tempfile.gettempdir()) / f"warehouse-rollout-tests-{os.getpid()}.db"
 try:
@@ -116,9 +118,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
                 program="FTTH",
             )
         )
-        original_records = main.rollout_daily_progress_records
         original_refs = main.rollout_code_reference_rows
-        main.rollout_daily_progress_records = lambda *args, **kwargs: self.fail("search should not load the full rollout data")
         main.rollout_code_reference_rows = lambda *args, **kwargs: self.fail("search should not rebuild code references")
         try:
             result = main.rollout_entry_reference(
@@ -129,7 +129,6 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
                 db=db,
             )
         finally:
-            main.rollout_daily_progress_records = original_records
             main.rollout_code_reference_rows = original_refs
 
         self.assertEqual(result["count"], 2)
@@ -1018,6 +1017,99 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             separators=(",", ":"),
         ).encode("utf-8"))
         self.assertLess(result["metrics"]["estimated_payload_bytes"], full_payload_bytes)
+        db.close()
+
+    def test_rollout_report_summary_preserves_report_inputs_without_full_records(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-REPORT-1", date="2026-08-23", city="Misurata", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", status="Done", related_to_xbox="X1", actual=2),
+            RolloutRecord(record_id="RDP-REPORT-2", date="2026-08-23", city="Misurata", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", status="Done", related_to_xbox="X1", actual=3),
+            RolloutRecord(record_id="RDP-REPORT-3", date="2026-08-24", city="Misurata", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", status="In Progress", related_to_xbox="X1", actual=7),
+            RolloutRecord(record_id="RDP-REPORT-4", date="2026-08-24", city="Tripoli", area="Maqawba", item="XBOX", material_type="XBOX", status="Done", related_to_xbox="X2", actual=1),
+        ])
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""), program="FTTH"))
+        result = main.rollout_report_summary(request, program="FTTH", db=db)
+
+        self.assertEqual(result["count"], 4)
+        self.assertEqual(result["summary_rows"], 3)
+        done = next(row for row in result["records"] if row["staus"] == "Done" and row["item"] == "Cable")
+        self.assertEqual(done["actual"], 5)
+        self.assertEqual(done["Related to XBOX"], "X1")
+        self.assertNotIn("ID", done)
+        self.assertEqual(sum(row["actual"] for row in result["records"] if row["Area"] == "Maqawba"), 13)
+        db.close()
+
+    def test_rollout_operations_summary_preserves_date_supervisor_groups(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-OPS-1", date="2026-08-23", supervisor_name="Sam", team_leader="Team A", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", actual=2),
+            RolloutRecord(record_id="RDP-OPS-2", date="2026-08-23", supervisor_name="Sam", team_leader="Team A", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", actual=3),
+            RolloutRecord(record_id="RDP-OPS-3", date="2026-08-24", supervisor_name="Sam", team_leader="Team A", area="Maqawba", item="SUB BOX", material_type="SUB BOX", actual=4),
+        ])
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""), program="FTTH"))
+        result = main.rollout_operations_summary(request, program="FTTH", db=db)
+
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["summary_rows"], 2)
+        cable = next(row for row in result["records"] if row["material type"].endswith("80m"))
+        self.assertEqual(cable["actual"], 5)
+        self.assertEqual(cable["__rollout_record_count"], 2)
+        self.assertNotIn("ID", cable)
+        db.close()
+
+    def test_rollout_map_page_filters_by_area_and_xbox(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-MAP-MATCH", date="2026-08-23", city="Misurata", area="Maqawba", related_to_xbox="X-BOX 01", item="SUB BOX", material_type="SUB BOX", actual=1),
+            RolloutRecord(record_id="RDP-MAP-OTHER-XBOX", date="2026-08-23", city="Misurata", area="Maqawba", related_to_xbox="X2", item="SUB BOX", material_type="SUB BOX", actual=2),
+            RolloutRecord(record_id="RDP-MAP-OTHER-AREA", date="2026-08-23", city="Misurata", area="Ras Ali", related_to_xbox="X1", item="SUB BOX", material_type="SUB BOX", actual=4),
+        ])
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""), program="FTTH"))
+
+        result = main.list_rollout_daily_progress(request, limit=500, offset=0, area="Maqawba", xbox="X1", map_only=True, program="FTTH", db=db)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual([row["ID"] for row in result["records"]], ["RDP-MAP-MATCH"])
+        self.assertNotIn("Notes", result["records"][0])
+        db.close()
+
+    def test_rollout_normalization_uses_one_postgresql_translate_expression(self):
+        expression = main.rollout_sql_normalized(RolloutRecord.area, "postgresql")
+        sql = str(expression.compile(dialect=postgresql.dialect())).lower()
+
+        self.assertIn("translate(", sql)
+        self.assertNotIn("replace(", sql)
+
+    def test_rollout_export_streams_complete_workbook_and_accessories(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-EXPORT-1", date="2026-08-23", area="Maqawba", item="Cable", material_type="Single-Core Distribution Cable_80m", actual=2),
+            RolloutRecord(record_id="RDP-EXPORT-2", date="2026-08-23", area="Maqawba", item="Hub Accessories", material_type="Hub Accessories", actual=1),
+        ])
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin", warehouse_name=""), program="FTTH"))
+
+        original_streaming_response = main.StreamingResponse
+        main.StreamingResponse = lambda content, **kwargs: SimpleNamespace(body_iterator=content, media_type=kwargs.get("media_type"))
+        try:
+            response = main.export_rollout_daily_progress(request, program="FTTH", db=db)
+            payload = b"".join(response.body_iterator)
+        finally:
+            main.StreamingResponse = original_streaming_response
+        workbook = main.load_workbook(BytesIO(payload), read_only=True, data_only=True)
+
+        self.assertEqual(response.media_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertEqual(workbook.sheetnames, ["Rollout Progress", "Hub Accessories"])
+        self.assertIn("RDP-EXPORT-1", {row[0] for row in workbook["Rollout Progress"].iter_rows(min_row=2, values_only=True)})
+        self.assertIn("RDP-EXPORT-2", {row[0] for row in workbook["Hub Accessories"].iter_rows(min_row=2, values_only=True)})
+        workbook.close()
         db.close()
 
     def test_rollout_dashboard_summary_filters_maqawba_by_active_map_codes(self):

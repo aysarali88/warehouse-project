@@ -13,6 +13,7 @@ import secrets
 import smtplib
 import sys
 import string
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -32,9 +33,10 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
 from email.message import EmailMessage
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import String, case, func, or_, text
+from sqlalchemy import String, case, event, func, or_, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload, undefer
 
@@ -137,12 +139,24 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
 ACTIVE_USER_WINDOW_SECONDS = 120
 DEFAULT_PROGRAM = "FTTH"
 SINGLE_RAN_PROGRAM = "SINGLE_RAN"
+ROLLOUT_SQL_STRIP_CHARS = string.punctuation + " \t\r\n\u00a0\u2010\u2011\u2012\u2013\u2014\u2212"
+ROLLOUT_SQL_STRIP_SET = frozenset(ROLLOUT_SQL_STRIP_CHARS)
+
+
+def _sqlite_rollout_normalize(value):
+    return "".join(char.lower() for char in str(value or "") if char not in ROLLOUT_SQL_STRIP_SET)
+
+
+def _register_sqlite_rollout_normalizer(connection, _record):
+    connection.create_function("rollout_normalize", 1, _sqlite_rollout_normalize, deterministic=True)
 
 if len(SESSION_SECRET) < 32:
     raise RuntimeError("SESSION_SECRET must be set to a value of at least 32 characters")
 
 for program_key, db_engine in all_engines():
     try:
+        if db_engine.dialect.name == "sqlite":
+            event.listen(db_engine, "connect", _register_sqlite_rollout_normalizer)
         sr_only_tables = {SrMaterialRequisitionSignedCopy.__tablename__, SrMaterialReturnStatus.__tablename__}
         use_shared_database = sr_engine is None or sr_engine.url == db_engine.url
         tables = [
@@ -2001,20 +2015,25 @@ def rollout_records_for_session(request: Request, rows: list[dict]) -> list[dict
     ]
 
 
-def rollout_sql_normalized(column):
-    expression = func.lower(func.coalesce(column, ""))
-    for character in string.punctuation + " \t\r\n\u00a0\u2010\u2011\u2012\u2013\u2014\u2212":
+def rollout_sql_normalized(column, dialect_name: str = ""):
+    lowered = func.lower(func.coalesce(column, ""))
+    if dialect_name == "postgresql":
+        return func.translate(lowered, ROLLOUT_SQL_STRIP_CHARS, "")
+    if dialect_name == "sqlite":
+        return func.rollout_normalize(column)
+    expression = lowered
+    for character in ROLLOUT_SQL_STRIP_CHARS:
         expression = func.replace(expression, character, "")
     return expression
 
 
-def rollout_scope_sql_clause(scope: str):
+def rollout_scope_sql_clause(scope: str, dialect_name: str = ""):
     keys = warehouse_scope_keys(scope)
     clauses = []
     city_keys = {"misurata", "misrata", "misrat", "misuratalnet", "misratalnet", "freezone", "misuratafreezone", "misratafreezone", "tripoli"}
     generic_keys = keys - city_keys
     for column in (RolloutRecord.city, RolloutRecord.area):
-        normalized = rollout_sql_normalized(column)
+        normalized = rollout_sql_normalized(column, dialect_name)
         if generic_keys:
             clauses.append(normalized.in_(generic_keys))
         if keys & {"freezone", "misuratafreezone", "misratafreezone"}:
@@ -2042,12 +2061,14 @@ def rollout_record_query(
     team_leader: str = "",
     date_from: str = "",
     date_to: str = "",
+    xbox: str = "",
 ):
     query = db.query(RolloutRecord)
+    dialect_name = db.get_bind().dialect.name
     user = current_user(request)
     if user.role.strip().lower() == "warehouse manager":
         scope = user.warehouse_name or user.name or user.username
-        query = query.filter(rollout_scope_sql_clause(scope))
+        query = query.filter(rollout_scope_sql_clause(scope, dialect_name))
 
     for term in re.findall(r"[\w]+", str(search or "").strip()[:120], flags=re.UNICODE):
         pattern = f"%{term}%"
@@ -2084,6 +2105,8 @@ def rollout_record_query(
     ):
         if str(value or "").strip():
             query = query.filter(column.ilike(f"%{str(value).strip()}%"))
+    if str(xbox or "").strip():
+        query = query.filter(rollout_xbox_filter_clause(RolloutRecord.related_to_xbox, xbox))
     if date_from:
         query = query.filter(RolloutRecord.date >= str(date_from).strip())
     if date_to:
@@ -2582,15 +2605,6 @@ def fetch_rollout_daily_progress_csv(force: bool = False) -> tuple[list[dict], s
     return [], "none"
 
 
-def db_rollout_records(db: Session) -> list[dict]:
-    # Compatibility for non-list consumers; paginated and dashboard paths use
-    # bounded SQL queries and never retain this result globally.
-    return [
-        row_to_record(row)
-        for row in db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).yield_per(500)
-    ]
-
-
 def stable_rollout_record_id(data: dict) -> str:
     source_id = str(first_value(data, "ID", "id", default="") or "").strip()
     if source_id:
@@ -2598,16 +2612,6 @@ def stable_rollout_record_id(data: dict) -> str:
     payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
     return f"RDP-SOURCE-{digest}"
-
-
-def sync_rollout_daily_progress(db: Session, force: bool = False) -> tuple[list[dict], str]:
-    # Supabase is the sole source of truth. The legacy Google Sheet is no
-    # longer consulted, including for forced refreshes from the UI.
-    return db_rollout_records(db), "database"
-
-
-def rollout_daily_progress_records(db: Session, force: bool = False) -> tuple[list[dict], str]:
-    return sync_rollout_daily_progress(db, force=force)
 
 
 def rollout_norm(value) -> str:
@@ -2651,6 +2655,18 @@ def rollout_xbox_key(value) -> str:
     if match:
         return f"X{int(match.group(1) or match.group(2))}"
     return re.sub(r"[^A-Z0-9]+", "", text_value)
+
+
+def rollout_xbox_filter_clause(column, value: str):
+    key = rollout_xbox_key(value)
+    match = re.fullmatch(r"X(\d+)", key)
+    if match:
+        number = int(match.group(1))
+        number_forms = {str(number), str(number).zfill(2), str(number).zfill(3)}
+        prefixes = ("X", "X-", "X ", "XBOX", "XBOX ", "XBOX-", "X-BOX", "X-BOX ", "X-BOX-", "X BOX", "X BOX ", "X BOX-")
+        candidates = {f"{prefix}{digits}" for prefix in prefixes for digits in number_forms}
+        return func.upper(func.trim(func.coalesce(column, ""))).in_(candidates)
+    return func.upper(func.trim(func.coalesce(column, ""))) == str(value or "").strip().upper()
 
 
 def rollout_code_key(value) -> str:
@@ -4261,13 +4277,12 @@ def fiber_map_manager_install_missing(data: FiberMapMissingInstallIn, request: R
     with ROLLOUT_SYNC_LOCK:
         replayed_records = replay_if_saved()
         if replayed_records is not None:
-            records, _ = rollout_daily_progress_records(db, force=False)
             return {
                 "success": True,
                 "replayed": True,
                 "changed": len(targets),
                 "records": replayed_records,
-                "summary": rollout_entry_summary(records),
+                "summary": rollout_entry_summary_from_db(request, db),
             }
 
         existing_candidates = db.query(RolloutRecord).filter(
@@ -4365,13 +4380,12 @@ def fiber_map_manager_install_missing(data: FiberMapMissingInstallIn, request: R
     clear_rollout_db_cache()
     for row in created_rows:
         db.refresh(row)
-    records, _ = rollout_daily_progress_records(db, force=False)
     return {
         "success": True,
         "replayed": False,
         "changed": len(targets),
         "records": [row_to_record(row) for row in created_rows],
-        "summary": rollout_entry_summary(records),
+        "summary": rollout_entry_summary_from_db(request, db),
     }
 
 
@@ -4830,7 +4844,7 @@ def rollout_entry_summary_from_db(request: Request, db: Session) -> dict:
     )
     if user.role.strip().lower() == "warehouse manager":
         scope = user.warehouse_name or user.name or user.username
-        query = query.filter(rollout_scope_sql_clause(scope))
+        query = query.filter(rollout_scope_sql_clause(scope, db.get_bind().dialect.name))
     rows = query.group_by(RolloutRecord.item, RolloutRecord.material_type, RolloutRecord.status).all()
     return rollout_entry_summary([
         {"item": row.item or "", "material type": row.material_type or "", "status": row.status or "", "actual": float(row.actual or 0)}
@@ -4860,7 +4874,7 @@ def rollout_entry_code_states_from_db(request: Request, db: Session) -> dict[tup
     user = current_user(request)
     if user.role.strip().lower() == "warehouse manager":
         scope = user.warehouse_name or user.name or user.username
-        query = query.filter(rollout_scope_sql_clause(scope))
+        query = query.filter(rollout_scope_sql_clause(scope, db.get_bind().dialect.name))
     rows = query.group_by(
         RolloutRecord.area,
         RolloutRecord.related_to_xbox,
@@ -6099,6 +6113,8 @@ def list_rollout_daily_progress(
     team_leader: str = "",
     date_from: str = "",
     date_to: str = "",
+    xbox: str = "",
+    map_only: bool = False,
     refresh: str = "",
     program: str = DEFAULT_PROGRAM,
     db: Session = Depends(db_session),
@@ -6120,9 +6136,44 @@ def list_rollout_daily_progress(
         team_leader=team_leader,
         date_from=date_from,
         date_to=date_to,
+        xbox=xbox,
     )
     total = query.order_by(None).count()
-    rows = query.order_by(RolloutRecord.id.desc()).offset(offset).limit(limit).all()
+    if map_only:
+        projected_rows = (
+            query.with_entities(
+                RolloutRecord.record_id,
+                RolloutRecord.city,
+                RolloutRecord.area,
+                RolloutRecord.related_to_xbox,
+                RolloutRecord.item,
+                RolloutRecord.material_type,
+                RolloutRecord.cable_code,
+                RolloutRecord.box_code,
+                RolloutRecord.cable_route,
+            )
+            .order_by(RolloutRecord.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        records = [
+            {
+                "ID": row.record_id or "",
+                "city": row.city or "",
+                "Area": row.area or "",
+                "Related to XBOX": row.related_to_xbox or "",
+                "item": row.item or "",
+                "material type": row.material_type or "",
+                "cable code": row.cable_code or "",
+                "box code": row.box_code or "",
+                "Cable route": row.cable_route or "",
+            }
+            for row in projected_rows
+        ]
+    else:
+        rows = query.order_by(RolloutRecord.id.desc()).offset(offset).limit(limit).all()
+        records = [row_to_record(row) for row in rows]
     return {
         "success": True,
         "name": "Rollout Daily Progress",
@@ -6131,7 +6182,114 @@ def list_rollout_daily_progress(
         "count": total,
         **rollout_page_metadata(total, page, limit),
         "fetched_at": datetime.now(TRIPOLI_TZ).isoformat(),
-        "records": [row_to_record(row) for row in rows],
+        "records": records,
+    }
+
+
+@app.get("/api/warehouse/rollout-report-summary")
+def rollout_report_summary(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    if is_single_ran(program):
+        return {"success": True, "count": 0, "records": [], "source": "disabled"}
+
+    query = rollout_record_query(request, db)
+    rows = (
+        query.with_entities(
+            RolloutRecord.date.label("date"),
+            RolloutRecord.city.label("city"),
+            RolloutRecord.area.label("area"),
+            RolloutRecord.item.label("item"),
+            RolloutRecord.material_type.label("material_type"),
+            RolloutRecord.status.label("status"),
+            RolloutRecord.related_to_xbox.label("related_to_xbox"),
+            func.sum(RolloutRecord.actual).label("actual"),
+            func.count(RolloutRecord.id).label("record_count"),
+        )
+        .group_by(
+            RolloutRecord.date,
+            RolloutRecord.city,
+            RolloutRecord.area,
+            RolloutRecord.item,
+            RolloutRecord.material_type,
+            RolloutRecord.status,
+            RolloutRecord.related_to_xbox,
+        )
+        .order_by(RolloutRecord.area.asc(), RolloutRecord.date.asc())
+        .all()
+    )
+    total = int(query.order_by(None).count())
+    records = [
+        {
+            "Date": str(row.date) if row.date else "",
+            "city": row.city or "",
+            "Area": row.area or "",
+            "item": row.item or "",
+            "material type": row.material_type or "",
+            "staus": row.status or "",
+            "Related to XBOX": row.related_to_xbox or "",
+            "actual": float(row.actual or 0),
+            "__rollout_record_count": int(row.record_count or 0),
+        }
+        for row in rows
+    ]
+    return {
+        "success": True,
+        "source": "database",
+        "count": total,
+        "summary_rows": len(records),
+        "records": records,
+    }
+
+
+@app.get("/api/warehouse/rollout-operations-summary")
+def rollout_operations_summary(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
+    if is_single_ran(program):
+        return {"success": True, "count": 0, "records": [], "source": "disabled"}
+
+    query = rollout_record_query(request, db)
+    rows = (
+        query.with_entities(
+            RolloutRecord.date.label("date"),
+            RolloutRecord.supervisor_name.label("supervisor_name"),
+            RolloutRecord.team_leader.label("team_leader"),
+            RolloutRecord.area.label("area"),
+            RolloutRecord.item.label("item"),
+            RolloutRecord.material_type.label("material_type"),
+            func.sum(RolloutRecord.actual).label("actual"),
+            func.count(RolloutRecord.id).label("record_count"),
+        )
+        .group_by(
+            RolloutRecord.date,
+            RolloutRecord.supervisor_name,
+            RolloutRecord.team_leader,
+            RolloutRecord.area,
+            RolloutRecord.item,
+            RolloutRecord.material_type,
+        )
+        .order_by(RolloutRecord.date.desc(), RolloutRecord.area.asc())
+        .all()
+    )
+    total = int(query.order_by(None).count())
+    records = [
+        {
+            "Date": str(row.date) if row.date else "",
+            "Supervisor Name": row.supervisor_name or "",
+            "team leader": row.team_leader or "",
+            "Area": row.area or "",
+            "item": row.item or "",
+            "material type": row.material_type or "",
+            "actual": float(row.actual or 0),
+            "__rollout_record_count": int(row.record_count or 0),
+        }
+        for row in rows
+    ]
+    return {
+        "success": True,
+        "source": "database",
+        "count": total,
+        "summary_rows": len(records),
+        "records": records,
     }
 
 
@@ -6305,49 +6463,55 @@ def save_tripoli_installed_pole_override(
 @app.get("/api/warehouse/rollout-daily-progress/export")
 def export_rollout_daily_progress(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     require_roles(request, "Admin", "Management", "Requester", "Approval", "Warehouse Manager")
-    if is_single_ran(program):
-        rows: list[dict] = []
-    else:
-        rows, _source = rollout_daily_progress_records(db, force=False)
-        rows = rollout_records_for_session(request, rows)
+    query = None if is_single_ran(program) else rollout_record_query(request, db)
+    total = int(query.order_by(None).count()) if query is not None else 0
 
     headers = [
         "ID", "Date", "entry time", "Supervisor Name", "team leader", "city", "Area", "Activity",
         "Related to XBOX", "item", "material type", "mount type", "Cable route", "cable code", "box code",
         "item serial", "planed quantity", "actual", "stock remaining", "staus", "laser", "acceptance", "scan", "labeling", "Notes",
     ]
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Rollout Progress"
-    sheet.append(headers)
-    for row in rows:
-        sheet.append([row.get(header, "") for header in headers])
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-
-    # Keep the main sheet complete, and provide a focused view for reviewing
-    # Hub-by-Hub accessory entries without changing the underlying records.
-    accessory_rows = [
-        row for row in rows
-        if rollout_norm(row.get("item")) in {"hubaccessory", "hubaccessories"}
-    ]
-    if accessory_rows:
-        accessories_sheet = workbook.create_sheet("Hub Accessories")
-        accessories_sheet.append(headers)
-        for row in accessory_rows:
-            accessories_sheet.append([row.get(header, "") for header in headers])
-        accessories_sheet.freeze_panes = "A2"
-        accessories_sheet.auto_filter.ref = accessories_sheet.dimensions
-
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet("Rollout Progress")
+    sample_records = [row_to_record(row) for row in query.order_by(RolloutRecord.id.asc()).limit(250).all()] if query is not None else []
     for index, header in enumerate(headers, start=1):
-        values = [header] + [str(row.get(header, "") or "") for row in rows[:250]]
-        sheet.column_dimensions[chr(64 + index) if index <= 26 else "A"].width = min(42, max(12, max(len(value) for value in values) + 2))
-    stream = io.BytesIO()
+        values = [header] + [str(record.get(header, "") or "") for record in sample_records]
+        sheet.column_dimensions[get_column_letter(index)].width = min(42, max(12, max(map(len, values)) + 2))
+    sheet.append(headers)
+    sheet.freeze_panes = "A2"
+    last_column = get_column_letter(len(headers))
+    sheet.auto_filter.ref = f"A1:{last_column}{total + 1}"
+    accessories_sheet = None
+    accessory_count = 0
+    if query is not None:
+        for row in query.order_by(RolloutRecord.id.asc()).yield_per(500):
+            record = row_to_record(row)
+            values = [record.get(header, "") for header in headers]
+            sheet.append(values)
+            if rollout_norm(record.get("item")) in {"hubaccessory", "hubaccessories"}:
+                if accessories_sheet is None:
+                    accessories_sheet = workbook.create_sheet("Hub Accessories")
+                    accessories_sheet.append(headers)
+                    accessories_sheet.freeze_panes = "A2"
+                accessories_sheet.append(values)
+                accessory_count += 1
+    if accessories_sheet is not None:
+        accessories_sheet.auto_filter.ref = f"A1:{last_column}{accessory_count + 1}"
+
+    stream = tempfile.SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
     workbook.save(stream)
     stream.seek(0)
     filename = f"rollout-progress-{datetime.now(TRIPOLI_TZ).strftime('%Y%m%d-%H%M%S')}.xlsx"
+
+    def file_chunks():
+        try:
+            while chunk := stream.read(64 * 1024):
+                yield chunk
+        finally:
+            stream.close()
+
     return StreamingResponse(
-        stream,
+        file_chunks(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -6432,12 +6596,11 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         raise HTTPException(status_code=400, detail="Invalid field entry submission key")
     existing_submission = db.query(RolloutRecord).filter(RolloutRecord.submission_key == submission_key).first()
     if existing_submission is not None:
-        records, _ = rollout_daily_progress_records(db, force=False)
         return {
             "success": True,
             "message": "Field entry already saved",
             "record": row_to_record(existing_submission),
-            "summary": rollout_entry_summary(records),
+            "summary": rollout_entry_summary_from_db(request, db),
             "warnings": [],
             "replayed": True,
         }
@@ -6514,12 +6677,11 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         existing_submission = db.query(RolloutRecord).filter(RolloutRecord.submission_key == submission_key).first()
         if existing_submission is not None:
             db.rollback()
-            records, _ = rollout_daily_progress_records(db, force=False)
             return {
                 "success": True,
                 "message": "Field entry already saved",
                 "record": row_to_record(existing_submission),
-                "summary": rollout_entry_summary(records),
+                "summary": rollout_entry_summary_from_db(request, db),
                 "warnings": [],
                 "replayed": True,
             }
@@ -6537,12 +6699,11 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         clear_warehouse_cache()
         clear_rollout_db_cache()
         db.refresh(row)
-    records, _ = rollout_daily_progress_records(db, force=False)
     return {
         "success": True,
         "message": "Field entry saved",
         "record": row_to_record(row),
-        "summary": rollout_entry_summary(records),
+        "summary": rollout_entry_summary_from_db(request, db),
         "warnings": warnings,
     }
 
@@ -6717,12 +6878,11 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
         for row in saved_rows:
             db.refresh(row)
 
-    records, _ = rollout_daily_progress_records(db, force=False)
     return {
         "success": True,
         "message": "Hub accessories saved",
         "records": [row_to_record(row) for row in saved_rows],
-        "summary": rollout_entry_summary(records),
+        "summary": rollout_entry_summary_from_db(request, db),
     }
 
 
@@ -6861,8 +7021,7 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     clear_warehouse_cache()
     clear_rollout_db_cache()
     db.refresh(row)
-    records, _ = rollout_daily_progress_records(db, force=False)
-    return {"success": True, "message": "Field Entry updated", "record": row_to_record(row), "summary": rollout_entry_summary(records), "warnings": warnings}
+    return {"success": True, "message": "Field Entry updated", "record": row_to_record(row), "summary": rollout_entry_summary_from_db(request, db), "warnings": warnings}
 
 
 @app.delete("/api/warehouse/rollout-field-entry/{record_id}")
@@ -6892,8 +7051,7 @@ def delete_rollout_field_entry(record_id: str, data: dict, request: Request, db:
     db.commit()
     clear_warehouse_cache()
     clear_rollout_db_cache()
-    records, _ = rollout_daily_progress_records(db, force=False)
-    return {"success": True, "message": "Field Entry deleted", "record_id": str(record_id).strip(), "summary": rollout_entry_summary(records)}
+    return {"success": True, "message": "Field Entry deleted", "record_id": str(record_id).strip(), "summary": rollout_entry_summary_from_db(request, db)}
 
 
 @app.get("/api/warehouse/rollout-source-check")
@@ -6906,9 +7064,13 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: S
             "sources": [],
             "source": "disabled",
         }
-    rows, _source = rollout_daily_progress_records(db, force=False)
-    rows = rollout_records_for_session(request, rows)
-    latest = max(rows, key=lambda row: str(row.get("entry time") or row.get("Date") or ""), default={})
+    query = rollout_record_query(request, db)
+    count = int(query.order_by(None).count())
+    latest = (
+        query.with_entities(RolloutRecord.record_id, RolloutRecord.date, RolloutRecord.entry_time)
+        .order_by(func.coalesce(func.nullif(func.trim(RolloutRecord.entry_time), ""), RolloutRecord.date).desc())
+        .first()
+    )
     return {
         "success": True,
         "checked_at": datetime.now(TRIPOLI_TZ).isoformat(),
@@ -6917,9 +7079,9 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: S
             {
                 "source": "supabase",
                 "ok": True,
-                "count": len(rows),
-                "latest_id": latest.get("ID") or latest.get("id") or "",
-                "latest_date": str(latest.get("Date") or latest.get("date") or "")[:10],
+                "count": count,
+                "latest_id": latest.record_id if latest else "",
+                "latest_date": str((latest.entry_time or latest.date) if latest else "")[:10],
             }
         ],
     }
@@ -9411,10 +9573,11 @@ def list_rollout_material_usage_details(
         "plasticcablestoringassembly": {"plasticcablestoringassembly", "itc2102p2"},
     }
     material_tokens = material_aliases.get(material_key, {material_key})
-    area_expression = rollout_sql_normalized(RolloutRecord.area)
-    material_expressions = (rollout_sql_normalized(RolloutRecord.material_type), rollout_sql_normalized(RolloutRecord.item))
+    dialect_name = db.get_bind().dialect.name
+    area_expression = rollout_sql_normalized(RolloutRecord.area, dialect_name)
+    material_expressions = (rollout_sql_normalized(RolloutRecord.material_type, dialect_name), rollout_sql_normalized(RolloutRecord.item, dialect_name))
     material_clauses = [expression.contains(token) for token in material_tokens for expression in material_expressions]
-    status_expression = rollout_sql_normalized(RolloutRecord.status)
+    status_expression = rollout_sql_normalized(RolloutRecord.status, dialect_name)
     query_rows = db.query(
         RolloutRecord.record_id,
         RolloutRecord.date,
@@ -9433,7 +9596,7 @@ def list_rollout_material_usage_details(
     user = current_user(request)
     if user.role.strip().lower() == "warehouse manager":
         scope = user.warehouse_name or user.name or user.username
-        query_rows = query_rows.filter(rollout_scope_sql_clause(scope))
+        query_rows = query_rows.filter(rollout_scope_sql_clause(scope, dialect_name))
     for record_id, record_date, record_area, xbox, material_type, item, actual_value, note_value in query_rows.all():
         record_material = str(material_type or item or "").strip()
         notes = str(note_value or "").strip()
