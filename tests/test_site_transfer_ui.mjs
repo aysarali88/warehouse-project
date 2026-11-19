@@ -323,6 +323,7 @@ test('requester cannot approve an unassigned request or reject without a reason'
 test('page keeps transfer controls hidden until readiness and restricts navigation to Admin', async () => {
   const html = await readFile(new URL('../static/materials_inventory.html', import.meta.url), 'utf8');
   const ui = await readFile(new URL('../static/site_transfer_ui.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../static/site_transfer_ui.css', import.meta.url), 'utf8');
   assert.match(html, /<button class="site-transfer-access hidden" data-view="siteTransfers">Site to Site Transfer<\/button>/);
   assert.match(html, /<section class="view site-transfer-view" id="siteTransfers">/);
   assert.match(html, /id="siteTransferApprover" required/);
@@ -331,6 +332,7 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(ui, /<th>Requested<\/th>/);
   assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
   assert.doesNotMatch(ui, /rowspan=/);
+  assert.match(css, /\.site-transfer-order-route\{[^}]*direction:ltr/);
   assert.match(html, /site-transfer-create-only hidden/);
   assert.match(html, /<div class="hidden" id="siteTransferWorkspace">/);
   assert.match(html, /id="siteTransferLines" class="site-transfer-lines"/);
