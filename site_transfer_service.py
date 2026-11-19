@@ -236,6 +236,7 @@ def _transfer_view(db, transfer: SiteTransfer) -> dict:
         "approval": ({
             "status": approval.status,
             "created_by_user_id": approval.created_by_user_id,
+            "created_by_role": approval.creator.role,
             "approver_user_id": approval.approver_user_id,
             "approver_name": approval.approver.name or approval.approver.username,
             "approver_username": approval.approver.username,

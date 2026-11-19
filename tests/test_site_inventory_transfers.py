@@ -308,6 +308,14 @@ class SiteTransferTests(unittest.TestCase):
             self.assertEqual(denied.exception.status_code, 403)
 
         request.state.current_user = SimpleNamespace(
+            id=7, role="Admin", program="FTTH", name="Admin",
+        )
+        with SessionLocal() as db:
+            with self.assertRaises(HTTPException) as denied_admin:
+                endpoint(transfer_id, payload, request, db)
+            self.assertEqual(denied_admin.exception.status_code, 403)
+
+        request.state.current_user = SimpleNamespace(
             id=self.manager_user_id, role="Requester", program="FTTH", name="Regional Manager",
         )
         with SessionLocal() as db:
@@ -678,7 +686,7 @@ class SiteTransferTests(unittest.TestCase):
             items=[site_transfer_api.TransferLineCreate(product_id=1, quantity=1, uom="M")],
             request_token="api-feature-disabled-token-0001",
         )
-        for role in (None, "Technician", "Warehouse Manager", "Management", "Approval"):
+        for role in (None, "Admin", "Technician", "Warehouse Manager", "Management", "Approval"):
             request = Request({"type": "http", "headers": [], "query_string": b""})
             if role:
                 request.state.current_user = SimpleNamespace(role=role, name=role, username=role.lower())
@@ -709,13 +717,74 @@ class SiteTransferTests(unittest.TestCase):
         dispatch_endpoint = next(route.endpoint for route in router.routes
                                   if route.path == "/api/warehouse/site-transfers/{transfer_id}/dispatch")
         dispatch_data = site_transfer_api.SiteTransferDispatchIn(
-            program="FTTH", request_token="requester-cannot-dispatch-token-001",
+            program="FTTH", request_token="requester-creator-dispatch-token-01",
         )
-        with patch.object(site_transfer_api, "dispatch_transfer") as dispatch:
+        receipt_endpoint = next(route.endpoint for route in router.routes
+                                if route.path == "/api/warehouse/site-transfers/{transfer_id}/receipts")
+        receipt_data = site_transfer_api.SiteTransferReceiptIn(
+            program="FTTH", request_token="requester-manager-receipt-token-01",
+            items=[site_transfer_api.TransferReceiptLine(transfer_item_id=51, quantity=1, uom="M")],
+        )
+        transfer_view = {
+            "id": 41,
+            "approval": {"created_by_user_id": 88, "created_by_role": "Requester", "approver_user_id": 101},
+        }
+        with patch.object(site_transfer_api, "get_transfer", return_value=transfer_view), \
+             patch.object(site_transfer_api, "dispatch_transfer", return_value=SimpleNamespace(id=41, program="FTTH")) as dispatch:
+            response = dispatch_endpoint(41, dispatch_data, requester_request, db)
+        self.assertTrue(response["success"])
+        dispatch.assert_called_once()
+
+        manager_request = Request({"type": "http", "headers": [], "query_string": b""})
+        manager_request.state.current_user = SimpleNamespace(
+            id=101, role="Requester", name="Regional Manager", username="manager", program="FTTH",
+        )
+        manager_request.state.session_program = "FTTH"
+        with patch.object(site_transfer_api, "get_transfer", return_value=transfer_view), \
+             patch.object(site_transfer_api, "dispatch_transfer") as dispatch:
             with self.assertRaises(HTTPException) as denied_dispatch:
-                dispatch_endpoint(41, dispatch_data, requester_request, db)
-            self.assertEqual(denied_dispatch.exception.status_code, 403)
-            dispatch.assert_not_called()
+                dispatch_endpoint(41, dispatch_data, manager_request, db)
+        self.assertEqual(denied_dispatch.exception.status_code, 403)
+        dispatch.assert_not_called()
+
+        legacy_admin_transfer = {
+            "id": 42,
+            "approval": {"created_by_user_id": 7, "created_by_role": "Admin", "approver_user_id": 101},
+        }
+        with patch.object(site_transfer_api, "get_transfer", return_value=legacy_admin_transfer), \
+             patch.object(site_transfer_api, "dispatch_transfer", return_value=SimpleNamespace(id=42, program="FTTH")) as dispatch:
+            response = dispatch_endpoint(42, dispatch_data, manager_request, db)
+        self.assertTrue(response["success"])
+        dispatch.assert_called_once()
+
+        with patch.object(site_transfer_api, "get_transfer", return_value=transfer_view), \
+             patch.object(site_transfer_api, "receive_transfer", return_value=SimpleNamespace(transfer_id=41)) as receive:
+            response = receipt_endpoint(41, receipt_data, manager_request, db)
+        self.assertTrue(response["success"])
+        receive.assert_called_once()
+
+        with patch.object(site_transfer_api, "get_transfer", return_value=transfer_view), \
+             patch.object(site_transfer_api, "receive_transfer") as receive:
+            with self.assertRaises(HTTPException) as denied_receipt:
+                receipt_endpoint(41, receipt_data, requester_request, db)
+        self.assertEqual(denied_receipt.exception.status_code, 403)
+        receive.assert_not_called()
+
+        admin_request = Request({"type": "http", "headers": [], "query_string": b""})
+        admin_request.state.current_user = SimpleNamespace(
+            id=7, role="Admin", name="Admin", username="admin", program="FTTH",
+        )
+        admin_request.state.session_program = "FTTH"
+        for endpoint, payload_value, service_name in (
+            (dispatch_endpoint, dispatch_data, "dispatch_transfer"),
+            (receipt_endpoint, receipt_data, "receive_transfer"),
+        ):
+            with self.subTest(endpoint=endpoint.__name__), \
+                 patch.object(site_transfer_api, service_name) as service:
+                with self.assertRaises(HTTPException) as denied_admin:
+                    endpoint(41, payload_value, admin_request, db)
+                self.assertEqual(denied_admin.exception.status_code, 403)
+                service.assert_not_called()
 
         dormant_router = site_transfer_api.build_site_transfer_router(
             lambda: None, normalize_program, main.require_roles, main.request_actor,
@@ -724,11 +793,14 @@ class SiteTransferTests(unittest.TestCase):
             route.endpoint for route in dormant_router.routes
             if route.path == "/api/warehouse/site-transfers" and "POST" in route.methods
         )
-        admin_request = Request({"type": "http", "headers": [], "query_string": b""})
-        admin_request.state.current_user = SimpleNamespace(role="Admin", name="Admin", username="admin")
+        dormant_requester = Request({"type": "http", "headers": [], "query_string": b""})
+        dormant_requester.state.current_user = SimpleNamespace(
+            id=88, role="Requester", name="Requester", username="requester", program="FTTH",
+        )
+        dormant_requester.state.session_program = "FTTH"
         with patch.dict(os.environ, {}, clear=True), patch.object(site_transfer_api, "create_transfer") as create:
             with self.assertRaises(HTTPException) as error:
-                dormant_endpoint(payload, admin_request, SimpleNamespace(begin=nullcontext))
+                dormant_endpoint(payload, dormant_requester, SimpleNamespace(begin=nullcontext))
             self.assertEqual(error.exception.status_code, 503)
             self.assertIn("Site-to-Site transfers are disabled", error.exception.detail)
             create.assert_not_called()
@@ -740,7 +812,7 @@ class SiteTransferTests(unittest.TestCase):
             self.assertTrue(site_transfer_api.site_transfer_enabled("FTTH", normalize_program))
             self.assertFalse(site_transfer_api.site_transfer_enabled("SINGLE_RAN", normalize_program))
 
-    def test_admin_write_off_does_not_block_transfer_actions_when_transfer_is_enabled(self):
+    def test_requester_transfer_workflow_does_not_require_admin_write_and_admin_cannot_participate(self):
         router = site_transfer_api.build_site_transfer_router(
             lambda: None, normalize_program, main.require_roles, main.request_actor,
             enabled_fn=lambda _program: True,
@@ -749,11 +821,21 @@ class SiteTransferTests(unittest.TestCase):
             route.path: route.endpoint for route in router.routes
             if "POST" in route.methods
         }
-        request = Request({"type": "http", "headers": [], "query_string": b""})
-        request.state.current_user = SimpleNamespace(
+        creator_request = Request({"type": "http", "headers": [], "query_string": b""})
+        creator_request.state.current_user = SimpleNamespace(
+            id=88, role="Requester", name="Creator", username="creator", program="FTTH",
+        )
+        creator_request.state.session_program = "FTTH"
+        manager_request = Request({"type": "http", "headers": [], "query_string": b""})
+        manager_request.state.current_user = SimpleNamespace(
+            id=101, role="Requester", name="Regional Manager", username="manager", program="FTTH",
+        )
+        manager_request.state.session_program = "FTTH"
+        admin_request = Request({"type": "http", "headers": [], "query_string": b""})
+        admin_request.state.current_user = SimpleNamespace(
             id=7, role="Admin", name="Admin", username="admin", program="FTTH",
         )
-        request.state.session_program = "FTTH"
+        admin_request.state.session_program = "FTTH"
         create_data = site_transfer_api.SiteTransferCreate(
             program="FTTH", from_site_id=1, to_site_id=2,
             approver_user_id=1,
@@ -777,33 +859,62 @@ class SiteTransferTests(unittest.TestCase):
             def order_by(self, *_args): return self
             def first(self): return None
 
-        cases = [
+        admin_create = endpoints["/api/warehouse/site-transfers"]
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "false"}, clear=True), \
+             patch.object(site_transfer_api, "create_transfer") as create:
+            with self.assertRaises(HTTPException) as denied:
+                admin_create(create_data, admin_request, SimpleNamespace(begin=nullcontext))
+            self.assertEqual(denied.exception.status_code, 403)
+            create.assert_not_called()
+
+        admin_approve = endpoints["/api/warehouse/site-transfers/{transfer_id}/approve"]
+        with patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "false"}, clear=True), \
+             patch.object(site_transfer_api, "decide_transfer_approval") as decide:
+            with self.assertRaises(HTTPException) as denied:
+                admin_approve(41, action_data, admin_request, SimpleNamespace(begin=nullcontext))
+            self.assertEqual(denied.exception.status_code, 403)
+            decide.assert_not_called()
+
+        transfer_view = {"id": 41, "approval": {"created_by_user_id": 88, "approver_user_id": 101}}
+        requester_cases = [
             ("/api/warehouse/site-transfers", create_data, "create_transfer",
-             lambda endpoint, db, data: endpoint(data, request, db), SimpleNamespace(id=41, program="FTTH")),
-            ("/api/warehouse/site-transfers/{transfer_id}/approve", action_data, "approve_transfer",
-             lambda endpoint, db, data: endpoint(41, data, request, db), SimpleNamespace(id=41, program="FTTH")),
+             lambda endpoint, db, data: endpoint(data, creator_request, db), SimpleNamespace(id=41, program="FTTH")),
+            ("/api/warehouse/site-transfers/{transfer_id}/approve", action_data, "decide_transfer_approval",
+             lambda endpoint, db, data: endpoint(41, data, manager_request, db), SimpleNamespace(id=41, program="FTTH")),
             ("/api/warehouse/site-transfers/{transfer_id}/dispatch", dispatch_data, "dispatch_transfer",
-             lambda endpoint, db, data: endpoint(41, data, request, db), SimpleNamespace(id=41, program="FTTH")),
+             lambda endpoint, db, data: endpoint(41, data, creator_request, db), SimpleNamespace(id=41, program="FTTH")),
             ("/api/warehouse/site-transfers/{transfer_id}/receipts", receipt_data, "receive_transfer",
-             lambda endpoint, db, data: endpoint(41, data, request, db), SimpleNamespace(transfer_id=41)),
-            ("/api/warehouse/site-transfers/{transfer_id}/corrections/receipts/{receipt_item_id}/reverse",
-             correction_data, "reverse_transfer_receipt",
-             lambda endpoint, db, data: endpoint(41, 51, data, request, db), SimpleNamespace(id=61, program="FTTH")),
-            ("/api/warehouse/site-transfers/{transfer_id}/corrections/dispatch/reverse",
-             correction_data, "reverse_transfer_dispatch",
-             lambda endpoint, db, data: endpoint(41, data, request, db), SimpleNamespace(id=62, program="FTTH")),
+             lambda endpoint, db, data: endpoint(41, data, manager_request, db), SimpleNamespace(transfer_id=41)),
         ]
-        for path, data, service_name, invoke, result in cases:
+        for path, data, service_name, invoke, result in requester_cases:
             begin_calls = []
             db = SimpleNamespace(begin=lambda: begin_calls.append(True) or nullcontext(), query=lambda *_: QueryStub())
             with self.subTest(path=path), \
                  patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "false"}, clear=True), \
                  patch.object(site_transfer_api, service_name, return_value=result) as service, \
-                 patch.object(site_transfer_api, "get_transfer", return_value={"id": 41}):
+                 patch.object(site_transfer_api, "get_transfer", return_value=transfer_view):
                 response = invoke(endpoints[path], db, data)
                 self.assertTrue(response["success"])
                 service.assert_called_once()
                 self.assertEqual(begin_calls, [True])
+
+        admin_correction_cases = [
+            ("/api/warehouse/site-transfers/{transfer_id}/corrections/receipts/{receipt_item_id}/reverse",
+             lambda db: endpoints["/api/warehouse/site-transfers/{transfer_id}/corrections/receipts/{receipt_item_id}/reverse"](
+                 41, 51, correction_data, admin_request, db), "reverse_transfer_receipt", SimpleNamespace(id=61, program="FTTH")),
+            ("/api/warehouse/site-transfers/{transfer_id}/corrections/dispatch/reverse",
+             lambda db: endpoints["/api/warehouse/site-transfers/{transfer_id}/corrections/dispatch/reverse"](
+                 41, correction_data, admin_request, db), "reverse_transfer_dispatch", SimpleNamespace(id=62, program="FTTH")),
+        ]
+        for path, invoke, service_name, result in admin_correction_cases:
+            db = SimpleNamespace(begin=lambda: nullcontext(), query=lambda *_: QueryStub())
+            with self.subTest(path=path), \
+                 patch.dict(os.environ, {"SITE_INVENTORY_ADMIN_WRITE_ENABLED": "false"}, clear=True), \
+                 patch.object(site_transfer_api, service_name, return_value=result) as service, \
+                 patch.object(site_transfer_api, "get_transfer", return_value=transfer_view):
+                response = invoke(db)
+                self.assertTrue(response["success"])
+                service.assert_called_once()
 
 
 if __name__ == "__main__":

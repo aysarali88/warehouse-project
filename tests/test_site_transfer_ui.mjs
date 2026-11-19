@@ -116,7 +116,7 @@ function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creato
   return { api, calls, transfer, get createCount() { return createCount; } };
 }
 
-async function readyController(api, { isAdmin = () => true, isRequester = () => false, getUserId = () => 0, confirm } = {}) {
+async function readyController(api, { isAdmin = () => false, isRequester = () => true, getUserId = () => 7, confirm } = {}) {
   const controller = SiteTransferUI.createController({
     api,
     getProgram: () => 'FTTH',
@@ -127,7 +127,7 @@ async function readyController(api, { isAdmin = () => true, isRequester = () => 
     onChange() {},
   });
   await controller.open();
-  if (isAdmin()) {
+  if (isRequester()) {
     await controller.updateForm('fromSiteId', '7');
     await controller.updateForm('toSiteId', '9');
     await controller.updateForm('approverUserId', '101');
@@ -136,7 +136,7 @@ async function readyController(api, { isAdmin = () => true, isRequester = () => 
   return controller;
 }
 
-async function readyRequesterController(api, userId = 101) {
+async function readyRequesterController(api, userId = 101, { confirm } = {}) {
   const scopedApi = async (url, options) => {
     const data = await api(url, options);
     const parsed = new URL(url, 'https://warehouse.test');
@@ -152,6 +152,7 @@ async function readyRequesterController(api, userId = 101) {
     isAdmin: () => false,
     isRequester: () => true,
     getUserId: () => userId,
+    confirm,
   });
 }
 
@@ -167,9 +168,13 @@ test('transfer validation rejects same site, excess quantity, and unknown free-t
 
 test('create, approve, dispatch, and repeated partial receipts follow backend status transitions', async () => {
   const mock = makeApi();
-  const controller = await readyController(mock.api);
+  const controller = await readyRequesterController(mock.api, 7);
+  await controller.updateForm('fromSiteId', '7');
+  await controller.updateForm('toSiteId', '9');
+  await controller.updateForm('approverUserId', '101');
   const line = controller.state.form.lines[0];
   assert.equal(line.availableQty, '100');
+  await controller.updateLine(line.id, 'productId', '31');
   await controller.updateLine(line.id, 'quantity', '30');
   assert.equal(await controller.createTransfer({ reference: 'REQ-1', notes: 'Stage 1' }), true);
   assert.equal(controller.state.message, 'Transfer request #41 submitted to Regional Manager for approval.');
@@ -181,17 +186,18 @@ test('create, approve, dispatch, and repeated partial receipts follow backend st
   await controller.loadPage(1);
   assert.ok(await controller.dispatch(41));
   assert.equal(controller.state.transfers[0].status, 'in_transit');
+  await manager.loadPage(1);
 
   for (const [quantity, expectedStatus, expectedRemaining] of [
     ['5', 'partially_received', '25'],
     ['10', 'partially_received', '15'],
     ['15', 'received', '0'],
   ]) {
-    const row = controller.state.transfers[0];
-    assert.equal(controller.openReceipt(41, 51), true);
-    await controller.receive({ ...controller.state.receipt, quantity, reference: 'RCV-1', notes: 'Received at site' });
-    assert.equal(controller.state.transfers[0].status, expectedStatus);
-    assert.equal(controller.state.transfers[0].items[0].in_transit_qty, expectedRemaining);
+    const row = manager.state.transfers[0];
+    assert.equal(manager.openReceipt(41, 51), true);
+    await manager.receive({ ...manager.state.receipt, quantity, reference: 'RCV-1', notes: 'Received at site' });
+    assert.equal(manager.state.transfers[0].status, expectedStatus);
+    assert.equal(manager.state.transfers[0].items[0].in_transit_qty, expectedRemaining);
     assert.equal(row.id, 41);
   }
 
@@ -204,23 +210,30 @@ test('create, approve, dispatch, and repeated partial receipts follow backend st
   assert.equal(create.body.approver_user_id, 101);
 });
 
-test('Admin can confirm Receive All as one receipt for every remaining material', async () => {
+test('assigned Requester can confirm Receive All as one receipt for every remaining material', async () => {
   const mock = makeApi();
   const confirmations = [];
-  const controller = await readyController(mock.api, {
+  const creator = await readyRequesterController(mock.api, 7);
+  await creator.updateForm('fromSiteId', '7');
+  await creator.updateForm('toSiteId', '9');
+  await creator.updateForm('approverUserId', '101');
+  const first = creator.state.form.lines[0];
+  await creator.updateLine(first.id, 'productId', '31');
+  await creator.updateLine(first.id, 'quantity', '40');
+  creator.addLine();
+  const second = creator.state.form.lines[1];
+  await creator.updateLine(second.id, 'productId', '32');
+  await creator.updateLine(second.id, 'quantity', '20');
+  assert.equal(await creator.createTransfer(), true);
+  const manager = await readyRequesterController(mock.api, 101, {
     confirm: message => { confirmations.push(message); return true; },
   });
-  const first = controller.state.form.lines[0];
-  await controller.updateLine(first.id, 'quantity', '40');
-  controller.addLine();
-  const second = controller.state.form.lines[1];
-  await controller.updateLine(second.id, 'productId', '32');
-  await controller.updateLine(second.id, 'quantity', '20');
-  assert.equal(await controller.createTransfer(), true);
-  assert.ok(await controller.approve(41));
-  assert.ok(await controller.dispatch(41));
+  assert.ok(await manager.approve(41));
+  await creator.loadPage(1);
+  assert.ok(await creator.dispatch(41));
+  await manager.loadPage(1);
 
-  assert.equal(await controller.receiveAll(41), true);
+  assert.equal(await manager.receiveAll(41), true);
   const receipts = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/41/receipts'));
   assert.equal(receipts.length, 1);
   assert.deepEqual(receipts[0].body.items, [
@@ -228,27 +241,58 @@ test('Admin can confirm Receive All as one receipt for every remaining material'
     { transfer_item_id: 52, quantity: '20', uom: 'PCS' },
   ]);
   assert.match(confirmations[0], /all 2 remaining materials as received at South Site for transfer #41/i);
-  assert.equal(controller.state.transfers[0].status, 'received');
-  assert.deepEqual(controller.state.transfers[0].items.map(item => item.received_qty), ['40', '20']);
+  assert.equal(manager.state.transfers[0].status, 'received');
+  assert.deepEqual(manager.state.transfers[0].items.map(item => item.received_qty), ['40', '20']);
 });
 
 test('Receive All cancellation and requester access send no receipt writes', async () => {
   const mock = makeApi();
-  const controller = await readyController(mock.api, { confirm: () => false });
+  const controller = await readyRequesterController(mock.api, 101, { confirm: () => false });
   controller.state.transfers.push({
-    id: 41, status: 'in_transit',
+    id: 41, status: 'in_transit', approval: { approver_user_id: 101 },
     items: [{ id: 51, uom: 'M', in_transit_qty: '4' }],
   });
   assert.equal(await controller.receiveAll(41), false);
   assert.equal(mock.calls.some(call => call.method === 'POST' && call.path.endsWith('/receipts')), false);
 
-  const requester = await readyRequesterController(mock.api);
+  const requester = await readyRequesterController(mock.api, 202);
   requester.state.transfers.push({
-    id: 41, status: 'in_transit',
+    id: 41, status: 'in_transit', approval: { approver_user_id: 101 },
     items: [{ id: 51, uom: 'M', in_transit_qty: '4' }],
   });
   assert.equal(await requester.receiveAll(41), false);
   assert.equal(mock.calls.some(call => call.method === 'POST' && call.path.endsWith('/receipts')), false);
+});
+
+test('Admin cannot dispatch or receive a requester-managed transfer', async () => {
+  const mock = makeApi();
+  const admin = await readyController(mock.api, { isAdmin: () => true, isRequester: () => false });
+  admin.state.transfers.push({
+    id: 41,
+    status: 'draft',
+    approval: { status: 'pending', created_by_user_id: 7, approver_user_id: 101 },
+    items: [{ id: 51, uom: 'M', in_transit_qty: '4' }],
+  });
+  assert.equal(await admin.createTransfer(), false);
+  assert.equal(await admin.approve(41), false);
+  assert.equal(await admin.dispatch(41), false);
+  assert.equal(admin.openReceipt(41, 51), false);
+  assert.equal(await admin.receiveAll(41), false);
+  assert.equal(mock.calls.some(call => call.method === 'POST'), false);
+});
+
+test('assigned Requester can dispatch an approved legacy Admin-created request', async () => {
+  const mock = makeApi();
+  const originalRequester = await readyRequesterController(mock.api, 7);
+  await originalRequester.updateLine(originalRequester.state.form.lines[0].id, 'quantity', '2');
+  assert.equal(await originalRequester.createTransfer(), true);
+  mock.transfer.approval.created_by_user_id = 1;
+  mock.transfer.approval.created_by_role = 'Admin';
+  mock.transfer.status = 'approved';
+
+  const assignedManager = await readyRequesterController(mock.api, 101);
+  assert.ok(await assignedManager.dispatch(41));
+  assert.equal(mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/dispatch')).length, 1);
 });
 
 test('one transfer can contain multiple materials with independent UOM and available quantities', async () => {
@@ -317,9 +361,9 @@ test('feature-disabled response leaves the UI gated and sends no write requests'
 
 test('selected Requester receives only assigned transfers and can approve or reject with a note', async () => {
   const mock = makeApi();
-  const admin = await readyController(mock.api);
-  await admin.updateLine(admin.state.form.lines[0].id, 'quantity', '5');
-  assert.equal(await admin.createTransfer(), true);
+  const creator = await readyRequesterController(mock.api, 7);
+  await creator.updateLine(creator.state.form.lines[0].id, 'quantity', '5');
+  assert.equal(await creator.createTransfer(), true);
 
   const otherManager = await readyRequesterController(mock.api, 202);
   assert.equal(otherManager.state.transfers.length, 0);
@@ -357,9 +401,9 @@ test('Requester can submit a request to another manager but cannot dispatch or r
 
 test('requester cannot approve an unassigned request or reject without a reason', async () => {
   const mock = makeApi();
-  const admin = await readyController(mock.api);
-  await admin.updateLine(admin.state.form.lines[0].id, 'quantity', '5');
-  assert.equal(await admin.createTransfer(), true);
+  const creator = await readyRequesterController(mock.api, 7);
+  await creator.updateLine(creator.state.form.lines[0].id, 'quantity', '5');
+  assert.equal(await creator.createTransfer(), true);
   const otherRequester = await readyRequesterController(mock.api, 202);
   assert.equal(await otherRequester.approve(41), false);
   const assignedRequester = await readyRequesterController(mock.api, 101);
@@ -400,7 +444,7 @@ test('transfer history renders one compact card per request and preserves reques
       status: 'draft',
       created_by: 'Aysar',
       created_at: '2026-11-18T08:00:00Z',
-      approval: { status: 'pending', approver_user_id: 101, approver_name: 'Regional Manager' },
+      approval: { status: 'pending', created_by_user_id: 7, approver_user_id: 101, approver_name: 'Regional Manager' },
       items: [
         { id: 51, product: 'Fiber Cable', sku: 'MAT-31', uom: 'M', requested_qty: '2', sent_qty: '0', received_qty: '0', in_transit_qty: '0' },
         { id: 52, product: 'Hub Box', sku: 'MAT-32', uom: 'PCS', requested_qty: '1', sent_qty: '0', received_qty: '0', in_transit_qty: '0' },
@@ -413,6 +457,7 @@ test('transfer history renders one compact card per request and preserves reques
       status: 'approved',
       created_by: 'Nadeer',
       created_at: '2026-11-18T09:00:00Z',
+      approval: { status: 'approved', created_by_user_id: 7, approver_user_id: 101 },
       items: [{ id: 53, product: 'Fiber Cable', sku: 'MAT-31', uom: 'M', requested_qty: '5', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }],
     },
     {
@@ -422,23 +467,45 @@ test('transfer history renders one compact card per request and preserves reques
       status: 'in_transit',
       created_by: 'Aysar',
       created_at: '2026-11-18T10:00:00Z',
+      approval: { status: 'approved', created_by_user_id: 7, approver_user_id: 101 },
       items: [{ id: 54, product: 'Hub Box', sku: 'MAT-32', uom: 'PCS', requested_qty: '3', sent_qty: '3', received_qty: '0', in_transit_qty: '3' }],
     },
+    {
+      id: 44,
+      from_site: 'Ras Ali',
+      to_site: 'Rwaisat',
+      status: 'approved',
+      created_by: 'Admin',
+      created_at: '2026-11-18T11:00:00Z',
+      approval: { status: 'approved', created_by_user_id: 1, created_by_role: 'Admin', approver_user_id: 101 },
+      items: [{ id: 55, product: 'Fiber Cable', sku: 'MAT-31', uom: 'M', requested_qty: '1', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }],
+    },
   ];
-  const html = SiteTransferUI.renderTransferOrders(transfers, { isAdmin: () => true });
+  const managerHtml = SiteTransferUI.renderTransferOrders(transfers, {
+    isRequester: () => true,
+    getUserId: () => 101,
+  });
+  const creatorHtml = SiteTransferUI.renderTransferOrders([transfers[1]], {
+    isRequester: () => true,
+    getUserId: () => 7,
+  });
+  const adminHtml = SiteTransferUI.renderTransferOrders(transfers, { isAdmin: () => true });
 
-  assert.equal((html.match(/class="site-transfer-order"/g) || []).length, 3);
-  assert.equal((html.match(/Transfer #41/g) || []).length, 1);
-  assert.equal((html.match(/Transfer #42/g) || []).length, 1);
-  assert.equal((html.match(/Transfer #43/g) || []).length, 1);
-  assert.equal((html.match(/<details class="site-transfer-order-details">/g) || []).length, 3);
-  assert.match(html, /Awaiting Regional Manager/);
-  assert.match(html, /data-site-transfer-action="dispatch" data-transfer-id="42"/);
-  assert.match(html, /data-site-transfer-action="receive" data-transfer-id="43" data-item-id="54"/);
-  assert.match(html, /data-site-transfer-action="receive-all" data-transfer-id="43">Receive All \(1\)<\/button>/);
-  assert.match(html, /Fiber Cable/);
-  assert.match(html, /Hub Box/);
-  assert.doesNotMatch(html, /rowspan=/);
+  assert.equal((managerHtml.match(/class="site-transfer-order"/g) || []).length, 4);
+  assert.equal((managerHtml.match(/Transfer #41/g) || []).length, 1);
+  assert.equal((managerHtml.match(/Transfer #42/g) || []).length, 1);
+  assert.equal((managerHtml.match(/Transfer #43/g) || []).length, 1);
+  assert.equal((managerHtml.match(/Transfer #44/g) || []).length, 1);
+  assert.equal((managerHtml.match(/<details class="site-transfer-order-details">/g) || []).length, 4);
+  assert.match(managerHtml, /data-site-transfer-action="approve" data-transfer-id="41"/);
+  assert.match(creatorHtml, /data-site-transfer-action="dispatch" data-transfer-id="42"/);
+  assert.match(managerHtml, /data-site-transfer-action="receive" data-transfer-id="43" data-item-id="54"/);
+  assert.match(managerHtml, /data-site-transfer-action="receive-all" data-transfer-id="43">Receive All \(1\)<\/button>/);
+  assert.match(managerHtml, /data-site-transfer-action="dispatch" data-transfer-id="44"/);
+  assert.match(managerHtml, /Fiber Cable/);
+  assert.match(managerHtml, /Hub Box/);
+  assert.doesNotMatch(managerHtml + creatorHtml, /rowspan=/);
+  assert.doesNotMatch(adminHtml, /data-site-transfer-action="(approve|reject|dispatch|receive|receive-all)"/);
 });
 
 test('same-site and excessive transfer quantities are rejected before create request', async () => {

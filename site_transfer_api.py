@@ -1,4 +1,4 @@
-"""Admin-managed Site-to-Site transfers with assigned Requester approval."""
+"""Requester-managed Site-to-Site transfers with assigned regional approval."""
 
 from decimal import Decimal
 
@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from models import SiteMaterialMovement, SiteTransferApproval
 from site_inventory_config import integration_enabled
 from site_transfer_service import (
-    approve_transfer,
     create_transfer,
     decide_transfer_approval,
     dispatch_transfer,
@@ -101,9 +100,37 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
             )
         return user
 
+    def authorize_requester_program(request: Request, program: str):
+        user = require_roles_fn(request, "Requester")
+        program_key = normalize_program_fn(program)
+        session_program = normalize_program_fn(getattr(request.state, "session_program", getattr(user, "program", "")))
+        if program_key != session_program or normalize_program_fn(getattr(user, "program", program_key)) != program_key:
+            raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
+        if not gate(program_key):
+            raise HTTPException(
+                status_code=503,
+                detail="Site-to-Site transfers are disabled until Site Inventory cutover is explicitly enabled for this program",
+            )
+        return user, program_key
+
+    def authorize_requester_transfer_party(request: Request, program: str, transfer_id: int,
+                                          participant_field: str, action_label: str, db: Session):
+        user, program_key = authorize_requester_program(request, program)
+        transfer = get_transfer(db, transfer_id, program_key, requester_user_id=int(user.id))
+        approval = transfer.get("approval") or {}
+        is_assigned_participant = int(approval.get(participant_field) or 0) == int(user.id)
+        legacy_admin_creator_dispatch = (
+            participant_field == "created_by_user_id"
+            and str(approval.get("created_by_role") or "").strip().lower() == "admin"
+            and int(approval.get("approver_user_id") or 0) == int(user.id)
+        )
+        if not is_assigned_participant and not legacy_admin_creator_dispatch:
+            raise HTTPException(status_code=403, detail=f"Only the assigned requester can {action_label} this transfer")
+        return user
+
     @router.post("/api/warehouse/site-transfers")
     def site_transfer_create(data: SiteTransferCreate, request: Request, db: Session = Depends(db_dependency)):
-        authorize_view(request, data.program)
+        user, _program_key = authorize_requester_program(request, data.program)
         actor = actor_fn(request)
         try:
             with db.begin():
@@ -114,7 +141,7 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
                     to_site_id=data.to_site_id,
                     items=[item.dict() for item in data.items],
                     approver_user_id=data.approver_user_id,
-                    actor_user_id=int(request.state.current_user.id),
+                    actor_user_id=int(user.id),
                     reference=data.reference,
                     notes=data.notes,
                     actor=actor,
@@ -184,23 +211,14 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        user = require_roles_fn(request, "Admin", "Requester")
-        program_key = normalize_program_fn(data.program)
-        session_program = normalize_program_fn(getattr(request.state, "session_program", getattr(user, "program", "")))
-        if program_key != session_program or normalize_program_fn(getattr(user, "program", program_key)) != program_key:
-            raise HTTPException(status_code=403, detail="This transfer belongs to a different program")
-        if not gate(program_key):
-            raise HTTPException(status_code=503, detail="Site-to-Site transfers are disabled for this program")
+        user, _program_key = authorize_requester_program(request, data.program)
         actor = actor_fn(request)
         try:
             with db.begin():
-                if str(user.role or "").strip().lower() == "requester":
-                    row = decide_transfer_approval(
-                        db, transfer_id, data.program, user_id=int(user.id), actor=actor,
-                        decision="approved", note=data.note,
-                    )
-                else:
-                    row = approve_transfer(db, transfer_id, data.program, actor)
+                row = decide_transfer_approval(
+                    db, transfer_id, data.program, user_id=int(user.id), actor=actor,
+                    decision="approved", note=data.note,
+                )
             return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
         except IntegrityError as exc:
             raise HTTPException(status_code=409, detail="Transfer changed concurrently; reload and retry") from exc
@@ -237,7 +255,10 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_gate(request, data.program)
+        authorize_requester_transfer_party(
+            request, data.program, transfer_id, "created_by_user_id", "dispatch", db,
+        )
+        actor = actor_fn(request)
         try:
             with db.begin():
                 row = dispatch_transfer(db, transfer_id, data.program, actor, data.request_token)
@@ -252,7 +273,10 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        actor = authorize_and_gate(request, data.program)
+        authorize_requester_transfer_party(
+            request, data.program, transfer_id, "approver_user_id", "receive", db,
+        )
+        actor = actor_fn(request)
         try:
             with db.begin():
                 receipt = receive_transfer(
