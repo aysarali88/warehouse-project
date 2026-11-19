@@ -8086,6 +8086,65 @@ def rollout_material_usage_aggregate_rows(db: Session) -> tuple[list[dict], int]
     ], count)
 
 
+SITE_TRANSFER_USAGE_EVENTS = (
+    "site_transfer_dispatched",
+    "site_transfer_dispatch_reversed",
+    "site_transfer_received",
+    "site_transfer_receipt_reversed",
+)
+SITE_TRANSFER_OUT_EVENTS = frozenset({
+    "site_transfer_dispatched",
+    "site_transfer_dispatch_reversed",
+})
+
+
+def site_transfer_usage_aggregate_rows(db: Session, program: str, site_ids=None) -> list[dict]:
+    """Return net approved transfer movements grouped by numeric site/product and event."""
+    program_key = normalize_program(program)
+    query = (
+        db.query(
+            SiteMaterialMovement.site_id,
+            SiteMaterialMovement.product_id,
+            Site.name.label("site_name"),
+            Product.name.label("product_name"),
+            Product.sku.label("sku"),
+            Product.unit.label("uom"),
+            SiteMaterialMovement.event_type,
+            func.sum(SiteMaterialMovement.quantity_delta).label("quantity_delta"),
+        )
+        .join(Site, Site.id == SiteMaterialMovement.site_id)
+        .join(Product, Product.id == SiteMaterialMovement.product_id)
+        .filter(
+            SiteMaterialMovement.program == program_key,
+            Site.program == program_key,
+            Product.program == program_key,
+            SiteMaterialMovement.status == "approved",
+            SiteMaterialMovement.event_type.in_(SITE_TRANSFER_USAGE_EVENTS),
+        )
+    )
+    if site_ids is not None:
+        query = query.filter(SiteMaterialMovement.site_id.in_(site_ids or {-1}))
+    rows = query.group_by(
+        SiteMaterialMovement.site_id,
+        SiteMaterialMovement.product_id,
+        Site.name,
+        Product.name,
+        Product.sku,
+        Product.unit,
+        SiteMaterialMovement.event_type,
+    ).all()
+    return [{
+        "site_id": row.site_id,
+        "product_id": row.product_id,
+        "site": row.site_name or "",
+        "material": material_display_name(row.product_name, row.sku),
+        "sku": row.sku or "",
+        "uom": row.uom or "PCS",
+        "event_type": row.event_type,
+        "quantity_delta": row.quantity_delta or 0,
+    } for row in rows]
+
+
 @app.get("/api/warehouse/stock-usage")
 def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
@@ -9366,6 +9425,8 @@ def build_open_field_site_inventory_snapshot(db: Session, request: Request, prog
             "issued": Decimal("0"),
             "rollout": Decimal("0"),
             "returned": Decimal("0"),
+            "transferred_in": Decimal("0"),
+            "transferred_out": Decimal("0"),
             "source_product_ids": set(),
             "source_uoms": set(),
             "rollout_present": False,
@@ -9449,6 +9510,47 @@ def build_open_field_site_inventory_snapshot(db: Session, request: Request, prog
             continue
         add_source(raw_area, material, actual, "rollout")
 
+    for movement in site_transfer_usage_aggregate_rows(db, program_key, active_ids):
+        product = products_by_id.get(movement["product_id"])
+        material = movement["material"] or (product.sku if product else "")
+        material_key = canonical_material_key(material)
+        site_id = movement["site_id"]
+        if product is None or product.program != program_key:
+            blockers.append({
+                "type": "invalid_transfer_product",
+                "site_id": site_id,
+                "product_id": movement["product_id"],
+            })
+            continue
+        if not material_key:
+            blockers.append({
+                "type": "unmapped_transfer_material",
+                "site_id": site_id,
+                "product_id": product.id,
+                "material": material,
+            })
+            continue
+        key = (site_id, material_key)
+        group = groups.setdefault(key, {
+            "site_id": site_id,
+            "material_key": material_key,
+            "issued": Decimal("0"),
+            "rollout": Decimal("0"),
+            "returned": Decimal("0"),
+            "transferred_in": Decimal("0"),
+            "transferred_out": Decimal("0"),
+            "source_product_ids": set(),
+            "source_uoms": set(),
+            "rollout_present": False,
+        })
+        group["source_product_ids"].add(product.id)
+        group["source_uoms"].add(str(movement["uom"] or "").strip().upper())
+        quantity_delta = _open_field_decimal(movement["quantity_delta"])
+        if movement["event_type"] in SITE_TRANSFER_OUT_EVENTS:
+            group["transferred_out"] += -quantity_delta
+        else:
+            group["transferred_in"] += quantity_delta
+
     targets: dict[tuple[int, int], dict] = {}
     for (site_id, material_key), group in groups.items():
         source_ids = set(group["source_product_ids"])
@@ -9498,12 +9600,18 @@ def build_open_field_site_inventory_snapshot(db: Session, request: Request, prog
         row = targets.setdefault(pair, {
             "site_id": site_id, "product_id": product_id, "uom": expected_uom,
             "issued": Decimal("0"), "rollout": Decimal("0"),
-            "returned": Decimal("0"), "target": Decimal("0"),
+            "returned": Decimal("0"), "transferred_in": Decimal("0"),
+            "transferred_out": Decimal("0"), "target": Decimal("0"),
         })
         row["issued"] += group["issued"]
         row["rollout"] += group["rollout"]
         row["returned"] += group["returned"]
-        row["target"] += group["issued"] - group["rollout"] - group["returned"]
+        row["transferred_in"] += group["transferred_in"]
+        row["transferred_out"] += group["transferred_out"]
+        row["target"] += (
+            group["issued"] - group["rollout"] - group["returned"]
+            + group["transferred_in"] - group["transferred_out"]
+        )
 
     site_by_id = {site.id: site for site in active_sites}
     ledger_rows = db.query(
@@ -9562,6 +9670,8 @@ def build_open_field_site_inventory_snapshot(db: Session, request: Request, prog
             "mr_issued_qty": targets.get((site_id, product_id), {}).get("issued", Decimal("0")),
             "rollout_actual_qty": targets.get((site_id, product_id), {}).get("rollout", Decimal("0")),
             "confirmed_return_qty": targets.get((site_id, product_id), {}).get("returned", Decimal("0")),
+            "transferred_in_qty": targets.get((site_id, product_id), {}).get("transferred_in", Decimal("0")),
+            "transferred_out_qty": targets.get((site_id, product_id), {}).get("transferred_out", Decimal("0")),
             "open_in_field_qty": target,
             "ledger_qty": ledger_qty,
             "balance_qty": balance_qty,
@@ -9714,6 +9824,8 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
                 "mr_issued_qty": 0.0,
                 "rollout_used_qty": 0.0,
                 "returned_qty": 0.0,
+                "transferred_in_qty": 0.0,
+                "transferred_out_qty": 0.0,
                 "warehouses": set(),
             }
         row = grouped[key]
@@ -9784,16 +9896,31 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
             continue
         usage_row(area, material_key, material)["rollout_used_qty"] += actual
 
+    for movement in site_transfer_usage_aggregate_rows(db, program_key):
+        area = canonical_rollout_usage_area(movement["site"])
+        material = movement["material"] or movement["sku"]
+        material_key = canonical_material_key(material)
+        if not area or not material_key:
+            continue
+        row = usage_row(area, material_key, material, movement["sku"])
+        quantity_delta = safe_float(movement["quantity_delta"])
+        if movement["event_type"] in SITE_TRANSFER_OUT_EVENTS:
+            row["transferred_out_qty"] += -quantity_delta
+        else:
+            row["transferred_in_qty"] += quantity_delta
+
     rows = []
     for row in grouped.values():
         issued = float(row["mr_issued_qty"] or 0)
         installed = float(row["rollout_used_qty"] or 0)
         returned = float(row["returned_qty"] or 0)
-        difference = issued - installed - returned
-        net_issued = issued - returned
+        transferred_in = float(row["transferred_in_qty"] or 0)
+        transferred_out = float(row["transferred_out_qty"] or 0)
+        difference = issued + transferred_in - installed - returned - transferred_out
+        net_available = issued + transferred_in - returned - transferred_out
         if difference < 0:
             usage_match = "over_mr"
-        elif installed or returned:
+        elif installed or returned or transferred_in or transferred_out:
             usage_match = "area"
         else:
             usage_match = "none"
@@ -9806,9 +9933,11 @@ def list_rollout_material_usage(request: Request, db: Session = Depends(db_sessi
                 "mr_issued_qty": issued,
                 "rollout_used_qty": installed,
                 "returned_qty": returned,
+                "transferred_in_qty": transferred_in,
+                "transferred_out_qty": transferred_out,
                 "rollout_actual_qty": installed,
                 "remaining_after_rollout": difference,
-                "usage_percent": (installed / net_issued * 100) if net_issued > 0 else 0,
+                "usage_percent": (installed / net_available * 100) if net_available > 0 else 0,
                 "usage_match": usage_match,
             }
         )
