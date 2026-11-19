@@ -3504,6 +3504,21 @@ function rolloutCityOverviewStatus(metric,asOf){
   return{key:'on-track',label:'On track',detail:gap<-.10?'Ahead of plan':'On time'};
 }
 function rolloutCityCompactDate(value){if(!value)return'—';const date=new Date(`${value}T00:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}
+function rolloutDashboardProductivityScore(metric,target){
+  const targetCable=Math.max(Number(target?.cableMeters||0),1),targetBoxes=Math.max(Number(target?.totalBoxes||0),1);
+  const cablePct=Math.min(100,(Number(metric.cableMeters||0)/targetCable)*100),boxPct=Math.min(100,(Number(metric.totalBoxes||0)/targetBoxes)*100);
+  return{cablePct,boxPct,productivity:cablePct*.8+boxPct*.2};
+}
+function rolloutDashboardAreaMetric(city,area,rows){
+  const areaRows=rolloutDashboardMetricRows((rows||[]).filter(row=>sameRolloutDashboardArea(row.Area||row.area,area)),area);
+  const raw=rolloutMetricFromRows(areaRows),mapCable=rolloutMapCableProgressMetric(area,areaRows),target=rolloutTargetFor(city,area),plan=rolloutPlanFor(city,area)||{};
+  const metric={...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters};
+  applyRolloutDashboardMetricOverrides(metric,plan);
+  const isMapCableTarget=canonicalRolloutArea(area)!=='awladbaeoo'&&!isMaqawbaRolloutArea(area)&&plan.dashboardCableTargetOverride===undefined;
+  const cableTarget=isMapCableTarget&&mapCable?mapCable.targetMeters:target.cableMeters;
+  const finalTarget={...target,cableMeters:cableTarget};
+  return{...metric,plan,target:finalTarget,...rolloutDashboardProductivityScore(metric,finalTarget)};
+}
 async function refreshRolloutCityRanking(showToast=false,force=false){
   if(isSingleRan()){rolloutCityRankingState={...rolloutCityRankingState,records:[],loaded:true,loading:false,error:''};renderRolloutCityOverview();return}
   const program=normalizeProgram(currentProgram||'FTTH');
@@ -3527,17 +3542,19 @@ async function refreshRolloutCityRanking(showToast=false,force=false){
   return promise;
 }
 function rolloutCityOverviewMetricFromSummary(city,area,summary){
-  const row=summary||{},plan=rolloutPlanFor(city,area)||{},isMaqawba=isMaqawbaRolloutArea(area);
+  const row=summary||{},plan=rolloutPlanFor(city,area)||{},mapCable=Boolean(row.map_cable_progress_available);
+  const usesMapCable=isMaqawbaRolloutArea(area)||canonicalRolloutArea(area)==='awladbaeoo';
   const metric={
-    cableMeters:isMaqawba&&row.map_cable_progress_available?Number(row.map_cable_meters||0):Number(row.cable_meters||0),
+    cableMeters:usesMapCable&&mapCable?Number(row.map_cable_meters||0):Number(row.cable_meters||0),
     distributionQty:Number(row.distribution_qty||0),fourCoreQty:Number(row.four_core_qty||0),
     subEndBox:Number(row.sub_end_box||0),hubBox:Number(row.hub_box||0),xbox:Number(row.xbox||0),
   };
+  metric.totalBoxes=metric.subEndBox+metric.hubBox+metric.xbox;
   applyRolloutDashboardMetricOverrides(metric,plan);
-  const target=rolloutTargetFor(city,area,row.design_target||null);
-  const targetCable=plan.dashboardCableTargetOverride!==undefined?Number(plan.dashboardCableTargetOverride):target.cableMeters;
-  const targetBoxes=Number(target.totalBoxes||0),cablePct=targetCable>0?Math.max(0,Math.min(100,metric.cableMeters/targetCable*100)):0,boxPct=targetBoxes>0?Math.max(0,Math.min(100,(metric.subEndBox+metric.hubBox+metric.xbox)/targetBoxes*100)):0;
-  return{productivity:targetCable>0&&targetBoxes>0?cablePct*.8+boxPct*.2:null,plan,target:{...target,cableMeters:targetCable,totalBoxes:targetBoxes}};
+  const target=rolloutTargetFor(city,area),isMapCableTarget=canonicalRolloutArea(area)!=='awladbaeoo'&&!isMaqawbaRolloutArea(area)&&plan.dashboardCableTargetOverride===undefined;
+  const targetCable=isMapCableTarget&&mapCable?Number(row.map_cable_target_meters||0):target.cableMeters;
+  const finalTarget={...target,cableMeters:targetCable};
+  return{...rolloutDashboardProductivityScore(metric,finalTarget),plan,target:finalTarget};
 }
 function renderRolloutCityOverview(){
   const panel=document.getElementById('rolloutDailyCityOverview');if(!panel)return;
@@ -3593,13 +3610,7 @@ const scopedRows=rows.filter(r=>{
   return rolloutDashboardDateMatches(rowDate,selectedDates)&&(!rolloutDashboardFilters.city||normalizeText(rowCity)===normalizeText(rolloutDashboardFilters.city))&&areaOk;
 });
 const allMetricRows=areaOptions.map(area=>{
-  const areaRows=rolloutDashboardMetricRows(rows.filter(r=>sameRolloutDashboardArea(r.Area||r.area,area)),area);
-  const raw=rolloutMetricFromRows(areaRows),mapCable=rolloutMapCableProgressMetric(area,areaRows),target=rolloutTargetFor(rolloutDashboardFilters.city,area),plan=rolloutPlanFor(rolloutDashboardFilters.city,area)||{};
-  const metric={...raw,cableMeters:mapCable?mapCable.installedMeters:raw.cableMeters};
-  applyRolloutDashboardMetricOverrides(metric,plan);
-  const isMapCableTarget=canonicalRolloutArea(area)!=='awladbaeoo'&&!isMaqawbaRolloutArea(area)&&plan.dashboardCableTargetOverride===undefined;
-  const cableTarget=isMapCableTarget&&mapCable?mapCable.targetMeters:target.cableMeters;
-  return{name:area,...metric,target:{...target,cableMeters:cableTarget}};
+  return{name:area,...rolloutDashboardAreaMetric(rolloutDashboardFilters.city,area,rows)};
 }).filter(r=>r.records>0);
 const plan=rolloutPlanFor(rolloutDashboardFilters.city,rolloutDashboardFilters.area);
 const rawMetric=rolloutMetricFromRows(rolloutDashboardMetricRows(scopedRows,rolloutDashboardFilters.area));
@@ -3642,7 +3653,7 @@ const dateSelectionLabel=selectedDates.length===1?rolloutDashDateLabel(selectedD
 const dateOptionsHtml=`<div class="rollout-date-menu-actions"><button type="button" onclick="clearRolloutDashboardDateSelection()">All dates</button><span>${selectedDates.length} selected</span></div><div class="rollout-date-options">${dateOptions.slice().reverse().map(date=>`<label class="rollout-date-option"><input type="checkbox" value="${esc(date)}" ${selectedDates.includes(date)?'checked':''} onchange="setRolloutDashboardDateSelection(this.value,this.checked)"><span>${esc(rolloutDashDateLabel(date))}</span></label>`).join('')}</div>`;
 const cityOptionsHtml=cityOptions.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
 const areaOptionsHtml=`<option value="All Areas">All Areas</option>${areaOptions.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('')}`;
-const topRows=allMetricRows.map(r=>{const targetCable=Math.max(Number(r.target?.cableMeters||0),1);const targetBox=Math.max(Number(r.target?.totalBoxes||0),1);const cablePct=Math.min(100,(Number(r.cableMeters||0)/targetCable)*100);const boxPct=Math.min(100,(Number(r.totalBoxes||0)/targetBox)*100);const prod=(cablePct*.8)+(boxPct*.2);return {...r,cablePct,boxPct,productivity:prod}}).sort((a,b)=>b.productivity-a.productivity);
+const topRows=[...allMetricRows].sort((a,b)=>b.productivity-a.productivity);
 const adjustmentHtml=plan&&(Number(plan.adjustmentCableMeters||0)||Number(plan.adjustmentSubEndBox||0))?`<div class="mini-row"><div><b>Dashboard total adjustment</b><small>${fmt(Math.abs(Number(plan.adjustmentCableMeters||0)))} m cable removed · ${fmt(Math.abs(Number(plan.adjustmentSubEndBox||0)))} SUB / END boxes removed</small></div><strong>${fmt(targetCableMeters)} m / ${fmt(targetSubEndBox)} SUB</strong></div>`:'';
 const projectNoteHtml=sameRolloutDashboardArea(areaName,'Al-Dhel Street')?'':`<div class="dash-panel"><h3>Project Note</h3><div class="mini-list"><div class="mini-row"><div><b>${esc(areaName)}</b><small>${esc(plan?.note||`Dashboard filtered for ${areaName}.`)}</small></div></div>${adjustmentHtml}</div></div>`;
 table.innerHTML=`
