@@ -255,12 +255,12 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        authorize_requester_transfer_party(
-            request, data.program, transfer_id, "created_by_user_id", "dispatch", db,
-        )
         actor = actor_fn(request)
         try:
             with db.begin():
+                authorize_requester_transfer_party(
+                    request, data.program, transfer_id, "created_by_user_id", "dispatch", db,
+                )
                 row = dispatch_transfer(db, transfer_id, data.program, actor, data.request_token)
             return {"success": True, "transfer": get_transfer(db, row.id, row.program)}
         except IntegrityError as exc:
@@ -273,12 +273,12 @@ def build_site_transfer_router(db_dependency, normalize_program_fn, require_role
         request: Request,
         db: Session = Depends(db_dependency),
     ):
-        authorize_requester_transfer_party(
-            request, data.program, transfer_id, "approver_user_id", "receive", db,
-        )
         actor = actor_fn(request)
         try:
             with db.begin():
+                authorize_requester_transfer_party(
+                    request, data.program, transfer_id, "approver_user_id", "receive", db,
+                )
                 receipt = receive_transfer(
                     db,
                     transfer_id,
