@@ -116,13 +116,14 @@ function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creato
   return { api, calls, transfer, get createCount() { return createCount; } };
 }
 
-async function readyController(api, { isAdmin = () => true, isRequester = () => false, getUserId = () => 0 } = {}) {
+async function readyController(api, { isAdmin = () => true, isRequester = () => false, getUserId = () => 0, confirm } = {}) {
   const controller = SiteTransferUI.createController({
     api,
     getProgram: () => 'FTTH',
     isAdmin,
     isRequester,
     getUserId,
+    confirm,
     onChange() {},
   });
   await controller.open();
@@ -201,6 +202,53 @@ test('create, approve, dispatch, and repeated partial receipts follow backend st
   const create = mock.calls.find(call => call.method === 'POST' && call.path === '/api/warehouse/site-transfers');
   assert.deepEqual([create.body.from_site_id, create.body.to_site_id, create.body.items[0].product_id, create.body.items[0].uom], [7, 9, 31, 'M']);
   assert.equal(create.body.approver_user_id, 101);
+});
+
+test('Admin can confirm Receive All as one receipt for every remaining material', async () => {
+  const mock = makeApi();
+  const confirmations = [];
+  const controller = await readyController(mock.api, {
+    confirm: message => { confirmations.push(message); return true; },
+  });
+  const first = controller.state.form.lines[0];
+  await controller.updateLine(first.id, 'quantity', '40');
+  controller.addLine();
+  const second = controller.state.form.lines[1];
+  await controller.updateLine(second.id, 'productId', '32');
+  await controller.updateLine(second.id, 'quantity', '20');
+  assert.equal(await controller.createTransfer(), true);
+  assert.ok(await controller.approve(41));
+  assert.ok(await controller.dispatch(41));
+
+  assert.equal(await controller.receiveAll(41), true);
+  const receipts = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/41/receipts'));
+  assert.equal(receipts.length, 1);
+  assert.deepEqual(receipts[0].body.items, [
+    { transfer_item_id: 51, quantity: '40', uom: 'M' },
+    { transfer_item_id: 52, quantity: '20', uom: 'PCS' },
+  ]);
+  assert.match(confirmations[0], /all 2 remaining materials as received at South Site for transfer #41/i);
+  assert.equal(controller.state.transfers[0].status, 'received');
+  assert.deepEqual(controller.state.transfers[0].items.map(item => item.received_qty), ['40', '20']);
+});
+
+test('Receive All cancellation and requester access send no receipt writes', async () => {
+  const mock = makeApi();
+  const controller = await readyController(mock.api, { confirm: () => false });
+  controller.state.transfers.push({
+    id: 41, status: 'in_transit',
+    items: [{ id: 51, uom: 'M', in_transit_qty: '4' }],
+  });
+  assert.equal(await controller.receiveAll(41), false);
+  assert.equal(mock.calls.some(call => call.method === 'POST' && call.path.endsWith('/receipts')), false);
+
+  const requester = await readyRequesterController(mock.api);
+  requester.state.transfers.push({
+    id: 41, status: 'in_transit',
+    items: [{ id: 51, uom: 'M', in_transit_qty: '4' }],
+  });
+  assert.equal(await requester.receiveAll(41), false);
+  assert.equal(mock.calls.some(call => call.method === 'POST' && call.path.endsWith('/receipts')), false);
 });
 
 test('one transfer can contain multiple materials with independent UOM and available quantities', async () => {
@@ -331,6 +379,7 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(ui, /<details class="site-transfer-order-details">/);
   assert.match(ui, /<th>Requested<\/th>/);
   assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
+  assert.match(ui, /data-site-transfer-action="receive-all"/);
   assert.doesNotMatch(ui, /rowspan=/);
   assert.match(css, /\.site-transfer-order-route\{[^}]*direction:ltr/);
   assert.match(html, /site-transfer-create-only hidden/);
@@ -386,6 +435,7 @@ test('transfer history renders one compact card per request and preserves reques
   assert.match(html, /Awaiting Regional Manager/);
   assert.match(html, /data-site-transfer-action="dispatch" data-transfer-id="42"/);
   assert.match(html, /data-site-transfer-action="receive" data-transfer-id="43" data-item-id="54"/);
+  assert.match(html, /data-site-transfer-action="receive-all" data-transfer-id="43">Receive All \(1\)<\/button>/);
   assert.match(html, /Fiber Cable/);
   assert.match(html, /Hub Box/);
   assert.doesNotMatch(html, /rowspan=/);

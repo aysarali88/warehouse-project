@@ -494,6 +494,56 @@
       }
     }
 
+    async function receiveAll(transferId) {
+      if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
+      const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
+      if (!transfer || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
+      const outstanding = (transfer.items || []).filter(item => {
+        const quantity = quantityUnits(item.in_transit_qty);
+        return quantity !== null && quantity > 0n;
+      });
+      if (!outstanding.length) {
+        state.error = 'There are no remaining materials to receive.';
+        publish();
+        return false;
+      }
+      if (outstanding.some(item => !Number(item.id) || !String(item.uom || '').trim())) {
+        state.error = 'A remaining material is missing its transfer item ID or UOM.';
+        publish();
+        return false;
+      }
+      const ask = typeof confirm === 'function' ? confirm : globalThis.confirm;
+      if (typeof ask !== 'function' || !ask(`Record all ${outstanding.length} remaining materials as received at ${transfer.to_site || 'the destination'} for transfer #${transferId}?`)) return false;
+
+      state.busy = true;
+      state.error = '';
+      state.message = '';
+      publish();
+      try {
+        await api(url(`/api/warehouse/site-transfers/${Number(transferId)}/receipts`), {
+          method: 'POST',
+          body: JSON.stringify({
+            program: program(),
+            request_token: requestToken(),
+            items: outstanding.map(item => ({
+              transfer_item_id: Number(item.id), quantity: String(item.in_transit_qty), uom: item.uom,
+            })),
+            reference: transfer.reference || '',
+            notes: `Bulk receipt of all remaining materials for transfer #${Number(transferId)}`,
+          }),
+        });
+        state.message = `All remaining materials recorded as received for transfer #${transferId}.`;
+        await refreshAfterAction();
+        return true;
+      } catch (error) {
+        setError(error);
+        return false;
+      } finally {
+        state.busy = false;
+        publish();
+      }
+    }
+
     async function reverseDispatch(transferId, { note, confirmPhysicalReturn } = {}) {
       if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
       if (!String(note || '').trim()) {
@@ -525,7 +575,7 @@
 
     return {
       state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine, refreshAllAvailability,
-      createTransfer, approve, reject, dispatch, openReceipt, closeReceipt, receive, reverseDispatch,
+      createTransfer, approve, reject, dispatch, openReceipt, closeReceipt, receive, receiveAll, reverseDispatch,
     };
   }
 
@@ -562,6 +612,15 @@
             : `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`;
       } else if (isAdmin() && transfer.status === 'approved') {
         actions = `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`;
+      }
+      const receivableCount = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
+        ? items.filter(item => {
+          const quantity = quantityUnits(item.in_transit_qty);
+          return Number(item.id) > 0 && quantity !== null && quantity > 0n;
+        }).length
+        : 0;
+      if (receivableCount) {
+        actions += `<button class="btn primary" type="button" data-site-transfer-action="receive-all" data-transfer-id="${Number(transfer.id)}">Receive All (${receivableCount})</button>`;
       }
 
       const created = transfer.created_at ? new Date(transfer.created_at).toLocaleString() : '—';
@@ -793,6 +852,7 @@
         }
         else if (button.dataset.siteTransferAction === 'dispatch') await controller.dispatch(id);
         else if (button.dataset.siteTransferAction === 'receive') controller.openReceipt(id, Number(button.dataset.itemId));
+        else if (button.dataset.siteTransferAction === 'receive-all') await controller.receiveAll(id);
         return;
       }
       const action = event.target.closest('[data-site-transfer-command]')?.dataset.siteTransferCommand;
