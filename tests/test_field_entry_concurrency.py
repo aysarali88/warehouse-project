@@ -1198,6 +1198,7 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         db.add_all([
             RolloutRecord(record_id="RDP-RANK-M1", city="Tripoli", area="Mansoura", item="Single-Core Distribution Cable_50m", material_type="Single-Core Distribution Cable_50m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=1),
             RolloutRecord(record_id="RDP-RANK-M2", city="Tripoli", area="Al-Mansoura", item="Single-Core Distribution Cable_50m", material_type="Single-Core Distribution Cable_50m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=2),
+            RolloutRecord(record_id="RDP-RANK-M-UNMAPPED", city="Tripoli", area="Al-Mansoura", item="Single-Core Distribution Cable_50m", material_type="Single-Core Distribution Cable_50m", related_to_xbox="X1", cable_code="H99-L1-S1", actual=1),
             RolloutRecord(record_id="RDP-RANK-BOX", city="Tripoli", area="Al-Mansoura", item="SUB BOX", material_type="SUB BOX", related_to_xbox="X1", box_code="H1-L1-S1", actual=2),
             RolloutRecord(record_id="RDP-RANK-XBOX", city="Tripoli", area="Al-Mansoura", item="XBOX", material_type="XBOX", related_to_xbox="X1", box_code="X1", actual=1),
             RolloutRecord(record_id="RDP-RANK-MAQ", city="Misurata", area="Maqawba", item="Single-Core Distribution Cable_100m", material_type="Single-Core Distribution Cable_100m", related_to_xbox="X1", cable_code="H1-L1-S1", actual=3),
@@ -1226,8 +1227,8 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
 
         by_key = {(row["city"], row["area"]): row for row in result["records"]}
         mansoura = by_key[("Tripoli", "Al-Mansoura")]
-        self.assertEqual(mansoura["cable_meters"], 150)
-        self.assertEqual(mansoura["distribution_qty"], 3)
+        self.assertEqual(mansoura["cable_meters"], 200)
+        self.assertEqual(mansoura["distribution_qty"], 4)
         self.assertEqual(mansoura["sub_end_box"], 2)
         self.assertEqual(mansoura["xbox"], 1)
         maqawba = by_key[("Misurata", "Maqawba")]

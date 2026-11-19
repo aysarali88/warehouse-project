@@ -6460,7 +6460,9 @@ def rollout_city_ranking_reference_index(reference_rows: list[dict]) -> dict:
 
 
 def rollout_city_ranking_keep_row(row, area_info: dict | None, city_key: str, area_key: str) -> bool:
-    if area_key != "maqawba" and (area_info is None or not area_info.get("has_parts")):
+    # Keep the city ranking aligned with the dashboard summary, which only
+    # applies map-code filtering to Maqawba's map-confirmed totals.
+    if area_key != "maqawba":
         return True
 
     material = rollout_norm(f"{row.item or ''} {row.material_type or ''}")
