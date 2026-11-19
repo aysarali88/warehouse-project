@@ -326,6 +326,88 @@ class SiteTransferTests(unittest.TestCase):
                 SiteMaterialMovement.event_type.like("site_transfer_%")
             ).count(), before_transfer_movements)
 
+    def test_requester_dispatch_and_receive_api_share_one_database_transaction(self):
+        transfer_id = self._create_assigned(
+            quantity=3,
+            approver_user_id=self.manager_user_id,
+            actor_user_id=self.other_manager_user_id,
+        )
+        with SessionLocal() as db:
+            with db.begin():
+                transfers.approve_transfer(db, transfer_id, "FTTH", "test-approver")
+
+        def require_roles(request, *roles):
+            user = request.state.current_user
+            if user.role not in roles:
+                raise HTTPException(status_code=403, detail="Role not allowed")
+            return user
+
+        router = site_transfer_api.build_site_transfer_router(
+            lambda: None,
+            normalize_program,
+            require_roles,
+            lambda request: request.state.current_user.name,
+            enabled_fn=lambda _program: True,
+        )
+        endpoints = {
+            route.path: route.endpoint
+            for route in router.routes
+            if route.path in {
+                "/api/warehouse/site-transfers/{transfer_id}/dispatch",
+                "/api/warehouse/site-transfers/{transfer_id}/receipts",
+            }
+        }
+
+        creator_request = Request({"type": "http", "headers": [], "query_string": b""})
+        creator_request.state.session_program = "FTTH"
+        creator_request.state.current_user = SimpleNamespace(
+            id=self.other_manager_user_id,
+            role="Requester",
+            program="FTTH",
+            name="Creating Manager",
+        )
+        dispatch_payload = site_transfer_api.SiteTransferDispatchIn(
+            program="FTTH", request_token=f"dispatch-api-{uuid4().hex}-token",
+        )
+        with SessionLocal() as db:
+            dispatched = endpoints["/api/warehouse/site-transfers/{transfer_id}/dispatch"](
+                transfer_id, dispatch_payload, creator_request, db,
+            )
+        self.assertTrue(dispatched["success"])
+        self.assertEqual(dispatched["transfer"]["status"], "in_transit")
+
+        manager_request = Request({"type": "http", "headers": [], "query_string": b""})
+        manager_request.state.session_program = "FTTH"
+        manager_request.state.current_user = SimpleNamespace(
+            id=self.manager_user_id,
+            role="Requester",
+            program="FTTH",
+            name="Receiving Manager",
+        )
+        receipt_payload = site_transfer_api.SiteTransferReceiptIn(
+            program="FTTH",
+            request_token=f"receipt-api-{uuid4().hex}-token",
+            items=[site_transfer_api.TransferReceiptLine(
+                transfer_item_id=dispatched["transfer"]["items"][0]["id"],
+                quantity=3,
+                uom="M",
+            )],
+        )
+        with SessionLocal() as db:
+            received = endpoints["/api/warehouse/site-transfers/{transfer_id}/receipts"](
+                transfer_id, receipt_payload, manager_request, db,
+            )
+
+        self.assertTrue(received["success"])
+        self.assertEqual(received["transfer"]["status"], "received")
+        self.assertEqual(self._balance(self.destination_id), Decimal("3.000000"))
+        with SessionLocal() as db:
+            self.assertEqual(db.query(SiteMaterialMovement).filter_by(
+                program="FTTH",
+                event_type="site_transfer_received",
+                document_id=str(transfer_id),
+            ).count(), 1)
+
     def test_creation_validates_numeric_sites_program_product_uom_and_positive_quantity(self):
         with self.assertRaises(HTTPException) as same_site:
             self._create(from_site_id=self.source_id, to_site_id=self.source_id)
