@@ -164,6 +164,52 @@ class SiteInventoryOpenFieldReconciliationTests(unittest.TestCase):
         self.assertEqual(movement_count, 1)
         self.assertEqual(audit_count, 1)
 
+    def test_transfer_movements_are_included_in_open_field_preview_and_report(self):
+        self._add_sources(mr_qty=20, rollout_qty=4)
+        self._seed_ledger(10)
+        with self.Session() as db:
+            with db.begin():
+                destination = Site(
+                    program="FTTH", name=f"Transfer Destination {self.suffix}",
+                    site_inventory_enabled=True,
+                )
+                db.add(destination)
+                db.flush()
+                destination_id, destination_name = destination.id, destination.name
+                inventory.post_site_movement(
+                    db, program="FTTH", site_id=self.site_id, product_id=self.product_id,
+                    movement_type="outgoing", event_type="site_transfer_dispatched",
+                    quantity_delta=-3, uom="PCS", document_type="site_transfer_dispatch",
+                    document_id=f"TRANSFER-{self.suffix}", document_line_id="1",
+                    reference=f"TRANSFER-{self.suffix}", note="Synthetic dispatch",
+                    created_by=self.actor, approved_by=self.actor, effective_date="2026-11-19",
+                    request_token=f"transfer-out-{self.suffix}",
+                )
+                inventory.post_site_movement(
+                    db, program="FTTH", site_id=destination_id, product_id=self.product_id,
+                    movement_type="incoming", event_type="site_transfer_received",
+                    quantity_delta=2, uom="PCS", document_type="site_transfer_receipt",
+                    document_id=f"TRANSFER-{self.suffix}", document_line_id="1",
+                    reference=f"TRANSFER-{self.suffix}", note="Synthetic receipt",
+                    created_by=self.actor, approved_by=self.actor, effective_date="2026-11-19",
+                    request_token=f"transfer-in-{self.suffix}",
+                )
+
+        snapshot = self._snapshot()
+        source_row = next(item for item in snapshot["items"] if item["site_id"] == self.site_id)
+        destination_row = next(item for item in snapshot["items"] if item["site_id"] == destination_id)
+        self.assertEqual(source_row["transferred_out_qty"], Decimal("3.000000"))
+        self.assertEqual(source_row["open_in_field_qty"], Decimal("13.000000"))
+        self.assertEqual(destination_row["transferred_in_qty"], Decimal("2.000000"))
+        self.assertEqual(destination_row["open_in_field_qty"], Decimal("2.000000"))
+
+        with self.Session() as db:
+            report = main.list_rollout_material_usage(self.request, db, program="FTTH")
+        source_usage = next(item for item in report["usage"] if item["area"] == self.site_name and item["sku"] == f"OFR-{self.suffix}")
+        destination_usage = next(item for item in report["usage"] if item["area"] == destination_name and item["sku"] == f"OFR-{self.suffix}")
+        self.assertEqual(source_usage["remaining_after_rollout"], 13)
+        self.assertEqual(destination_usage["remaining_after_rollout"], 2)
+
     def test_decimal_zero_rollout_cable_length_maps_to_catalog_product(self):
         rollout_product = Product(
             program="FTTH", sku=f"OFR-150-{self.suffix}",
