@@ -327,8 +327,10 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(html, /<section class="view site-transfer-view" id="siteTransfers">/);
   assert.match(html, /id="siteTransferApprover" required/);
   assert.match(html, /My Requests &amp; Assigned Transfers|My Requests & Assigned Transfers/);
-  assert.match(ui, /<th>Requested Qty<\/th>/);
+  assert.match(ui, /<details class="site-transfer-order-details">/);
+  assert.match(ui, /<th>Requested<\/th>/);
   assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
+  assert.doesNotMatch(ui, /rowspan=/);
   assert.match(html, /site-transfer-create-only hidden/);
   assert.match(html, /<div class="hidden" id="siteTransferWorkspace">/);
   assert.match(html, /id="siteTransferLines" class="site-transfer-lines"/);
@@ -336,6 +338,55 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(html, /<script src="\/static\/site_transfer_ui\.js"><\/script>/);
   assert.match(html, /href="\/static\/site_transfer_ui\.css"/);
   assert.equal(SiteTransferUI.PAGE_SIZE, 25);
+});
+
+test('transfer history renders one compact card per request and preserves request and item actions', () => {
+  const transfers = [
+    {
+      id: 41,
+      from_site: 'Ras Ali',
+      to_site: 'Rwaisat',
+      status: 'draft',
+      created_by: 'Aysar',
+      created_at: '2026-11-18T08:00:00Z',
+      approval: { status: 'pending', approver_user_id: 101, approver_name: 'Regional Manager' },
+      items: [
+        { id: 51, product: 'Fiber Cable', sku: 'MAT-31', uom: 'M', requested_qty: '2', sent_qty: '0', received_qty: '0', in_transit_qty: '0' },
+        { id: 52, product: 'Hub Box', sku: 'MAT-32', uom: 'PCS', requested_qty: '1', sent_qty: '0', received_qty: '0', in_transit_qty: '0' },
+      ],
+    },
+    {
+      id: 42,
+      from_site: 'Al-Mansoura',
+      to_site: 'Al-Dhel Street',
+      status: 'approved',
+      created_by: 'Nadeer',
+      created_at: '2026-11-18T09:00:00Z',
+      items: [{ id: 53, product: 'Fiber Cable', sku: 'MAT-31', uom: 'M', requested_qty: '5', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }],
+    },
+    {
+      id: 43,
+      from_site: 'Ras Ali',
+      to_site: 'Rwaisat',
+      status: 'in_transit',
+      created_by: 'Aysar',
+      created_at: '2026-11-18T10:00:00Z',
+      items: [{ id: 54, product: 'Hub Box', sku: 'MAT-32', uom: 'PCS', requested_qty: '3', sent_qty: '3', received_qty: '0', in_transit_qty: '3' }],
+    },
+  ];
+  const html = SiteTransferUI.renderTransferOrders(transfers, { isAdmin: () => true });
+
+  assert.equal((html.match(/class="site-transfer-order"/g) || []).length, 3);
+  assert.equal((html.match(/Transfer #41/g) || []).length, 1);
+  assert.equal((html.match(/Transfer #42/g) || []).length, 1);
+  assert.equal((html.match(/Transfer #43/g) || []).length, 1);
+  assert.equal((html.match(/<details class="site-transfer-order-details">/g) || []).length, 3);
+  assert.match(html, /Awaiting Regional Manager/);
+  assert.match(html, /data-site-transfer-action="dispatch" data-transfer-id="42"/);
+  assert.match(html, /data-site-transfer-action="receive" data-transfer-id="43" data-item-id="54"/);
+  assert.match(html, /Fiber Cable/);
+  assert.match(html, /Hub Box/);
+  assert.doesNotMatch(html, /rowspan=/);
 });
 
 test('same-site and excessive transfer quantities are rejected before create request', async () => {

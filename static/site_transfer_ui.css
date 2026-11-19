@@ -24,10 +24,22 @@
 .site-transfer-form-actions{grid-column:1/-1;display:flex;justify-content:flex-start;padding-top:3px}
 .site-transfer-list-tools{display:flex;align-items:flex-end;gap:8px}
 .site-transfer-list-tools .field{min-width:190px}
-.site-transfer-table-wrap{max-height:min(62vh,760px);overflow:auto}
-.site-transfer-table{min-width:1120px}
+.site-transfer-orders{display:grid;gap:8px;min-width:0}
+.site-transfer-order{min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:7px;background:#fff}
+.site-transfer-order-head{display:grid;grid-template-columns:minmax(155px,1fr) minmax(200px,1.15fr) minmax(240px,1.55fr) auto;gap:12px;align-items:center;padding:11px 12px}
+.site-transfer-order-id{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.site-transfer-order-id>strong{color:var(--brand);white-space:nowrap}
+.site-transfer-order-route{display:flex;align-items:center;gap:8px;min-width:0;font-weight:800;overflow-wrap:anywhere}
+.site-transfer-route-arrow{color:var(--muted);flex:0 0 auto}
+.site-transfer-order-meta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-width:0;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.site-transfer-order-actions{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+.site-transfer-order-actions:empty{display:none}
+.site-transfer-order-details{border-top:1px solid var(--line)}
+.site-transfer-order-details>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 12px;color:var(--brand);font-size:12px;font-weight:800;cursor:pointer}
+.site-transfer-order-details[open]>summary{border-bottom:1px solid var(--line)}
+.site-transfer-table-wrap{max-height:min(48vh,520px);overflow:auto}
+.site-transfer-table{width:100%;min-width:760px}
 .site-transfer-table th,.site-transfer-table td{vertical-align:middle}
-.site-transfer-table td[rowspan]{background:#fff}
 .site-transfer-cell-sub{display:block;margin-top:3px;color:var(--muted);font-size:10px}
 .site-transfer-status{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#eef3f6;color:#475a6c;font-size:11px;font-weight:900}
 .site-transfer-status.status-draft{background:#eef3f6;color:#475a6c}
@@ -36,7 +48,6 @@
 .site-transfer-status.status-partially_received{background:#e7f5f5;color:#006d70}
 .site-transfer-status.status-received{background:#e8f6ed;color:#16733d}
 .site-transfer-status.status-cancelled{background:#fdecec;color:#a52f2f}
-.site-transfer-actions{display:flex;gap:6px}
 .site-transfer-pagination{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .site-transfer-corrections{padding:12px 16px}
 .site-transfer-corrections summary{color:var(--muted);font-size:12px;font-weight:900;cursor:pointer}
@@ -57,6 +68,8 @@
   .site-transfer-section-head{align-items:stretch;flex-direction:column}
   .site-transfer-list-tools{align-items:stretch;flex-wrap:wrap}
   .site-transfer-list-tools .field{flex:1;min-width:160px}
+  .site-transfer-order-head{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);align-items:start}
+  .site-transfer-order-actions{grid-column:1/-1;justify-content:flex-start}
   .site-transfer-line{grid-template-columns:repeat(2,minmax(0,1fr))}
   .site-transfer-line .field:first-child{grid-column:1/-1}
   .site-transfer-remove-line{justify-self:start}
@@ -68,6 +81,9 @@
   .site-transfer-form-actions{grid-column:auto}
   .site-transfer-form-actions .btn{width:100%}
   .site-transfer-list-tools .btn{flex:1}
+  .site-transfer-order-head{grid-template-columns:1fr;gap:8px;padding:10px}
+  .site-transfer-order-actions{grid-column:auto}
+  .site-transfer-order-details>summary{padding:8px 10px}
   .site-transfer-correction-form{grid-template-columns:1fr}
   .site-transfer-confirm{grid-column:auto}
   .site-transfer-dialog>form{padding:14px}
