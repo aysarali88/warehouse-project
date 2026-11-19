@@ -80,7 +80,7 @@
 
     const publish = () => onChange(state);
     const program = () => String(getProgram() || 'FTTH').trim().toUpperCase();
-    const canCreate = () => isAdmin() || (isRequester() && program() === 'FTTH');
+    const canCreate = () => isRequester() && program() === 'FTTH';
     const url = (path, params = {}) => {
       const query = new URLSearchParams({ program: program(), ...params });
       return `${path}?${query.toString()}`;
@@ -409,12 +409,10 @@
     }
 
     async function approve(transferId) {
-      if (!isAdmin()) {
-        const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
-        const approval = transfer?.approval;
-        if (!isRequester() || program() !== 'FTTH' || transfer?.status !== 'draft'
-          || approval?.status !== 'pending' || Number(approval.approver_user_id) !== Number(getUserId?.())) return false;
-      }
+      const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
+      const approval = transfer?.approval;
+      if (!isRequester() || program() !== 'FTTH' || transfer?.status !== 'draft'
+        || approval?.status !== 'pending' || Number(approval.approver_user_id) !== Number(getUserId?.())) return false;
       return performAction(transferId, 'approve');
     }
 
@@ -433,15 +431,22 @@
     }
 
     async function dispatch(transferId) {
-      if (!isAdmin()) return false;
+      const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
+      const approval = transfer?.approval;
+      const isCreator = Number(approval?.created_by_user_id) === Number(getUserId?.());
+      const isLegacyAssignedManager = String(approval?.created_by_role || '').toLowerCase() === 'admin'
+        && Number(approval?.approver_user_id) === Number(getUserId?.());
+      if (!isRequester() || transfer?.status !== 'approved'
+        || (!isCreator && !isLegacyAssignedManager)) return false;
       return performAction(transferId, 'dispatch', { request_token: requestToken() });
     }
 
     function openReceipt(transferId, itemId) {
-      if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
+      if (!isRequester() || state.busy || state.gate !== 'enabled') return false;
       const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
       const item = transfer?.items?.find(row => Number(row.id) === Number(itemId));
-      if (!transfer || !item || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
+      if (!transfer || Number(transfer.approval?.approver_user_id) !== Number(getUserId?.())
+        || !item || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
       state.receipt = {
         transferId: Number(transferId), itemId: Number(itemId),
         product: item.product, uom: item.uom,
@@ -459,7 +464,9 @@
     }
 
     async function receive(input = state.receipt) {
-      if (!isAdmin() || state.busy || !input || state.gate !== 'enabled') return false;
+      if (!isRequester() || state.busy || !input || state.gate !== 'enabled') return false;
+      const transfer = state.transfers.find(row => Number(row.id) === Number(input.transferId));
+      if (!transfer || Number(transfer.approval?.approver_user_id) !== Number(getUserId?.())) return false;
       const validation = validateReceiptQuantity(input.quantity, input.remaining);
       if (validation) {
         state.error = validation;
@@ -495,9 +502,10 @@
     }
 
     async function receiveAll(transferId) {
-      if (!isAdmin() || state.busy || state.gate !== 'enabled') return false;
+      if (!isRequester() || state.busy || state.gate !== 'enabled') return false;
       const transfer = state.transfers.find(row => Number(row.id) === Number(transferId));
-      if (!transfer || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
+      if (!transfer || Number(transfer.approval?.approver_user_id) !== Number(getUserId?.())
+        || !['in_transit', 'partially_received'].includes(transfer.status)) return false;
       const outstanding = (transfer.items || []).filter(item => {
         const quantity = quantityUnits(item.in_transit_qty);
         return quantity !== null && quantity > 0n;
@@ -597,23 +605,25 @@
     return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: 6 }) : escapeHtml(value);
   }
 
-  function renderTransferOrders(transfers, { isAdmin = () => false, getUserId = () => 0 } = {}) {
+  function renderTransferOrders(transfers, { isAdmin = () => false, isRequester = () => false, getUserId = () => 0 } = {}) {
     return (transfers || []).map(transfer => {
       const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', requested_qty: '0', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
       const approval = transfer.approval;
-      const assignedToMe = approval && Number(approval.approver_user_id) === Number(getUserId?.());
+      const currentUserId = Number(getUserId?.());
+      const assignedToMe = approval && Number(approval.approver_user_id) === currentUserId;
+      const createdByMe = approval && Number(approval.created_by_user_id) === currentUserId;
+      const legacyAdminCreatorManager = approval && String(approval.created_by_role || '').toLowerCase() === 'admin' && assignedToMe;
       let actions = '';
-      if (!isAdmin() && assignedToMe && approval.status === 'pending' && transfer.status === 'draft') {
+      if (isRequester() && assignedToMe && approval.status === 'pending' && transfer.status === 'draft') {
         actions = `<button class="btn primary" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button><button class="btn danger" type="button" data-site-transfer-action="reject" data-transfer-id="${Number(transfer.id)}">Reject</button>`;
       } else if (isAdmin() && transfer.status === 'draft') {
         actions = approval?.status === 'pending'
           ? `<span class="site-transfer-hint">Awaiting ${escapeHtml(approval.approver_name || 'regional manager')}</span>`
-          : approval ? `<span class="site-transfer-hint">${escapeHtml(displayStatus(approval.status))}</span>`
-            : `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`;
-      } else if (isAdmin() && transfer.status === 'approved') {
+          : `<span class="site-transfer-hint">${escapeHtml(approval ? displayStatus(approval.status) : 'Requester approval required')}</span>`;
+      } else if (isRequester() && (createdByMe || legacyAdminCreatorManager) && transfer.status === 'approved') {
         actions = `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`;
       }
-      const receivableCount = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
+      const receivableCount = isRequester() && assignedToMe && ['in_transit', 'partially_received'].includes(transfer.status)
         ? items.filter(item => {
           const quantity = quantityUnits(item.in_transit_qty);
           return Number(item.id) > 0 && quantity !== null && quantity > 0n;
@@ -625,7 +635,7 @@
 
       const created = transfer.created_at ? new Date(transfer.created_at).toLocaleString() : '—';
       const itemRows = items.map(item => {
-        const receive = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
+        const receive = isRequester() && assignedToMe && ['in_transit', 'partially_received'].includes(transfer.status)
           ? `<button class="btn soft" type="button" data-site-transfer-action="receive" data-transfer-id="${Number(transfer.id)}" data-item-id="${Number(item.id)}">Receive</button>`
           : '—';
         return `<tr>
@@ -726,7 +736,7 @@
       if (!state.transfers.length) {
         table.innerHTML = '<div class="empty">No transfers on this page.</div>';
       } else {
-        table.innerHTML = `<div class="site-transfer-orders">${renderTransferOrders(state.transfers, { isAdmin, getUserId })}</div>`;
+        table.innerHTML = `<div class="site-transfer-orders">${renderTransferOrders(state.transfers, { isAdmin, isRequester, getUserId })}</div>`;
       }
       const meta = element('siteTransferPageMeta');
       if (meta) meta.textContent = `${Number(state.total).toLocaleString()} transfers · Page ${state.page} of ${state.totalPages || 1}`;
