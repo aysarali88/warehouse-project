@@ -2649,6 +2649,23 @@ def rollout_area_label(value) -> str:
     return "Hay Al Andalus Zone 2" if rollout_area_key(value) == "hayalandaluszone2" else str(value or "").strip()
 
 
+def rollout_area_query_values(area: str) -> set[str]:
+    key = rollout_area_key(area)
+    aliases = {
+        "almansoura": {"Mansoura", "Al-Mansoura"},
+        "awladabushala": {"Awlad Abo Sha'alah", "Awlad Abushala"},
+        "hayalandaluszone1": {
+            "Hay Al Andalus Z1", "Hay Al Andalus Zone 1", "Hay Andalus Z1", "Hay Andalus Zone 1",
+        },
+        "hayalandaluszone2": {
+            "Hay Al Andalus Z2", "Hay Al Andalus Zone 2", "Hay Andalus Z2", "Hay Andalus Zone 2", "Hay Andalus",
+        },
+    }
+    values = {str(area or "").strip(), rollout_area_label(area)}
+    values.update(aliases.get(key, set()))
+    return {value.casefold() for value in values if value}
+
+
 def rollout_xbox_key(value) -> str:
     text_value = str(value or "").upper()
     match = re.search(r"X\s*-?\s*BOX\s*0*(\d+)|X\s*0*(\d+)", text_value)
@@ -4855,7 +4872,13 @@ def rollout_entry_summary_from_db(request: Request, db: Session) -> dict:
     ])
 
 
-def rollout_entry_code_states_from_db(request: Request, db: Session) -> dict[tuple[str, str, str, str], str]:
+def rollout_entry_code_states_from_db(
+    request: Request,
+    db: Session,
+    *,
+    area: str = "",
+    xbox: str = "",
+) -> dict[tuple[str, str, str, str], str]:
     has_cable_code = func.trim(func.coalesce(RolloutRecord.cable_code, "")) != ""
     has_box_code = func.trim(func.coalesce(RolloutRecord.box_code, "")) != ""
     code_type = case(
@@ -4874,6 +4897,11 @@ def rollout_entry_code_states_from_db(request: Request, db: Session) -> dict[tup
         code_value.label("code"),
         RolloutRecord.status,
     ).filter(or_(has_cable_code, has_box_code))
+    if area:
+        area_values = rollout_area_query_values(area)
+        query = query.filter(func.lower(func.trim(func.coalesce(RolloutRecord.area, ""))).in_(area_values))
+    if xbox:
+        query = query.filter(rollout_xbox_filter_clause(RolloutRecord.related_to_xbox, xbox))
     user = current_user(request)
     if user.role.strip().lower() == "warehouse manager":
         scope = user.warehouse_name or user.name or user.username
@@ -6789,22 +6817,29 @@ def rollout_entry_reference(
     limit: int = 50,
     offset: int = 0,
     records_only: bool = False,
+    reference_only: bool = False,
+    include_entry_meta: bool = False,
     db: Session = Depends(db_session),
 ):
     record_limit = min(max(int(limit or 50), 1), 200)
     record_offset = max(int(offset or 0), 0)
     page = record_offset // record_limit + 1
-    search_query = rollout_record_query(request, db, search=query)
-    total = search_query.order_by(None).count()
-    latest_rows = (
-        search_query.order_by(RolloutRecord.id.desc())
-        .offset(record_offset)
-        .limit(record_limit)
-        .all()
-    )
-    latest = [row_to_record(row) for row in latest_rows]
+    if records_only or not reference_only:
+        search_query = rollout_record_query(request, db, search=query)
+        total = search_query.order_by(None).count()
+        latest_rows = (
+            search_query.order_by(RolloutRecord.id.desc())
+            .offset(record_offset)
+            .limit(record_limit)
+            .all()
+        )
+        latest = [row_to_record(row) for row in latest_rows]
     if records_only:
-        return {"success": True, "records_only": True, "latest": latest, "count": total, **rollout_page_metadata(total, page, record_limit)}
+        response = {"success": True, "records_only": True, "latest": latest, "count": total, **rollout_page_metadata(total, page, record_limit)}
+        if include_entry_meta:
+            response["next_id"] = next_rollout_entry_id(db)
+            response["summary"] = rollout_entry_summary_from_db(request, db)
+        return response
 
     refs = rollout_code_reference_rows(db, getattr(request.state, "program", DEFAULT_PROGRAM))
     areas_map: dict[str, dict] = {}
@@ -6816,7 +6851,11 @@ def rollout_entry_reference(
         area_key = rollout_area_key(area_name)
         areas_map.setdefault(area_key, {"area": area_name, "city": row.get("city") or ""})
         xboxes_map.setdefault(area_key, set()).add(row.get("xbox") or "")
-    code_states = rollout_entry_code_states_from_db(request, db)
+    code_states = (
+        rollout_entry_code_states_from_db(request, db, area=area, xbox=xbox)
+        if area or not reference_only
+        else {}
+    )
 
     scoped_refs = refs
     if area:
@@ -6833,6 +6872,16 @@ def rollout_entry_reference(
         }
         for row in scoped_refs
     ]
+
+    if reference_only:
+        return {
+            "success": True,
+            "source": "database",
+            "reference_only": True,
+            "areas": sorted(areas_map.values(), key=lambda r: (r.get("city") or "", r.get("area") or "")),
+            "xboxes_by_area": {areas_map[k]["area"]: sorted(v) for k, v in xboxes_map.items()},
+            "codes": scoped_refs,
+        }
 
     return {
         "success": True,

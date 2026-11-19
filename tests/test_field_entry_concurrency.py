@@ -135,6 +135,131 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual([row["ID"] for row in result["latest"]], ["RDP-SEARCH-2"])
         db.close()
 
+    def test_entry_reference_only_skips_record_summary_and_scopes_code_states(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(
+                record_id="RDP-REF-OTHER-AREA",
+                area="Ras Ali",
+                related_to_xbox="X1",
+                cable_code="H1-L1-S1",
+                status="Done",
+            ),
+            RolloutRecord(
+                record_id="RDP-REF-OTHER-XBOX",
+                area="Al-Mansoura",
+                related_to_xbox="X2",
+                cable_code="H1-L1-S1",
+                status="Done",
+            ),
+            RolloutRecord(
+                record_id="RDP-REF-MATCH",
+                area="Al-Mansoura",
+                related_to_xbox="X1",
+                cable_code="H2-L1-S1",
+                status="Done",
+            ),
+        ])
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_refs = main.rollout_code_reference_rows
+        original_query = main.rollout_record_query
+        original_summary = main.rollout_entry_summary_from_db
+        original_next_id = main.next_rollout_entry_id
+        main.rollout_code_reference_rows = lambda *args, **kwargs: [
+            {"area": "Al-Mansoura", "city": "Misurata", "xbox": "X1", "code": "H1-L1-S1", "type": "cable"},
+            {"area": "Al-Mansoura", "city": "Misurata", "xbox": "X1", "code": "H2-L1-S1", "type": "cable"},
+            {"area": "Ras Ali", "city": "Misurata", "xbox": "X1", "code": "H1-L1-S1", "type": "cable"},
+        ]
+        main.rollout_record_query = lambda *args, **kwargs: self.fail("reference-only request must not query the record list")
+        main.rollout_entry_summary_from_db = lambda *args, **kwargs: self.fail("reference-only request must not calculate the project summary")
+        main.next_rollout_entry_id = lambda *args, **kwargs: self.fail("reference-only request must not scan entry IDs")
+        try:
+            result = main.rollout_entry_reference(
+                request,
+                area="Al-Mansoura",
+                xbox="X1",
+                reference_only=True,
+                db=db,
+            )
+        finally:
+            main.rollout_code_reference_rows = original_refs
+            main.rollout_record_query = original_query
+            main.rollout_entry_summary_from_db = original_summary
+            main.next_rollout_entry_id = original_next_id
+            db.close()
+
+        states = {row["code"]: row["entry_status"] for row in result["codes"]}
+        self.assertEqual(states["H1-L1-S1"], "available")
+        self.assertEqual(states["H2-L1-S1"], "done")
+        self.assertNotIn("summary", result)
+        self.assertNotIn("latest", result)
+        self.assertNotIn("next_id", result)
+
+    def test_entry_reference_only_without_scope_skips_code_history_query(self):
+        db = SessionLocal()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_refs = main.rollout_code_reference_rows
+        original_query = main.rollout_record_query
+        original_states = main.rollout_entry_code_states_from_db
+        main.rollout_code_reference_rows = lambda *args, **kwargs: [
+            {"area": "Ras Ali", "city": "Misurata", "xbox": "X1", "code": "H1-L1-S1", "type": "cable"},
+        ]
+        main.rollout_record_query = lambda *args, **kwargs: self.fail("reference-only request must not query records")
+        main.rollout_entry_code_states_from_db = lambda *args, **kwargs: self.fail("unscoped reference must not aggregate code history")
+        try:
+            result = main.rollout_entry_reference(request, reference_only=True, db=db)
+        finally:
+            main.rollout_code_reference_rows = original_refs
+            main.rollout_record_query = original_query
+            main.rollout_entry_code_states_from_db = original_states
+            db.close()
+
+        self.assertEqual(result["codes"][0]["entry_status"], "available")
+        self.assertEqual(result["areas"], [{"area": "Ras Ali", "city": "Misurata"}])
+
+    def test_entry_records_only_can_load_summary_and_next_id_separately(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add(RolloutRecord(record_id="RDP-META-1", area="Ras Ali", city="Misurata"))
+        db.commit()
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_summary = main.rollout_entry_summary_from_db
+        original_next_id = main.next_rollout_entry_id
+        main.rollout_entry_summary_from_db = lambda *args, **kwargs: {"cable": 7}
+        main.next_rollout_entry_id = lambda *args, **kwargs: "RDP-2"
+        try:
+            result = main.rollout_entry_reference(
+                request,
+                records_only=True,
+                include_entry_meta=True,
+                db=db,
+            )
+        finally:
+            main.rollout_entry_summary_from_db = original_summary
+            main.next_rollout_entry_id = original_next_id
+            db.close()
+
+        self.assertEqual(result["next_id"], "RDP-2")
+        self.assertEqual(result["summary"], {"cable": 7})
+        self.assertEqual([row["ID"] for row in result["latest"]], ["RDP-META-1"])
+
     def test_entry_record_search_preserves_warehouse_manager_scope(self):
         db = SessionLocal()
         db.query(RolloutRecord).delete()
