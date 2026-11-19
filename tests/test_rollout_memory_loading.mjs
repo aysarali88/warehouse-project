@@ -71,7 +71,7 @@ test('Operations view renders the compact operations projection', () => {
   assert.doesNotMatch(operations, /wh\.rolloutDailyProgress/);
 });
 
-test('City Overview loads only the compact ranking and does not fetch the large Rollout summary', () => {
+test('City Overview keeps the compact ranking endpoint to avoid loading the larger Rollout summary', () => {
   const tabSwitch = html.match(/function switchRolloutDailyTab\([^\n]+/)?.[0];
   const overviewBranch = tabSwitch?.match(/if\(rolloutOpen&&tab==='overview'\)\{([^}]*)\}/)?.[1] || '';
   assert.match(overviewBranch, /refreshRolloutCityRanking\(false\)/);
@@ -90,15 +90,17 @@ test('City Overview contains only the Productivity Ranking panel', () => {
 
 test('ranking score keeps the existing 80/20 cable and box weighting', () => {
   const metricSource = html.match(/function rolloutCityOverviewMetricFromSummary\([\s\S]*?\n\}/)?.[0] || '';
+  const scoreSource = html.match(/function rolloutDashboardProductivityScore\([\s\S]*?\n\}/)?.[0] || '';
   assert.ok(metricSource);
   const context = vm.createContext({
     rolloutPlanFor: () => ({}),
     isMaqawbaRolloutArea: () => false,
     applyRolloutDashboardMetricOverrides: metric => metric,
     rolloutTargetFor: () => ({ cableMeters: 100, totalBoxes: 10 }),
+    canonicalRolloutArea: area => area,
     Math,
   });
-  vm.runInContext(metricSource, context);
+  vm.runInContext(`${scoreSource}\n${metricSource}`, context);
   const score = vm.runInContext(`rolloutCityOverviewMetricFromSummary('Tripoli', 'Example', {
     cable_meters: 100, sub_end_box: 5, hub_box: 2, xbox: 1
   }).productivity`, context);
@@ -107,19 +109,53 @@ test('ranking score keeps the existing 80/20 cable and box weighting', () => {
 
 test('Maqawba ranking uses map-confirmed cable progress instead of raw cable totals', () => {
   const metricSource = html.match(/function rolloutCityOverviewMetricFromSummary\([\s\S]*?\n\}/)?.[0] || '';
+  const scoreSource = html.match(/function rolloutDashboardProductivityScore\([\s\S]*?\n\}/)?.[0] || '';
   const context = vm.createContext({
     rolloutPlanFor: () => ({}),
     isMaqawbaRolloutArea: area => area === 'Maqawba',
     applyRolloutDashboardMetricOverrides: metric => metric,
     rolloutTargetFor: () => ({ cableMeters: 100, totalBoxes: 10 }),
+    canonicalRolloutArea: area => area,
     Math,
   });
-  vm.runInContext(metricSource, context);
+  vm.runInContext(`${scoreSource}\n${metricSource}`, context);
   const score = vm.runInContext(`rolloutCityOverviewMetricFromSummary('Misurata', 'Maqawba', {
     cable_meters: 300, map_cable_meters: 50, map_cable_target_meters: 100,
     map_cable_progress_available: true, sub_end_box: 5, hub_box: 2, xbox: 1
   }).productivity`, context);
   assert.equal(score, 56);
+});
+
+test('Dashboard and Productivity Ranking share the same 80/20 scoring helper and target source', () => {
+  const dashboardRenderer = html.match(/function renderRolloutDailyProgress\(\)\{[\s\S]*?(?=\nfunction )/)?.[0] || '';
+  const overviewMetric = html.match(/function rolloutCityOverviewMetricFromSummary\([\s\S]*?\n\}/)?.[0] || '';
+  const scoreHelper = html.match(/function rolloutDashboardProductivityScore\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(dashboardRenderer, /rolloutDashboardAreaMetric\(rolloutDashboardFilters\.city,area,rows\)/);
+  assert.match(overviewMetric, /rolloutDashboardProductivityScore\(metric,finalTarget\)/);
+  assert.doesNotMatch(overviewMetric, /row\.design_target/);
+  assert.ok(scoreHelper);
+
+  const context = vm.createContext({
+    Math,
+    rolloutPlanFor: () => ({}),
+    isMaqawbaRolloutArea: () => false,
+    applyRolloutDashboardMetricOverrides: metric => metric,
+    rolloutTargetFor: () => ({ cableMeters: 39925, totalBoxes: 448 }),
+    canonicalRolloutArea: area => area,
+  });
+  vm.runInContext(`${scoreHelper}\n${overviewMetric}`, context);
+  const scores = vm.runInContext(`(() => {
+    const summary = rolloutCityOverviewMetricFromSummary('Tripoli', 'Al-Mansoura', {
+      cable_meters: 39925, sub_end_box: 415, hub_box: 31, xbox: 2,
+      design_target: { cableMeters: 50000, totalBoxes: 500 }
+    });
+    const dashboard = rolloutDashboardProductivityScore(
+      { cableMeters: 39925, totalBoxes: 448 },
+      { cableMeters: 39925, totalBoxes: 448 }
+    );
+    return [summary.productivity, dashboard.productivity];
+  })()`, context);
+  assert.deepEqual(Array.from(scores), [100, 100]);
 });
 
 test('Manqosh project timeline uses the existing start date and updated November 23 end date', () => {

@@ -6413,6 +6413,7 @@ def rollout_city_ranking_reference_index(reference_rows: list[dict]) -> dict:
             "hub_codes": set(),
             "route_codes": set(),
             "has_parts": False,
+            "has_map_parts": False,
             "design_boxes": set(),
             "design_hubs": set(),
             "design_xboxes": set(),
@@ -6449,6 +6450,7 @@ def rollout_city_ranking_reference_index(reference_rows: list[dict]) -> dict:
                 item.setdefault("design_box_count", set()).add((xbox, code))
     for (city_key, area_key), item in index.items():
         item["has_parts"] = bool(item["design_boxes"] and item["design_hubs"])
+        item["has_map_parts"] = bool((item["design_boxes"] or item["design_hubs"]) and item["xboxes"])
         item["design_target"] = {
             "cableMeters": item["design_cable_meters"],
             "subEndBox": len(item.get("design_box_count", set())),
@@ -6460,11 +6462,12 @@ def rollout_city_ranking_reference_index(reference_rows: list[dict]) -> dict:
 
 
 def rollout_city_ranking_keep_row(row, area_info: dict | None, city_key: str, area_key: str) -> bool:
-    # Keep the city ranking aligned with the dashboard summary, which only
-    # applies map-code filtering to Maqawba's map-confirmed totals.
-    if area_key != "maqawba":
+    # Mirror rolloutDashboardMetricRows: areas with an active map filter coded
+    # records, while Maqawba requires exact codes for all metric rows.
+    if not area_info or not area_info.get("has_map_parts"):
         return True
 
+    exact_codes = area_key == "maqawba"
     material = rollout_norm(f"{row.item or ''} {row.material_type or ''}")
     xbox = rollout_xbox_key(row.related_to_xbox or "")
     box_code = rollout_city_ranking_code_key(row.box_code or "")
@@ -6475,15 +6478,16 @@ def rollout_city_ranking_keep_row(row, area_info: dict | None, city_key: str, ar
     xbox_codes = area_info["xboxes"] if area_info else set()
 
     if "hubbox" in material:
-        return (xbox, box_code) in hub_codes if area_key == "maqawba" else not box_code or (xbox, box_code) in hub_codes
+        return (xbox, box_code) in hub_codes if exact_codes else not box_code or (xbox, box_code) in hub_codes
     if "xbox" in material:
-        return (xbox in xbox_codes and box_code == rollout_city_ranking_code_key(xbox)) if area_key == "maqawba" else not box_code or (xbox in xbox_codes and box_code == rollout_city_ranking_code_key(xbox))
+        matched = xbox in xbox_codes and box_code == rollout_city_ranking_code_key(xbox)
+        return matched if exact_codes else not box_code or matched
     if "subbox" in material or "endbox" in material:
-        return (xbox, box_code) in box_codes if area_key == "maqawba" else not box_code or (xbox, box_code) in box_codes
+        return (xbox, box_code) in box_codes if exact_codes else not box_code or (xbox, box_code) in box_codes
     if "singlecoredistributioncable" in material or "distributioncable" in material:
-        return (xbox, cable_code) in box_codes if area_key == "maqawba" else not cable_code or (xbox, cable_code) in box_codes
+        return (xbox, cable_code) in box_codes if exact_codes else not cable_code or (xbox, cable_code) in box_codes
     if "4corecable" in material:
-        return (xbox, cable_code) in route_codes if area_key == "maqawba" else not cable_code or (xbox, cable_code) in route_codes
+        return (xbox, cable_code) in route_codes if exact_codes else not cable_code or (xbox, cable_code) in route_codes
     return True
 
 
@@ -6584,7 +6588,7 @@ def rollout_city_ranking_summary(request: Request, program: str = DEFAULT_PROGRA
             else:
                 metric["unlinked_xbox_qty"] += qty
 
-        if area_key == "maqawba" and area_info and rollout_city_ranking_map_cable_match(row, "distribution"):
+        if area_key in {"maqawba", "awladbaeoo"} and area_info and rollout_city_ranking_map_cable_match(row, "distribution"):
             xbox = rollout_xbox_key(row.related_to_xbox or "")
             candidates = (row.cable_code or "", row.box_code or "")
             targets = area_info["map_cables"]
@@ -6592,7 +6596,7 @@ def rollout_city_ranking_summary(request: Request, program: str = DEFAULT_PROGRA
                 code_key = rollout_city_ranking_code_key(candidate)
                 if code_key and (xbox, "distribution", code_key) in targets:
                     installed_map_cables.setdefault(ref_key, set()).add((xbox, "distribution", code_key))
-        if area_key == "maqawba" and area_info and rollout_city_ranking_map_cable_match(row, "fourcore"):
+        if area_key in {"maqawba", "awladbaeoo"} and area_info and rollout_city_ranking_map_cable_match(row, "fourcore"):
             xbox = rollout_xbox_key(row.related_to_xbox or "")
             candidates = (row.cable_code or "", row.box_code or "")
             targets = area_info["map_cables"]
@@ -6605,9 +6609,10 @@ def rollout_city_ranking_summary(request: Request, program: str = DEFAULT_PROGRA
     for key, metric in accumulators.items():
         city_key, area_key = key
         area_info = reference.get(key)
-        metric["map_cable_meters"] = sum(area_info["map_cables"].get(item, 0.0) for item in installed_map_cables.get(key, set())) if area_key == "maqawba" and area_info else 0.0
-        metric["map_cable_target_meters"] = sum(area_info["map_cables"].values()) if area_key == "maqawba" and area_info else 0.0
-        metric["map_cable_progress_available"] = bool(area_info and area_info.get("has_parts")) if area_key == "maqawba" else False
+        uses_map_cable = area_key in {"maqawba", "awladbaeoo"}
+        metric["map_cable_meters"] = sum(area_info["map_cables"].get(item, 0.0) for item in installed_map_cables.get(key, set())) if uses_map_cable and area_info else 0.0
+        metric["map_cable_target_meters"] = sum(area_info["map_cables"].values()) if uses_map_cable and area_info else 0.0
+        metric["map_cable_progress_available"] = bool(area_info and area_info.get("has_map_parts")) if uses_map_cable else False
         metric["xbox"] = len(metric.pop("xbox_refs")) + metric.pop("unlinked_xbox_qty")
         metric["design_target"] = area_info.get("design_target") if area_info and area_info.get("has_parts") else None
         metric.pop("record_count", None)

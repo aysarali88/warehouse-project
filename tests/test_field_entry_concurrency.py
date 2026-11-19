@@ -1191,6 +1191,25 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertFalse({"rolloutRecords", "rolloutUsage", "rolloutDailyProgress", "rolloutSource"} & set(result))
         db.close()
 
+    def test_city_ranking_map_filter_matches_dashboard_for_mapped_areas(self):
+        area_info = {
+            "has_parts": True,
+            "has_map_parts": True,
+            "box_codes": {("X1", "H1L1S1")},
+            "hub_codes": {("X1", "H1")},
+            "route_codes": {("X1", "H1H2")},
+            "xboxes": {"X1"},
+        }
+        mapped_box = SimpleNamespace(item="SUB BOX", material_type="", related_to_xbox="X1", box_code="H1-L1-S1", cable_code="")
+        unmapped_box = SimpleNamespace(item="SUB BOX", material_type="", related_to_xbox="X1", box_code="H9-L1-S1", cable_code="")
+        uncoded_box = SimpleNamespace(item="SUB BOX", material_type="", related_to_xbox="X1", box_code="", cable_code="")
+
+        self.assertTrue(main.rollout_city_ranking_keep_row(mapped_box, area_info, "tripoli", "hayalandaluszone3"))
+        self.assertFalse(main.rollout_city_ranking_keep_row(unmapped_box, area_info, "tripoli", "hayalandaluszone3"))
+        self.assertTrue(main.rollout_city_ranking_keep_row(uncoded_box, area_info, "tripoli", "hayalandaluszone3"))
+        self.assertFalse(main.rollout_city_ranking_keep_row(uncoded_box, area_info, "misurata", "maqawba"))
+        self.assertTrue(main.rollout_city_ranking_keep_row(unmapped_box, {**area_info, "has_map_parts": False}, "tripoli", "hayalandaluszone3"))
+
     def test_city_ranking_returns_compact_canonical_area_metrics(self):
         self.assertEqual(main.rollout_city_ranking_area_identity("Bera W Taleem"), ("albera", "Bera W Taleem"))
         db = SessionLocal()
@@ -1227,8 +1246,8 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
 
         by_key = {(row["city"], row["area"]): row for row in result["records"]}
         mansoura = by_key[("Tripoli", "Al-Mansoura")]
-        self.assertEqual(mansoura["cable_meters"], 200)
-        self.assertEqual(mansoura["distribution_qty"], 4)
+        self.assertEqual(mansoura["cable_meters"], 150)
+        self.assertEqual(mansoura["distribution_qty"], 3)
         self.assertEqual(mansoura["sub_end_box"], 2)
         self.assertEqual(mansoura["xbox"], 1)
         maqawba = by_key[("Misurata", "Maqawba")]
