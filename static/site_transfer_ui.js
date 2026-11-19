@@ -547,6 +547,58 @@
     return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: 6 }) : escapeHtml(value);
   }
 
+  function renderTransferOrders(transfers, { isAdmin = () => false, getUserId = () => 0 } = {}) {
+    return (transfers || []).map(transfer => {
+      const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', requested_qty: '0', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
+      const approval = transfer.approval;
+      const assignedToMe = approval && Number(approval.approver_user_id) === Number(getUserId?.());
+      let actions = '';
+      if (!isAdmin() && assignedToMe && approval.status === 'pending' && transfer.status === 'draft') {
+        actions = `<button class="btn primary" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button><button class="btn danger" type="button" data-site-transfer-action="reject" data-transfer-id="${Number(transfer.id)}">Reject</button>`;
+      } else if (isAdmin() && transfer.status === 'draft') {
+        actions = approval?.status === 'pending'
+          ? `<span class="site-transfer-hint">Awaiting ${escapeHtml(approval.approver_name || 'regional manager')}</span>`
+          : approval ? `<span class="site-transfer-hint">${escapeHtml(displayStatus(approval.status))}</span>`
+            : `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`;
+      } else if (isAdmin() && transfer.status === 'approved') {
+        actions = `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`;
+      }
+
+      const created = transfer.created_at ? new Date(transfer.created_at).toLocaleString() : '—';
+      const itemRows = items.map(item => {
+        const receive = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
+          ? `<button class="btn soft" type="button" data-site-transfer-action="receive" data-transfer-id="${Number(transfer.id)}" data-item-id="${Number(item.id)}">Receive</button>`
+          : '—';
+        return `<tr>
+          <td>${escapeHtml(item.product)}${item.sku ? `<small class="site-transfer-cell-sub">${escapeHtml(item.sku)}</small>` : ''}</td>
+          <td>${displayQuantity(item.requested_qty)} ${escapeHtml(item.uom)}</td>
+          <td>${displayQuantity(item.sent_qty)} ${escapeHtml(item.uom)}</td>
+          <td>${displayQuantity(item.received_qty)} ${escapeHtml(item.uom)}</td>
+          <td>${displayQuantity(item.in_transit_qty)} ${escapeHtml(item.uom)}</td>
+          <td>${receive}</td>
+        </tr>`;
+      }).join('');
+      const approvalMeta = approval
+        ? `<span>Manager: ${escapeHtml(approval.approver_name || approval.approver_username || '—')}</span>`
+        : '';
+
+      return `<article class="site-transfer-order">
+        <div class="site-transfer-order-head">
+          <div class="site-transfer-order-id"><strong>Transfer #${Number(transfer.id)}</strong><span class="site-transfer-status status-${escapeHtml(transfer.status)}">${escapeHtml(displayStatus(transfer.status))}</span></div>
+          <div class="site-transfer-order-route"><span>${escapeHtml(transfer.from_site)}</span><span class="site-transfer-route-arrow" aria-label="to">→</span><span>${escapeHtml(transfer.to_site)}</span></div>
+          <div class="site-transfer-order-meta"><span>By ${escapeHtml(transfer.created_by || '—')}</span><span>${escapeHtml(created)}</span><span>${items.length} ${items.length === 1 ? 'material' : 'materials'}</span>${approvalMeta}</div>
+          <div class="site-transfer-order-actions">${actions}</div>
+        </div>
+        <details class="site-transfer-order-details">
+          <summary><span>Material details</span><span>${items.length} ${items.length === 1 ? 'item' : 'items'}</span></summary>
+          <div class="table-wrap site-transfer-table-wrap"><table class="site-transfer-table"><thead><tr>
+            <th>Product</th><th>Requested</th><th>Sent</th><th>Received</th><th>In Transit</th><th>Action</th>
+          </tr></thead><tbody>${itemRows}</tbody></table></div>
+        </details>
+      </article>`;
+    }).join('');
+  }
+
   function attach({ api, getProgram, isAdmin, isRequester, getUserId, confirm, prompt }) {
     const root = document.getElementById('siteTransferView');
     if (!root) return null;
@@ -615,46 +667,7 @@
       if (!state.transfers.length) {
         table.innerHTML = '<div class="empty">No transfers on this page.</div>';
       } else {
-        const rows = state.transfers.map(transfer => {
-          const items = transfer.items?.length ? transfer.items : [{ product: '—', uom: '', requested_qty: '0', sent_qty: '0', received_qty: '0', in_transit_qty: '0' }];
-          return items.map((item, index) => {
-            const group = (content) => index === 0 ? `<td rowspan="${items.length}">${content}</td>` : '';
-            const assignedApproval = transfer.approval;
-            const assignedToMe = assignedApproval && Number(assignedApproval.approver_user_id) === Number(getUserId?.());
-            const actions = index === 0
-              ? !isAdmin() && assignedToMe && assignedApproval.status === 'pending' && transfer.status === 'draft'
-                ? `<button class="btn primary" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button><button class="btn danger" type="button" data-site-transfer-action="reject" data-transfer-id="${Number(transfer.id)}">Reject</button>`
-                : isAdmin() && transfer.status === 'draft'
-                  ? assignedApproval?.status === 'pending'
-                    ? `<span class="site-transfer-hint">Awaiting ${escapeHtml(assignedApproval.approver_name || 'regional manager')}</span>`
-                    : assignedApproval ? `<span class="site-transfer-hint">${escapeHtml(displayStatus(assignedApproval.status))}</span>`
-                      : `<button class="btn soft" type="button" data-site-transfer-action="approve" data-transfer-id="${Number(transfer.id)}">Approve</button>`
-                  : isAdmin() && transfer.status === 'approved'
-                    ? `<button class="btn primary" type="button" data-site-transfer-action="dispatch" data-transfer-id="${Number(transfer.id)}">Dispatch</button>`
-                    : ''
-              : '';
-            const receive = isAdmin() && ['in_transit', 'partially_received'].includes(transfer.status)
-              ? `<button class="btn soft" type="button" data-site-transfer-action="receive" data-transfer-id="${Number(transfer.id)}" data-item-id="${Number(item.id)}">Receive</button>`
-              : '';
-            const created = transfer.created_at ? new Date(transfer.created_at).toLocaleString() : '—';
-            return `<tr>
-              ${group(`<strong>#${Number(transfer.id)}</strong>`)}
-              ${group(escapeHtml(transfer.from_site))}${group(escapeHtml(transfer.to_site))}
-              <td>${escapeHtml(item.product)}${item.sku ? `<small class="site-transfer-cell-sub">${escapeHtml(item.sku)}</small>` : ''}</td>
-              <td>${displayQuantity(item.requested_qty)} ${escapeHtml(item.uom)}</td>
-              <td>${displayQuantity(item.sent_qty)} ${escapeHtml(item.uom)}</td>
-              <td>${displayQuantity(item.received_qty)} ${escapeHtml(item.uom)}</td>
-              <td>${displayQuantity(item.in_transit_qty)} ${escapeHtml(item.uom)}</td>
-              ${group(`<span class="site-transfer-status status-${escapeHtml(transfer.status)}">${escapeHtml(displayStatus(transfer.status))}</span>`)}
-              ${group(`${escapeHtml(transfer.created_by)}${assignedApproval ? `<small class="site-transfer-cell-sub">Manager: ${escapeHtml(assignedApproval.approver_name || assignedApproval.approver_username)}</small>` : ''}`)}${group(escapeHtml(created))}
-              ${index === 0 ? `<td rowspan="${items.length}" class="site-transfer-actions">${actions}</td>` : ''}
-              <td>${receive}</td>
-            </tr>`;
-          }).join('');
-        }).join('');
-        table.innerHTML = `<div class="table-wrap site-transfer-table-wrap"><table class="site-transfer-table"><thead><tr>
-          <th>Transfer ID</th><th>From Site</th><th>To Site</th><th>Product</th><th>Requested Qty</th><th>Sent Qty</th><th>Received Qty</th><th>In Transit Qty</th><th>Status</th><th>Created By</th><th>Created Date</th><th colspan="2">Actions</th>
-        </tr></thead><tbody>${rows}</tbody></table></div>`;
+        table.innerHTML = `<div class="site-transfer-orders">${renderTransferOrders(state.transfers, { isAdmin, getUserId })}</div>`;
       }
       const meta = element('siteTransferPageMeta');
       if (meta) meta.textContent = `${Number(state.total).toLocaleString()} transfers · Page ${state.page} of ${state.totalPages || 1}`;
@@ -799,5 +812,5 @@
     return controller;
   }
 
-  return { PAGE_SIZE, quantityUnits, validateReceiptQuantity, validateTransferForm, displayStatus, createController, attach };
+  return { PAGE_SIZE, quantityUnits, validateReceiptQuantity, validateTransferForm, displayStatus, renderTransferOrders, createController, attach };
 });
