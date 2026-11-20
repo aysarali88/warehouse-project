@@ -4946,6 +4946,17 @@ def rollout_duplicate_details(row: RolloutRecord) -> dict:
     }
 
 
+def rollout_duplicate_code_candidates(db: Session, code_column, area: str, xbox: str) -> list[RolloutRecord]:
+    dialect_name = db.get_bind().dialect.name
+    area_keys = {rollout_norm(value) for value in rollout_area_query_values(area)}
+    query = db.query(RolloutRecord).filter(code_column != "")
+    if area_keys:
+        query = query.filter(rollout_sql_normalized(RolloutRecord.area, dialect_name).in_(area_keys))
+    if xbox:
+        query = query.filter(rollout_xbox_filter_clause(RolloutRecord.related_to_xbox, xbox))
+    return query.all()
+
+
 def rollout_consumption_movement(db: Session, row: RolloutRecord):
     return (
         db.query(SiteMaterialMovement)
@@ -6912,7 +6923,6 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
             "success": True,
             "message": "Field entry already saved",
             "record": row_to_record(existing_submission),
-            "summary": rollout_entry_summary_from_db(request, db),
             "warnings": [],
             "replayed": True,
         }
@@ -6938,7 +6948,7 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
             raise HTTPException(status_code=400, detail="Code is not listed for this Area / XBOX / Type")
 
         code_attr = RolloutRecord.cable_code if code_type == "cable" else RolloutRecord.box_code
-        existing_candidates = db.query(RolloutRecord).filter(code_attr != "").all()
+        existing_candidates = rollout_duplicate_code_candidates(db, code_attr, area, xbox)
         for row in existing_candidates:
             if rollout_record_code_type(row) != code_type:
                 continue
@@ -6993,7 +7003,6 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
                 "success": True,
                 "message": "Field entry already saved",
                 "record": row_to_record(existing_submission),
-                "summary": rollout_entry_summary_from_db(request, db),
                 "warnings": [],
                 "replayed": True,
             }
@@ -7015,7 +7024,6 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         "success": True,
         "message": "Field entry saved",
         "record": row_to_record(row),
-        "summary": rollout_entry_summary_from_db(request, db),
         "warnings": warnings,
     }
 
@@ -7194,7 +7202,6 @@ def save_rollout_hub_accessories(data: dict, request: Request, db: Session = Dep
         "success": True,
         "message": "Hub accessories saved",
         "records": [row_to_record(row) for row in saved_rows],
-        "summary": rollout_entry_summary_from_db(request, db),
     }
 
 

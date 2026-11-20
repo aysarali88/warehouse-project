@@ -2286,7 +2286,7 @@ function restoreUiState(){const state=uiState();switchView(state.view||'dashboar
 function applyAuthState(){if(!session){document.getElementById('programScreen').classList.remove('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.add('hidden');document.documentElement.classList.remove('auth-restoring');return}document.getElementById('programScreen').classList.add('hidden');document.getElementById('loginScreen').classList.add('hidden');document.getElementById('appShell').classList.remove('hidden');document.documentElement.classList.remove('auth-restoring');setCurrentUserFromSession();applyPermissions();if(location.hash)applyPageLink();else restoreUiState();if(roleKey()==='admin'){loadUsers();loadActiveUsers()}sendPresenceHeartbeat();pollNotifications(false);refreshMrsFast()}
 function userRole(){return activeRole||'Requester'}
 function isAdmin(){return roleKey()==='admin'}
-function canUseMapDirectEntry(){return isAdmin()||(normalizeProgram(currentProgram)==='FTTH'&&roleKey()==='requester'&&normalizeText(session?.username)==='ghassan')}
+function canUseMapDirectEntry(){return isAdmin()||(normalizeProgram(currentProgram)==='FTTH'&&roleKey()==='requester')}
 function canAccessAreaBuilder(){return !isSingleRan()&&(isAdmin()||session?.area_builder_access===true)}
 function isManagement(){return roleKey()==='management'}
 function canApprove(){return ['approver','approval','admin'].includes(roleKey())}
@@ -4173,7 +4173,7 @@ function mapEntryForTarget(target){
   return {area,city:wfmValue(ref,['City'])||'',xbox:wfmXboxKey(xbox),code,codeType:item==='Cable'?'cable':'box',item,material,cableRoute:wfmValue(ref,['Cable route','Route type'])||'Aerial',mountType:'',expectedLength:Number(wfmValue(ref,['Cable length m'])||0)};
 }
 function openMapFieldEntryFromTarget(target){
-  if(!canUseMapDirectEntry()){toast('Direct map entry is available to Ghassan and Admin only');return}
+  if(!canUseMapDirectEntry()){toast('Direct map entry is not available for this account');return}
   const entry=mapEntryForTarget(target);if(!entry){toast('Map item details are unavailable');return}
   const saved=fieldEntrySavedContext();mapFieldEntryState={entry,saving:false,submissionKey:fieldEntrySubmissionKey()};
   document.getElementById('mapEntryScope').textContent=`${entry.area} / ${entry.xbox} / ${entry.code}${entry.expectedLength?` / planned ${entry.expectedLength}m`:''}`;

@@ -260,6 +260,125 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual(result["summary"], {"cable": 7})
         self.assertEqual([row["ID"] for row in result["latest"]], ["RDP-META-1"])
 
+    def test_duplicate_code_candidates_are_scoped_to_area_and_xbox(self):
+        db = SessionLocal()
+        db.query(RolloutRecord).delete()
+        db.add_all([
+            RolloutRecord(record_id="RDP-DUP-CANONICAL", area="Al-Mansoura", related_to_xbox="X1", cable_code="H1-L1-S1"),
+            RolloutRecord(record_id="RDP-DUP-AREA-ALIAS", area="Mansoura", related_to_xbox="X-BOX 01", cable_code="H01 L1 S1"),
+            RolloutRecord(record_id="RDP-DUP-OTHER-XBOX", area="Al-Mansoura", related_to_xbox="X2", cable_code="H1-L1-S1"),
+            RolloutRecord(record_id="RDP-DUP-OTHER-AREA", area="Ras Ali", related_to_xbox="X1", cable_code="H1-L1-S1"),
+        ])
+        db.commit()
+        try:
+            candidates = main.rollout_duplicate_code_candidates(
+                db,
+                RolloutRecord.cable_code,
+                "Al-Mansoura",
+                "X1",
+            )
+        finally:
+            db.close()
+
+        self.assertEqual(
+            {row.record_id for row in candidates},
+            {"RDP-DUP-CANONICAL", "RDP-DUP-AREA-ALIAS"},
+        )
+
+    def test_new_field_entry_save_skips_synchronous_project_summary(self):
+        db = SessionLocal()
+        submission_key = "field-entry-fast-save-test-001"
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_matches = main.rollout_reference_matches
+        original_summary = main.rollout_entry_summary_from_db
+        main.rollout_reference_matches = lambda *args, **kwargs: [{
+            "area": "Maqawba",
+            "xbox": "X1",
+            "code": "H1-L1-S1",
+            "type": "cable",
+            "cable_length_m": 0,
+        }]
+        main.rollout_entry_summary_from_db = lambda *args, **kwargs: self.fail(
+            "save response must not wait for the full project summary"
+        )
+        try:
+            result = main.save_rollout_field_entry(
+                {
+                    "submission_key": submission_key,
+                    "Area": "Maqawba",
+                    "Related to XBOX": "X1",
+                    "code_type": "cable",
+                    "code": "H1-L1-S1",
+                    "item": "Cable",
+                    "material_type": "Single-Core Distribution Cable_50m",
+                    "actual": 1,
+                    "status": "Done",
+                },
+                request,
+                db,
+            )
+            self.assertTrue(result["success"])
+            self.assertNotIn("summary", result)
+            self.assertEqual(result["record"]["cable code"], "H1-L1-S1")
+        finally:
+            main.rollout_reference_matches = original_matches
+            main.rollout_entry_summary_from_db = original_summary
+            db.query(RolloutRecord).filter(RolloutRecord.submission_key == submission_key).delete()
+            db.commit()
+            main.clear_rollout_db_cache()
+            db.close()
+
+    def test_hub_accessory_save_skips_synchronous_project_summary(self):
+        db = SessionLocal()
+        submission_key = "field-entry-accessory-fast-test-001"
+        request = SimpleNamespace(
+            state=SimpleNamespace(
+                current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"),
+                program="FTTH",
+            )
+        )
+        original_matches = main.rollout_reference_matches
+        original_summary = main.rollout_entry_summary_from_db
+        main.rollout_reference_matches = lambda *args, **kwargs: [{
+            "area": "Maqawba",
+            "xbox": "X1",
+            "code": "H1-L1-S1",
+            "type": "box",
+            "box_type": "HUB BOX",
+        }]
+        main.rollout_entry_summary_from_db = lambda *args, **kwargs: self.fail(
+            "accessory save response must not wait for the full project summary"
+        )
+        try:
+            result = main.save_rollout_hub_accessories(
+                {
+                    "submission_key": submission_key,
+                    "Area": "Maqawba",
+                    "Related to XBOX": "X1",
+                    "hub_code": "H1-L1-S1",
+                    "accessories": [{"material": "Metal wedge clamping", "quantity": 2}],
+                },
+                request,
+                db,
+            )
+            self.assertTrue(result["success"])
+            self.assertNotIn("summary", result)
+            self.assertEqual(len(result["records"]), 1)
+        finally:
+            main.rollout_reference_matches = original_matches
+            main.rollout_entry_summary_from_db = original_summary
+            db.query(RolloutRecord).filter(
+                RolloutRecord.submission_key.like(f"{submission_key}%")
+            ).delete(synchronize_session=False)
+            db.commit()
+            main.clear_rollout_db_cache()
+            db.close()
+
     def test_entry_record_search_preserves_warehouse_manager_scope(self):
         db = SessionLocal()
         db.query(RolloutRecord).delete()
