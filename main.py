@@ -7446,32 +7446,54 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     if cached is not None:
         return {**cached, "cached": True}
 
-    stock = list_stock_balances(request, program_key, db)
-    usage = list_stock_usage(request, program_key, db)
-    movements = list_stock_movements(request, 12 if light else 40, program_key, db)
-    mrs = (
-        list_material_requisition_headers(80, db=db, viewer=viewer, role=role, requester_identity=requester_identity, manager_can_request=manager_can_request, program=program_key)
-        if light
-        else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
+    started_at = time.perf_counter()
+    section_times = {}
+
+    def measured(name, callback):
+        section_started_at = time.perf_counter()
+        try:
+            return callback()
+        finally:
+            section_times[name] = round((time.perf_counter() - section_started_at) * 1000, 1)
+
+    stock = measured("stock_balances", lambda: list_stock_balances(request, program_key, db))
+    usage = measured("stock_usage", lambda: list_stock_usage(request, program_key, db))
+    movements = measured("movements", lambda: list_stock_movements(request, 12 if light else 40, program_key, db))
+    mrs = measured(
+        "material_requisitions",
+        lambda: (
+            list_material_requisition_headers(80, db=db, viewer=viewer, role=role, requester_identity=requester_identity, manager_can_request=manager_can_request, program=program_key)
+            if light
+            else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
+        ),
     )
-    receipts = list_receive_order_headers(12, program_key, db) if light else list_receive_orders(request, limit=60, program=program_key, db=db)
-    transfers = (
-        list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
-        if light
-        else list_material_transfers(request, 200, viewer=viewer, role=role, program=program_key, db=db)
+    receipts = measured(
+        "receive_orders",
+        lambda: list_receive_order_headers(12, program_key, db) if light else list_receive_orders(request, limit=60, program=program_key, db=db),
     )
-    returns = list_material_return_headers(120, program_key, db) if light else list_material_returns(request, 200, program_key, db)
-    scans = list_material_scans(request, 80 if light else 300, program_key, db)
+    transfers = measured(
+        "transfers",
+        lambda: (
+            list_material_transfer_headers(120, db=db, viewer=viewer, role=role, program=program_key)
+            if light
+            else list_material_transfers(request, 200, viewer=viewer, role=role, program=program_key, db=db)
+        ),
+    )
+    returns = measured(
+        "returns",
+        lambda: list_material_return_headers(120, program_key, db) if light else list_material_returns(request, 200, program_key, db),
+    )
+    scans = measured("scans", lambda: list_material_scans(request, 80 if light else 300, program_key, db))
     payload = {
         "success": True,
         "program": program_key,
         "programLabel": PROGRAM_LABELS[program_key],
         "partial": light,
-        "summary": warehouse_summary(program_key, db),
-        "warehouses": list_warehouses(program_key, db)["warehouses"],
-        "sites": list_sites(program_key, db)["sites"],
-        "technicians": list_technicians(program_key, db)["technicians"],
-        "products": list_products(program_key, db)["products"],
+        "summary": measured("summary", lambda: warehouse_summary(program_key, db)),
+        "warehouses": measured("warehouses", lambda: list_warehouses(program_key, db))["warehouses"],
+        "sites": measured("sites", lambda: list_sites(program_key, db))["sites"],
+        "technicians": measured("technicians", lambda: list_technicians(program_key, db))["technicians"],
+        "products": measured("products", lambda: list_products(program_key, db))["products"],
         "stockBalances": stock["balances"],
         "stockUsage": usage["usage"],
         "movements": movements["movements"],
@@ -7480,16 +7502,30 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         "transfers": transfers["transfers"],
         "returns": returns["returns"],
         "scanLogs": scans["scans"],
-        "damagedStock": virtual_damage_report(request, db, program_key),
+        "damagedStock": measured("damaged_stock", lambda: virtual_damage_report(request, db, program_key)),
     }
     if not light:
-        tech = list_technician_balances(request, program_key, db)
-        audit = list_audit_logs(request, 40, program_key, db) if current_user(request).role.strip().lower() == "admin" else {"logs": []}
+        tech = measured("technician_balances", lambda: list_technician_balances(request, program_key, db))
+        audit = measured(
+            "audit_logs",
+            lambda: list_audit_logs(request, 40, program_key, db)
+            if current_user(request).role.strip().lower() == "admin"
+            else {"logs": []},
+        )
         payload.update(
             {
                 "technicianBalances": tech["balances"],
                 "audit": audit["logs"],
             }
+        )
+    total_ms = round((time.perf_counter() - started_at) * 1000, 1)
+    if total_ms >= 2500:
+        logger.warning(
+            "warehouse_bootstrap_slow program=%s light=%s total_ms=%s sections_ms=%s",
+            program_key,
+            light,
+            total_ms,
+            json.dumps(section_times, sort_keys=True),
         )
     _warehouse_cache_set(cache_key, payload)
     return payload
@@ -10138,28 +10174,36 @@ def list_audit_logs(request: Request, limit: int = 50, program: str = DEFAULT_PR
 def list_material_requisitions(request: Request, limit: int = 50, viewer: str = "", role: str = "", program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
     viewer, role, requester_identity, manager_can_request = requisition_view_context(request, program_key)
-    rows = (
+    row_limit = max(0, min(limit, 200))
+    query = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse), selectinload(MaterialRequisition.items))
         .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
-        .all()
     )
-    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
-    return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
+    if normalize_usage_key(role) in {"admin", "management"}:
+        visible_rows = query.limit(row_limit).all()
+    else:
+        rows = query.all()
+        visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
+    return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[:row_limit]]}
 
 
 def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", requester_identity: str = "", manager_can_request: bool = False, program: str = DEFAULT_PROGRAM):
     program_key = normalize_program(program)
-    rows = (
+    row_limit = max(0, min(limit, 200))
+    query = (
         db.query(MaterialRequisition)
         .options(joinedload(MaterialRequisition.warehouse))
         .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
-        .all()
     )
-    visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
-    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in visible_rows[: min(limit, 200)]]}
+    if normalize_usage_key(role) in {"admin", "management"}:
+        visible_rows = query.limit(row_limit).all()
+    else:
+        rows = query.all()
+        visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
+    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in visible_rows[:row_limit]]}
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")
