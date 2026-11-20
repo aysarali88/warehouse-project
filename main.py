@@ -2337,10 +2337,6 @@ def reserved_stock_quantities(
     )
     if exclude_requisition_id:
         requisition_items = requisition_items.filter(MaterialRequisition.id != exclude_requisition_id)
-    for warehouse_id, product_id, quantity in requisition_items.all():
-        if product_id:
-            key = (warehouse_id, product_id)
-            reserved[key] = reserved.get(key, 0) + float(quantity or 0)
 
     transfer_items = (
         db.query(
@@ -2356,7 +2352,9 @@ def reserved_stock_quantities(
     )
     if exclude_transfer_id:
         transfer_items = transfer_items.filter(MaterialTransfer.id != exclude_transfer_id)
-    for warehouse_id, product_id, quantity in transfer_items.all():
+    for warehouse_id, product_id, quantity in requisition_items.union_all(transfer_items).all():
+        if not product_id:
+            continue
         key = (warehouse_id, product_id)
         reserved[key] = reserved.get(key, 0) + float(quantity or 0)
 
@@ -7415,30 +7413,46 @@ def rollout_source_check(request: Request, program: str = DEFAULT_PROGRAM, db: S
 @app.get("/api/warehouse/summary")
 def warehouse_summary(program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
-    inventory_receive_total = (
-        db.query(func.coalesce(func.sum(StockMovement.quantity), 0))
-        .filter(
-            StockMovement.program == program_key,
-            StockMovement.movement_type == "receive",
-            StockMovement.note.like("Inventory receive:%"),
-        )
-        .scalar()
-    )
+    warehouse_count = db.query(func.count(Warehouse.id)).filter(
+        Warehouse.program == program_key,
+        or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
+    ).scalar_subquery()
+    technician_count = db.query(func.count(Technician.id)).filter(
+        Technician.program == program_key,
+    ).scalar_subquery()
+    product_count = db.query(func.count(Product.id)).filter(
+        Product.program == program_key,
+    ).scalar_subquery()
+    movement_count = db.query(func.count(StockMovement.id)).filter(
+        StockMovement.program == program_key,
+        or_(StockMovement.warehouse_id.is_(None), StockMovement.warehouse_id.in_(regular_warehouse_ids_query(db, program_key))),
+    ).scalar_subquery()
+    open_serial_count = db.query(func.count(ProductSerial.id)).filter(
+        ProductSerial.program == program_key,
+        ProductSerial.status.in_(["in_warehouse", "with_technician"]),
+    ).scalar_subquery()
+    inventory_receive_total = db.query(func.coalesce(func.sum(StockMovement.quantity), 0)).filter(
+        StockMovement.program == program_key,
+        StockMovement.movement_type == "receive",
+        StockMovement.note.like("Inventory receive:%"),
+    ).scalar_subquery()
+    counts = db.query(
+        warehouse_count.label("warehouses"),
+        technician_count.label("technicians"),
+        product_count.label("products"),
+        movement_count.label("stock_movements"),
+        open_serial_count.label("open_serials"),
+        inventory_receive_total.label("inventory_receive_total"),
+    ).one()
     return {
         "success": True,
         "program": program_key,
-        "warehouses": db.query(Warehouse).filter(
-            Warehouse.program == program_key,
-            or_(Warehouse.status.is_(None), Warehouse.status != VIRTUAL_DAMAGE_WAREHOUSE_STATUS),
-        ).count(),
-        "technicians": db.query(Technician).filter(Technician.program == program_key).count(),
-        "products": db.query(Product).filter(Product.program == program_key).count(),
-        "stock_movements": db.query(StockMovement).filter(
-            StockMovement.program == program_key,
-            or_(StockMovement.warehouse_id.is_(None), StockMovement.warehouse_id.in_(regular_warehouse_ids_query(db, program_key))),
-        ).count(),
-        "open_serials": db.query(ProductSerial).filter(ProductSerial.program == program_key, ProductSerial.status.in_(["in_warehouse", "with_technician"])).count(),
-        "inventory_receive_total": float(inventory_receive_total or 0),
+        "warehouses": counts.warehouses or 0,
+        "technicians": counts.technicians or 0,
+        "products": counts.products or 0,
+        "stock_movements": counts.stock_movements or 0,
+        "open_serials": counts.open_serials or 0,
+        "inventory_receive_total": float(counts.inventory_receive_total or 0),
     }
 
 
@@ -7462,8 +7476,21 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
         finally:
             section_times[name] = round((time.perf_counter() - section_started_at) * 1000, 1)
 
-    stock = measured("stock_balances", lambda: list_stock_balances(request, program_key, db))
-    usage = measured("stock_usage", lambda: list_stock_usage(request, program_key, db))
+    balance_rows, reserved_quantities = measured(
+        "stock_balances",
+        lambda: _stock_balance_snapshot(request, program_key, db),
+    )
+    stock = {"balances": _stock_balances_payload(balance_rows, reserved_quantities)}
+    usage = measured(
+        "stock_usage",
+        lambda: _stock_usage_payload(
+            request,
+            program_key,
+            db,
+            balance_rows=balance_rows,
+            reserved_quantities=reserved_quantities,
+        ),
+    )
     movements = measured("movements", lambda: list_stock_movements(request, 12 if light else 40, program_key, db))
     mrs = measured(
         "material_requisitions",
@@ -8081,6 +8108,12 @@ def purge_product(product_id: int, data: ProductPurgeIn, request: Request, db: S
 @app.get("/api/warehouse/stock-balances")
 def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
     program_key = normalize_program(program)
+    rows, reserved = _stock_balance_snapshot(request, program_key, db)
+    return {"success": True, "balances": _stock_balances_payload(rows, reserved)}
+
+
+def _stock_balance_rows(request: Request, program: str, db: Session) -> list[StockBalance]:
+    program_key = normalize_program(program)
     query = (
         db.query(StockBalance)
         .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
@@ -8091,12 +8124,16 @@ def list_stock_balances(request: Request, program: str = DEFAULT_PROGRAM, db: Se
     allowed = allowed_warehouse_ids(request, db, program_key)
     if allowed is not None:
         query = query.filter(StockBalance.warehouse_id.in_(allowed))
-    rows = query.all()
-    reserved = reserved_stock_quantities(db, program_key)
-    return {
-        "success": True,
-        "balances": [balance_to_dict(r, reserved.get((r.warehouse_id, r.product_id), 0)) for r in rows],
-    }
+    return query.all()
+
+
+def _stock_balance_snapshot(request: Request, program: str, db: Session):
+    rows = _stock_balance_rows(request, program, db)
+    return rows, reserved_stock_quantities(db, program)
+
+
+def _stock_balances_payload(rows: list[StockBalance], reserved: dict[tuple[int, int], float]) -> list[dict]:
+    return [balance_to_dict(row, reserved.get((row.warehouse_id, row.product_id), 0)) for row in rows]
 
 
 def rollout_stock_usage_aggregate_rows(db: Session) -> list[dict]:
@@ -8243,47 +8280,32 @@ def site_transfer_usage_aggregate_rows(db: Session, program: str, site_ids=None)
     } for row in rows]
 
 
-@app.get("/api/warehouse/stock-usage")
-def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+def _stock_usage_payload(
+    request: Request,
+    program: str,
+    db: Session,
+    balance_rows: list[StockBalance] | None = None,
+    reserved_quantities: dict[tuple[int, int], float] | None = None,
+):
     program_key = normalize_program(program)
-    balances_query = (
-        db.query(StockBalance)
-        .options(joinedload(StockBalance.warehouse), joinedload(StockBalance.product))
-        .filter(StockBalance.program == program_key)
-        .filter(StockBalance.warehouse_id.in_(regular_warehouse_ids_query(db, program_key)))
-        .order_by(StockBalance.warehouse_id, StockBalance.product_id)
-    )
-    allowed = allowed_warehouse_ids(request, db, program_key)
-    if allowed is not None:
-        balances_query = balances_query.filter(StockBalance.warehouse_id.in_(allowed))
-    balances = balances_query.all()
-    reserved_quantities = reserved_stock_quantities(db, program_key)
-    received_totals = {
-        (warehouse_id, product_id): total or 0
-        for warehouse_id, product_id, total in (
-            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(StockMovement.quantity))
-            .filter(StockMovement.program == program_key, StockMovement.warehouse_id.isnot(None), StockMovement.movement_type.in_(["receive", "return_in", "transfer_in"]))
-            .group_by(StockMovement.warehouse_id, StockMovement.product_id)
-            .all()
-        )
-    }
-    consumed_query = (
-        db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(-StockMovement.quantity))
-        .filter(
-            StockMovement.warehouse_id.isnot(None),
-            StockMovement.program == program_key,
-            StockMovement.movement_type == "issue_to_technician",
-        )
-    )
-    consumed_totals = {
-        (warehouse_id, product_id): total or 0
-        for warehouse_id, product_id, total in consumed_query.group_by(StockMovement.warehouse_id, StockMovement.product_id).all()
-    }
-    adjustment_totals = {
-        (warehouse_id, product_id): total or 0
-        for warehouse_id, product_id, total in (
-            db.query(StockMovement.warehouse_id, StockMovement.product_id, func.sum(StockMovement.quantity))
-            .filter(StockMovement.program == program_key, StockMovement.warehouse_id.isnot(None), StockMovement.movement_type == "adjustment")
+    balances = balance_rows if balance_rows is not None else _stock_balance_rows(request, program_key, db)
+    reserved = reserved_quantities if reserved_quantities is not None else reserved_stock_quantities(db, program_key)
+    movement_types = ("receive", "return_in", "transfer_in", "issue_to_technician", "adjustment")
+    movement_totals = {
+        (warehouse_id, product_id): (received or 0, consumed or 0, adjustment or 0)
+        for warehouse_id, product_id, received, consumed, adjustment in (
+            db.query(
+                StockMovement.warehouse_id,
+                StockMovement.product_id,
+                func.sum(case((StockMovement.movement_type.in_(("receive", "return_in", "transfer_in")), StockMovement.quantity), else_=0)),
+                func.sum(case((StockMovement.movement_type == "issue_to_technician", -StockMovement.quantity), else_=0)),
+                func.sum(case((StockMovement.movement_type == "adjustment", StockMovement.quantity), else_=0)),
+            )
+            .filter(
+                StockMovement.program == program_key,
+                StockMovement.warehouse_id.isnot(None),
+                StockMovement.movement_type.in_(movement_types),
+            )
             .group_by(StockMovement.warehouse_id, StockMovement.product_id)
             .all()
         )
@@ -8306,11 +8328,9 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
     usage_rows = []
     for balance in balances:
         key = (balance.warehouse_id, balance.product_id)
-        total_received = received_totals.get(key, 0)
-        total_consumed = consumed_totals.get(key, 0)
-        total_adjustment = adjustment_totals.get(key, 0)
+        total_received, total_consumed, total_adjustment = movement_totals.get(key, (0, 0, 0))
         remaining = balance.quantity or 0
-        reserved_pending = float(reserved_quantities.get(key, 0) or 0)
+        reserved_pending = float(reserved.get(key, 0) or 0)
         available_stock = max(float(remaining or 0) - reserved_pending, 0)
         display_total = remaining + total_consumed
         denominator = display_total if display_total > 0 else total_received
@@ -8346,6 +8366,11 @@ def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Sessi
             }
         )
     return {"success": True, "usage": usage_rows}
+
+
+@app.get("/api/warehouse/stock-usage")
+def list_stock_usage(request: Request, program: str = DEFAULT_PROGRAM, db: Session = Depends(db_session)):
+    return _stock_usage_payload(request, program, db)
 
 
 MONTHLY_NEED_REFERENCE = [
