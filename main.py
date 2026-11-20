@@ -1963,7 +1963,19 @@ def virtual_damage_report(request: Request, db: Session, program: str) -> dict:
             "quantity": 0,
         })
         item["quantity"] += float(balance.quantity or 0)
-    movements = db.query(StockMovement).options(
+    movements = db.query(
+        StockMovement,
+        Warehouse.name.label("source_warehouse"),
+    ).outerjoin(
+        MaterialReturnItem,
+        MaterialReturnItem.id == StockMovement.source_item_id,
+    ).outerjoin(
+        MaterialReturn,
+        MaterialReturn.id == MaterialReturnItem.return_id,
+    ).outerjoin(
+        Warehouse,
+        Warehouse.id == MaterialReturn.warehouse_id,
+    ).options(
         joinedload(StockMovement.product),
     ).filter(
         StockMovement.program == program_key,
@@ -1971,22 +1983,12 @@ def virtual_damage_report(request: Request, db: Session, program: str) -> dict:
         StockMovement.warehouse_id.in_(list(virtual_by_id) or [-1]),
     ).order_by(StockMovement.id.desc()).limit(50).all()
     events = []
-    for row in movements:
-        source_name = ""
-        if row.source_item_id:
-            source = (
-                db.query(Warehouse.name)
-                .join(MaterialReturn, MaterialReturn.warehouse_id == Warehouse.id)
-                .join(MaterialReturnItem, MaterialReturnItem.return_id == MaterialReturn.id)
-                .filter(MaterialReturnItem.id == row.source_item_id)
-                .scalar()
-            )
-            source_name = source or ""
+    for row, source_name in movements:
         events.append({
             "date": row.created_at.isoformat() if row.created_at else "",
             "reference": row.reference,
             "source_item_id": row.source_item_id,
-            "source_warehouse": source_name,
+            "source_warehouse": source_name or "",
             "product": product_display_name(row.product),
             "sku": row.product.sku if row.product else "",
             "serial_number": row.serial_number or "",
@@ -2321,38 +2323,42 @@ def reserved_stock_quantities(
     program_key = normalize_program(program)
     reserved: dict[tuple[int, int], float] = {}
 
-    requisitions = (
-        db.query(MaterialRequisition)
-        .options(selectinload(MaterialRequisition.items))
+    requisition_items = (
+        db.query(
+            MaterialRequisition.warehouse_id,
+            MaterialRequisitionItem.product_id,
+            MaterialRequisitionItem.quantity,
+        )
+        .join(MaterialRequisitionItem, MaterialRequisitionItem.requisition_id == MaterialRequisition.id)
         .filter(
             MaterialRequisition.program == program_key,
             MaterialRequisition.status.in_(RESERVING_REQUISITION_STATUSES),
         )
-        .all()
     )
-    for requisition in requisitions:
-        if exclude_requisition_id and requisition.id == exclude_requisition_id:
-            continue
-        for item in requisition.items:
-            if item.product_id:
-                key = (requisition.warehouse_id, item.product_id)
-                reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+    if exclude_requisition_id:
+        requisition_items = requisition_items.filter(MaterialRequisition.id != exclude_requisition_id)
+    for warehouse_id, product_id, quantity in requisition_items.all():
+        if product_id:
+            key = (warehouse_id, product_id)
+            reserved[key] = reserved.get(key, 0) + float(quantity or 0)
 
-    transfers = (
-        db.query(MaterialTransfer)
-        .options(selectinload(MaterialTransfer.items))
+    transfer_items = (
+        db.query(
+            MaterialTransfer.from_warehouse_id,
+            MaterialTransferItem.product_id,
+            MaterialTransferItem.quantity,
+        )
+        .join(MaterialTransferItem, MaterialTransferItem.transfer_id == MaterialTransfer.id)
         .filter(
             MaterialTransfer.program == program_key,
             MaterialTransfer.status.in_(RESERVING_TRANSFER_STATUSES),
         )
-        .all()
     )
-    for transfer in transfers:
-        if exclude_transfer_id and transfer.id == exclude_transfer_id:
-            continue
-        for item in transfer.items:
-            key = (transfer.from_warehouse_id, item.product_id)
-            reserved[key] = reserved.get(key, 0) + float(item.quantity or 0)
+    if exclude_transfer_id:
+        transfer_items = transfer_items.filter(MaterialTransfer.id != exclude_transfer_id)
+    for warehouse_id, product_id, quantity in transfer_items.all():
+        key = (warehouse_id, product_id)
+        reserved[key] = reserved.get(key, 0) + float(quantity or 0)
 
     return reserved
 
