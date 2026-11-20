@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
 from database import SessionLocal
-from models import Product, RolloutRecord, StockBalance, Warehouse
+from models import Product, RolloutRecord, StockBalance, StockMovement, Warehouse
 
 
 def process_rss_bytes():
@@ -217,6 +217,36 @@ class MemoryFixPhase2ATests(unittest.TestCase):
 
     def _legacy_rollout_rows(self):
         return [main.row_to_record(row) for row in self.db.query(RolloutRecord).order_by(RolloutRecord.id.asc()).yield_per(200)]
+
+    def test_stock_usage_keeps_movement_totals_after_conditional_aggregation(self):
+        warehouse = self.db.query(Warehouse).filter_by(program="FTTH", name="Misurata Lnet").one()
+        product = self.db.query(Product).filter_by(program="FTTH", sku="P2A-DIST-80").one()
+        self.db.add_all([
+            StockMovement(program="FTTH", movement_type="receive", product_id=product.id, warehouse_id=warehouse.id, quantity=10),
+            StockMovement(program="FTTH", movement_type="return_in", product_id=product.id, warehouse_id=warehouse.id, quantity=2),
+            StockMovement(program="FTTH", movement_type="transfer_in", product_id=product.id, warehouse_id=warehouse.id, quantity=3),
+            StockMovement(program="FTTH", movement_type="issue_to_technician", product_id=product.id, warehouse_id=warehouse.id, quantity=-4),
+            StockMovement(program="FTTH", movement_type="adjustment", product_id=product.id, warehouse_id=warehouse.id, quantity=5),
+        ])
+        self.db.commit()
+
+        statements = []
+
+        def record_sql(_conn, _cursor, statement, _parameters, _context, _executemany):
+            statements.append(statement)
+
+        event.listen(main.engine, "before_cursor_execute", record_sql)
+        with patch.object(main, "rollout_stock_usage_aggregate_rows", return_value=[]):
+            try:
+                result = main.list_stock_usage(self.request, "FTTH", self.db)
+            finally:
+                event.remove(main.engine, "before_cursor_execute", record_sql)
+
+        usage = next(row for row in result["usage"] if row["warehouse_id"] == warehouse.id and row["product_id"] == product.id)
+        self.assertEqual(len(statements), 3)
+        self.assertEqual(usage["received_movements"], 15)
+        self.assertEqual(usage["total_consumed"], 4)
+        self.assertEqual(usage["total_adjustment"], 5)
 
     def test_pagination_search_filters_and_empty_results(self):
         first = main.list_records(self.request, page=1, page_size=500, db=self.db)

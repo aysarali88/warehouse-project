@@ -168,6 +168,14 @@ class WarehouseMemoryPhase1Tests(unittest.TestCase):
             event.remove(main.engine, "before_cursor_execute", record_sql)
         return result, statements
 
+    def test_warehouse_summary_uses_one_database_roundtrip(self):
+        result, statements = self.capture_sql(lambda: main.warehouse_summary("FTTH", self.db))
+
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(result["program"], "FTTH")
+        self.assertGreaterEqual(result["warehouses"], 1)
+        self.assertGreaterEqual(result["products"], 1)
+
     def test_receive_order_lists_and_dashboard_do_not_load_invoice_blob(self):
         def list_orders():
             return main.list_receive_orders(
@@ -195,8 +203,9 @@ class WarehouseMemoryPhase1Tests(unittest.TestCase):
 
         def dashboard(light):
             with (
-                patch.object(main, "list_stock_balances", return_value={"balances": []}),
-                patch.object(main, "list_stock_usage", return_value={"usage": []}),
+                patch.object(main, "_stock_balance_snapshot", return_value=([], {})),
+                patch.object(main, "_stock_balances_payload", return_value=[]),
+                patch.object(main, "_stock_usage_payload", return_value={"usage": []}),
                 patch.object(main, "list_stock_movements", return_value={"movements": []}),
                 patch.object(main, "list_material_requisition_headers", return_value={"requisitions": []}),
                 patch.object(main, "list_material_requisitions", return_value={"requisitions": []}),

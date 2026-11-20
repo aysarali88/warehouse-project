@@ -60,7 +60,11 @@ class MaterialRequisitionListLimitTests(unittest.TestCase):
         requisition_query = MagicMock()
         requisition_query.join.return_value = requisition_query
         requisition_query.filter.return_value = requisition_query
-        requisition_query.all.return_value = [(10, 2, 3.5), (10, 2, 1.0), (11, None, 4.0)]
+        requisition_query.union_all.return_value = requisition_query
+        requisition_query.all.return_value = [
+            (10, 2, 3.5), (10, 2, 1.0), (11, None, 4.0),
+            (10, 3, 2.0), (12, 2, 4.0),
+        ]
 
         transfer_query = MagicMock()
         transfer_query.join.return_value = transfer_query
@@ -72,6 +76,7 @@ class MaterialRequisitionListLimitTests(unittest.TestCase):
 
         self.assertEqual(result, {(10, 2): 4.5, (10, 3): 2.0, (12, 2): 4.0})
         self.assertEqual(db.query.call_count, 2)
+        requisition_query.union_all.assert_called_once_with(transfer_query)
 
 
 class VirtualDamageReportTests(unittest.TestCase):
