@@ -7468,6 +7468,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
 
     started_at = time.perf_counter()
     section_times = {}
+    section_details = {}
 
     def measured(name, callback):
         section_started_at = time.perf_counter()
@@ -7478,9 +7479,11 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
 
     balance_rows, reserved_quantities = measured(
         "stock_balances",
-        lambda: _stock_balance_snapshot(request, program_key, db),
+        lambda: _stock_balance_snapshot(request, program_key, db, diagnostics=section_details),
     )
+    serialization_started_at = time.perf_counter()
     stock = {"balances": _stock_balances_payload(balance_rows, reserved_quantities)}
+    section_details["stock_balance_serialization_ms"] = round((time.perf_counter() - serialization_started_at) * 1000, 1)
     usage = measured(
         "stock_usage",
         lambda: _stock_usage_payload(
@@ -7495,7 +7498,7 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     mrs = measured(
         "material_requisitions",
         lambda: (
-            list_material_requisition_headers(80, db=db, viewer=viewer, role=role, requester_identity=requester_identity, manager_can_request=manager_can_request, program=program_key)
+            list_material_requisition_headers(80, db=db, viewer=viewer, role=role, requester_identity=requester_identity, manager_can_request=manager_can_request, program=program_key, diagnostics=section_details)
             if light
             else list_material_requisitions(request, 200, viewer=viewer, role=role, program=program_key, db=db)
         ),
@@ -7554,11 +7557,12 @@ def warehouse_bootstrap(request: Request, light: bool = False, viewer: str = "",
     total_ms = round((time.perf_counter() - started_at) * 1000, 1)
     if total_ms >= 2500:
         logger.warning(
-            "warehouse_bootstrap_slow program=%s light=%s total_ms=%s sections_ms=%s",
+            "warehouse_bootstrap_slow program=%s light=%s total_ms=%s sections_ms=%s details_ms=%s",
             program_key,
             light,
             total_ms,
             json.dumps(section_times, sort_keys=True),
+            json.dumps(section_details, sort_keys=True),
         )
     _warehouse_cache_set(cache_key, payload)
     return payload
@@ -8127,9 +8131,18 @@ def _stock_balance_rows(request: Request, program: str, db: Session) -> list[Sto
     return query.all()
 
 
-def _stock_balance_snapshot(request: Request, program: str, db: Session):
+def _stock_balance_snapshot(request: Request, program: str, db: Session, diagnostics: dict | None = None):
+    started_at = time.perf_counter()
     rows = _stock_balance_rows(request, program, db)
-    return rows, reserved_stock_quantities(db, program)
+    if diagnostics is not None:
+        diagnostics["stock_balance_read_ms"] = round((time.perf_counter() - started_at) * 1000, 1)
+        diagnostics["stock_balance_rows"] = len(rows)
+    started_at = time.perf_counter()
+    reserved = reserved_stock_quantities(db, program)
+    if diagnostics is not None:
+        diagnostics["stock_reservations_ms"] = round((time.perf_counter() - started_at) * 1000, 1)
+        diagnostics["stock_reservation_keys"] = len(reserved)
+    return rows, reserved
 
 
 def _stock_balances_payload(rows: list[StockBalance], reserved: dict[tuple[int, int], float]) -> list[dict]:
@@ -10220,7 +10233,7 @@ def list_material_requisitions(request: Request, limit: int = 50, viewer: str = 
     return {"success": True, "requisitions": [requisition_to_dict(r) for r in visible_rows[:row_limit]]}
 
 
-def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", requester_identity: str = "", manager_can_request: bool = False, program: str = DEFAULT_PROGRAM):
+def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_session), viewer: str = "", role: str = "", requester_identity: str = "", manager_can_request: bool = False, program: str = DEFAULT_PROGRAM, diagnostics: dict | None = None):
     program_key = normalize_program(program)
     row_limit = max(0, min(limit, 200))
     query = (
@@ -10229,12 +10242,30 @@ def list_material_requisition_headers(limit: int = 50, db: Session = Depends(db_
         .filter(MaterialRequisition.program == program_key)
         .order_by(MaterialRequisition.id.desc())
     )
+    query_started_at = time.perf_counter()
+    filter_started_at = query_started_at
+    rows_loaded = 0
     if normalize_usage_key(role) in {"admin", "management"}:
         visible_rows = query.limit(row_limit).all()
+        query_ms = round((time.perf_counter() - query_started_at) * 1000, 1)
+        filter_ms = 0.0
     else:
         rows = query.all()
+        query_ms = round((time.perf_counter() - query_started_at) * 1000, 1)
+        filter_started_at = time.perf_counter()
         visible_rows = [r for r in rows if user_can_view_requisition(r, viewer, role, requester_identity, manager_can_request)]
-    return {"success": True, "requisitions": [requisition_header_to_dict(r) for r in visible_rows[:row_limit]]}
+        filter_ms = round((time.perf_counter() - filter_started_at) * 1000, 1)
+        rows_loaded = len(rows)
+    visible_rows = visible_rows[:row_limit]
+    serialization_started_at = time.perf_counter()
+    requisitions = [requisition_header_to_dict(r) for r in visible_rows]
+    if diagnostics is not None:
+        diagnostics["mr_query_ms"] = query_ms
+        diagnostics["mr_visibility_filter_ms"] = filter_ms
+        diagnostics["mr_serialization_ms"] = round((time.perf_counter() - serialization_started_at) * 1000, 1)
+        diagnostics["mr_rows_loaded"] = rows_loaded if rows_loaded else len(visible_rows)
+        diagnostics["mr_rows_returned"] = len(visible_rows)
+    return {"success": True, "requisitions": requisitions}
 
 
 @app.get("/api/warehouse/material-requisitions/{requisition_id}")

@@ -47,14 +47,17 @@ class MaterialRequisitionListLimitTests(unittest.TestCase):
         query.limit.return_value = query
         query.all.return_value = [SimpleNamespace(id=1)]
         db = SimpleNamespace(query=MagicMock(return_value=query))
+        diagnostics = {}
 
         with patch.object(main, "requisition_header_to_dict", return_value={"id": 1}):
             result = main.list_material_requisition_headers(
-                limit=80, db=db, viewer="Aysar", role="Admin", program="FTTH"
+                limit=80, db=db, viewer="Aysar", role="Admin", program="FTTH", diagnostics=diagnostics
             )
 
         query.limit.assert_called_once_with(80)
         self.assertEqual(result["requisitions"], [{"id": 1}])
+        self.assertEqual(diagnostics["mr_rows_loaded"], 1)
+        self.assertEqual(diagnostics["mr_rows_returned"], 1)
 
     def test_reserved_quantities_read_only_required_item_columns(self):
         requisition_query = MagicMock()
