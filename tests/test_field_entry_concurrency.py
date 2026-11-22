@@ -77,6 +77,12 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
             effective_date="2026-11-07",
         )
 
+    def test_box_type_mismatch_confirmation_covers_end_sub_and_hub(self):
+        self.assertEqual(main.rollout_box_type_mismatch_message("END BOX", "SUB BOX"), "Map reference is END BOX, selected material is different")
+        self.assertEqual(main.rollout_box_type_mismatch_message("SUB BOX", "HubBox"), "Map reference is SUB BOX, selected material is different")
+        self.assertEqual(main.rollout_box_type_mismatch_message("HUB BOX", "END BOX"), "Map reference is HUB BOX, selected material is different")
+        self.assertEqual(main.rollout_box_type_mismatch_message("HUB BOX", "HubBox"), "")
+
     def test_counter_and_submission_key_are_unique(self):
         db = SessionLocal()
         db.add(RolloutRecord(record_id="RDP-9", submission_key="existing-submission-key-0001"))

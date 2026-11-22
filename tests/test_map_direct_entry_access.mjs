@@ -70,8 +70,35 @@ test('non-cable map entries keep their fixed material', () => {
       submissionKey: 'field-entry-submission-key',
       entry: { item: 'SUB BOX', codeType: 'box', material: 'SUB BOX', area: 'Al-Dhel Street', city: 'Tripoli', xbox: 'X4', code: 'H1-L1-S2' },
     },
-    mapEntryValue: () => 'should not replace box material',
+    mapEntryValue: id => ({ mapEntryMaterial: 'should not replace box material' })[id] || '',
   });
 
   assert.equal(result.material_type, 'SUB BOX');
+});
+
+test('map field entry records each selected actual box type without changing its map code', () => {
+  const payload = html.match(/function mapEntryPayload\(confirmWarnings=false\)\{[^\n]+\}/)?.[0];
+  assert.ok(payload, 'map entry payload builder should be present');
+  assert.match(html, /<select id="mapEntryItem" onchange="mapEntryItemChanged\(\)"><\/select>/);
+  for (const actualType of ['SUB BOX', 'END BOX', 'HubBox']) {
+    const result = vm.runInNewContext(`${payload}\nmapEntryPayload()`, {
+      mapFieldEntryState: {
+        submissionKey: 'field-entry-submission-key',
+        entry: { item: 'END BOX', codeType: 'box', material: 'END BOX', area: 'Ras A Tota', city: 'Misurata', xbox: 'X1', code: 'H1-L1-S2' },
+      },
+      mapEntryValue: id => ({ mapEntryItem: actualType })[id] || '',
+    });
+
+    assert.equal(result.item, actualType);
+    assert.equal(result.material_type, actualType);
+    assert.equal(result.box_code, 'H1-L1-S2');
+  }
+});
+
+test('map entry type controls are valid JavaScript', () => {
+  for (const name of ['mapEntrySetMaterial', 'mapEntryItemChanged']) {
+    const source = html.match(new RegExp(`function ${name}\\([^\\n]+`))?.[0];
+    assert.ok(source, `${name} should be present`);
+    assert.doesNotThrow(() => new Function(source));
+  }
 });
