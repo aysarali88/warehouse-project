@@ -828,6 +828,43 @@ class FiberMapManagerTests(unittest.TestCase):
         self.assertIn(("X1", "H10L4S1"), {(row["xbox"], main.rollout_code_key(row["code"])) for row in updated["active"]})
         self.assertEqual(self.db.query(main.RolloutRecord).filter_by(area="Manqosh").count(), rollout_count)
 
+    def test_rwaisat_x3_h11_l4_is_exposed_as_one_exact_missing_line(self):
+        boxes = [{
+            "Area": "Rwaisat",
+            "Zone": "Rwaisat",
+            "City": "Misurata",
+            "Related to XBOX": "X3",
+            "XBOX": "X-BOX03",
+            "Part": "X3-Part01",
+            "Hub": "H11",
+            "Line": line,
+            "Splitter": 1,
+            "Box code": f"H11-L{line}-S1",
+            "Box type": "SUB BOX",
+            "Real length m": "",
+            "Cable length m": 50,
+            "Material type": "Single-Core Distribution Cable_50m",
+            "dB": "",
+        } for line in (1, 2, 3)]
+        self.db.add(main.FiberMapArea(
+            program="FTTH",
+            area="Rwaisat",
+            city="Misurata",
+            start_date="",
+            end_date="",
+            target_users=0,
+            design_data=json.dumps({"boxes": boxes, "routes": []}),
+            created_by="test",
+        ))
+        self.db.commit()
+
+        area = next(row for row in main.fiber_map_manager_options(self.db, "FTTH")["areas"] if row["name"] == "Rwaisat")
+        candidate = next(row for row in area["line_candidates"] if row["xbox"] == "X3" and row["hub"] == "H11" and row["line"] == "L4")
+        self.assertFalse(candidate["enabled"])
+        self.assertTrue(main.fiber_map_manager_can_add_empty_line("Rwaisat", "X3", "H11", "L4"))
+        self.assertFalse(main.fiber_map_manager_can_add_empty_line("Rwaisat", "X3", "H10", "L4"))
+        self.assertFalse(main.fiber_map_manager_can_add_empty_line("Rwaisat", "X3", "H11", "L3"))
+
     def test_mansoura_missing_lines_are_derived_from_current_hub_topology(self):
         boxes = []
         for xbox, hub, lines in (

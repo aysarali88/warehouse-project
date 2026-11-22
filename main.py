@@ -4293,6 +4293,9 @@ FIBER_MAP_MANAGER_LINE_CANDIDATES = {
     "manqosh": {
         "X1": {"H10": {"L4"}},
     },
+    "rwaisat": {
+        "X3": {"H11": {"L4"}},
+    },
 }
 
 
