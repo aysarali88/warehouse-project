@@ -3065,6 +3065,324 @@ def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_P
     return data
 
 
+MR_MAP_ALLOWANCE_DESIGN_CACHE: dict[str, tuple[int, dict[str, dict]]] = {}
+MR_MAP_COMMITTED_STATUSES = ("pending_approval", "approved", "signed", "issued")
+
+
+def mr_map_material_key(*values) -> str:
+    for value in values:
+        key = canonical_material_key(str(value or ""))
+        if key in {"subbox", "endbox", "hubbox", "xbox"} or key.startswith(("distributioncable", "4corecable")):
+            return key
+    return ""
+
+
+def mr_map_area_key(value: str) -> str:
+    return normalize_usage_key(canonical_rollout_usage_area(value))
+
+
+def mr_map_design_summary(reference: dict) -> dict[str, dict]:
+    areas: dict[str, dict] = {}
+
+    def area_bucket(raw_area: str) -> dict:
+        key = mr_map_area_key(raw_area)
+        return areas.setdefault(key, {
+            "area": canonical_rollout_usage_area(raw_area),
+            "limits": {},
+            "incomplete_box_rows": 0,
+            "incomplete_cable_rows": 0,
+            "_xbox_keys": set(),
+            "_hub_keys": set(),
+        })
+
+    def add_limit(bucket: dict, key: str) -> None:
+        if key:
+            bucket["limits"][key] = bucket["limits"].get(key, 0) + 1
+
+    for row in reference.get("boxes") or []:
+        raw_area = first_value(row, "Area", "Zone", default="")
+        if not raw_area:
+            continue
+        bucket = area_bucket(str(raw_area))
+        box_key = mr_map_material_key(first_value(row, "Box type", "box_type", default=""))
+        if box_key in {"subbox", "endbox", "hubbox", "xbox"}:
+            add_limit(bucket, box_key)
+        else:
+            bucket["incomplete_box_rows"] += 1
+
+        xbox_key = normalize_usage_key(str(first_value(row, "Related to XBOX", "XBOX", default="") or ""))
+        hub_key = normalize_usage_key(str(first_value(row, "Hub", default="") or ""))
+        if xbox_key:
+            bucket["_xbox_keys"].add(xbox_key)
+        if xbox_key and hub_key:
+            bucket["_hub_keys"].add((xbox_key, hub_key))
+
+        cable_key = mr_map_material_key(first_value(row, "Material type", "material_type", default=""))
+        if cable_key.startswith("distributioncable") or cable_key.startswith("4corecable"):
+            add_limit(bucket, cable_key)
+        else:
+            bucket["incomplete_cable_rows"] += 1
+    for bucket in areas.values():
+        if bucket["_xbox_keys"]:
+            bucket["limits"]["xbox"] = len(bucket["_xbox_keys"])
+        if bucket["_hub_keys"]:
+            bucket["limits"]["hubbox"] = len(bucket["_hub_keys"])
+        bucket.pop("_xbox_keys")
+        bucket.pop("_hub_keys")
+
+    for row in reference.get("routes") or []:
+        raw_area = first_value(row, "Area", "Zone", default="")
+        if not raw_area:
+            continue
+        bucket = area_bucket(str(raw_area))
+        cable_key = mr_map_material_key(first_value(row, "Material type", "material_type", default=""))
+        if cable_key.startswith("distributioncable") or cable_key.startswith("4corecable"):
+            add_limit(bucket, cable_key)
+        else:
+            bucket["incomplete_cable_rows"] += 1
+    return areas
+
+
+def mr_map_design_for_program(db: Session, program: str) -> dict[str, dict]:
+    program_key = normalize_program(program)
+    revision = int(fiber_map_global_version(db) or 0)
+    cached = MR_MAP_ALLOWANCE_DESIGN_CACHE.get(program_key)
+    if cached and cached[0] == revision:
+        return cached[1]
+    design = mr_map_design_summary(load_fiber_map_reference(db, program_key))
+    MR_MAP_ALLOWANCE_DESIGN_CACHE[program_key] = (revision, design)
+    return design
+
+
+def mr_map_area_filter(area: str, model) -> object:
+    aliases = rollout_area_query_values(area)
+    area_aliases = {
+        "berawtaleem": {"Bera W Taleem", "Albera"},
+        "haydemascus": {"Hay Demascus", "Hay Demashq", "Hay Damascus"},
+        "maqawba": {"Maqawba", "Magawba"},
+        "hayalandalusz3": {"Hay Al Andalus Z3", "Hay Al Andalus Zone 3"},
+    }
+    aliases.update(area_aliases.get(mr_map_area_key(area), set()))
+    values = sorted({value.lower() for value in aliases if value})
+    site_value = func.lower(func.trim(model.site_id))
+    address_value = func.lower(func.trim(model.site_address))
+    return or_(
+        site_value.in_(values),
+        address_value.in_(values),
+    )
+
+
+def mr_map_active_site_ids(db: Session, program: str, area: str) -> set[int]:
+    area_key = mr_map_area_key(area)
+    sites = db.query(Site.id, Site.name).filter(
+        Site.program == normalize_program(program), Site.site_inventory_enabled.is_(True)
+    ).all()
+    site_ids = {
+        int(site_id) for site_id, name in sites
+        if mr_map_area_key(str(name or "")) == area_key
+    }
+    alias_rows = (
+        db.query(SiteAlias.site_id, SiteAlias.display_alias)
+        .join(Site, Site.id == SiteAlias.site_id)
+        .filter(
+            SiteAlias.program == normalize_program(program),
+            Site.program == normalize_program(program),
+            Site.site_inventory_enabled.is_(True),
+        )
+        .all()
+    )
+    site_ids.update(
+        int(site_id) for site_id, alias in alias_rows
+        if mr_map_area_key(str(alias or "")) == area_key
+    )
+    return site_ids
+
+
+def mr_map_allowance_summary(db: Session, requisition: MaterialRequisition, program: str) -> dict:
+    area = canonical_rollout_usage_area(requisition.site_id or requisition.site_address)
+    area_key = mr_map_area_key(area)
+    design = mr_map_design_for_program(db, program).get(area_key)
+    if not design or not design["limits"]:
+        return {"available": False, "area": area, "items": [], "reason": "No map material allowance is available for this area."}
+
+    current_by_key: dict[str, dict] = {}
+    for item in requisition.items or []:
+        product = item.product
+        uom = str(item.uom or (product.unit if product else "PCS") or "PCS").strip()
+        key = mr_map_material_key(
+            product.name if product else "",
+            product.sku if product else "",
+            product.part_number if product else "",
+            item.model,
+            item.part_nbr,
+            item.description,
+        )
+        uom_key = normalize_usage_key(uom)
+        identity = f"{key}|{uom_key}" if key else f"unmapped:{item.product_id or item.part_nbr or item.model or item.line_no}|{uom_key}"
+        current = current_by_key.setdefault(identity, {
+            "material_key": key,
+            "sku": product.sku if product else (item.model or item.part_nbr or ""),
+            "material": product_display_name(product) if product else (item.description or item.model or "Unmapped item"),
+            "uom": uom,
+            "uom_key": uom_key,
+            "request_qty": 0.0,
+        })
+        current["request_qty"] += safe_float(item.quantity)
+
+    tracked_keys = {
+        item["material_key"] for item in current_by_key.values()
+        if item["material_key"] and item["material_key"] in design["limits"]
+    }
+    product_key_by_id: dict[int, str] = {}
+    product_uom_by_id: dict[int, str] = {}
+    if tracked_keys:
+        product_rows = db.query(Product.id, Product.name, Product.sku, Product.part_number, Product.unit).filter(
+            Product.program == normalize_program(program)
+        ).all()
+        for product_id, name, sku, part_number, unit in product_rows:
+            key = mr_map_material_key(name, sku, part_number)
+            if key in tracked_keys:
+                product_key_by_id[int(product_id)] = key
+                product_uom_by_id[int(product_id)] = normalize_usage_key(unit or "PCS")
+    relevant_product_ids = set(product_key_by_id)
+
+    prior_by_key: dict[str, float] = {}
+    if relevant_product_ids:
+        prior_rows = (
+            db.query(
+                MaterialRequisitionItem.product_id,
+                MaterialRequisitionItem.uom,
+                func.sum(MaterialRequisitionItem.quantity),
+            )
+            .join(MaterialRequisition, MaterialRequisition.id == MaterialRequisitionItem.requisition_id)
+            .filter(
+                MaterialRequisition.program == normalize_program(program),
+                MaterialRequisition.status.in_(MR_MAP_COMMITTED_STATUSES),
+                MaterialRequisition.id != requisition.id,
+                MaterialRequisitionItem.product_id.in_(relevant_product_ids),
+                mr_map_area_filter(area, MaterialRequisition),
+            )
+            .group_by(MaterialRequisitionItem.product_id, MaterialRequisitionItem.uom)
+            .all()
+        )
+        for product_id, uom, quantity in prior_rows:
+            product_id = int(product_id or 0)
+            key = product_key_by_id.get(product_id, "")
+            if key:
+                uom_key = normalize_usage_key(uom or product_uom_by_id.get(product_id) or "PCS")
+                identity = f"{key}|{uom_key}"
+                prior_by_key[identity] = prior_by_key.get(identity, 0.0) + safe_float(quantity)
+
+        return_rows = (
+            db.query(
+                MaterialReturnItem.product_id,
+                MaterialReturnItem.uom,
+                func.sum(MaterialReturnItem.quantity),
+            )
+            .join(MaterialReturn, MaterialReturn.id == MaterialReturnItem.return_id)
+            .filter(
+                MaterialReturn.program == normalize_program(program),
+                MaterialReturn.status == "confirmed",
+                MaterialReturnItem.product_id.in_(relevant_product_ids),
+                mr_map_area_filter(area, MaterialReturn),
+            )
+            .group_by(MaterialReturnItem.product_id, MaterialReturnItem.uom)
+            .all()
+        )
+        returned_by_key: dict[str, float] = {}
+        for product_id, uom, quantity in return_rows:
+            product_id = int(product_id or 0)
+            key = product_key_by_id.get(product_id, "")
+            if key:
+                uom_key = normalize_usage_key(uom or product_uom_by_id.get(product_id) or "PCS")
+                identity = f"{key}|{uom_key}"
+                returned_by_key[identity] = returned_by_key.get(identity, 0.0) + safe_float(quantity)
+    else:
+        returned_by_key = {}
+
+    transfer_by_key: dict[str, float] = {}
+    transfer_scope_warning = False
+    if relevant_product_ids:
+        site_ids = mr_map_active_site_ids(db, program, area)
+        if len(site_ids) == 1:
+            transfer_rows = (
+                db.query(
+                    SiteMaterialMovement.product_id,
+                    SiteMaterialMovement.uom,
+                    func.sum(SiteMaterialMovement.quantity_delta),
+                )
+                .filter(
+                    SiteMaterialMovement.program == normalize_program(program),
+                    SiteMaterialMovement.site_id.in_(site_ids),
+                    SiteMaterialMovement.product_id.in_(relevant_product_ids),
+                    SiteMaterialMovement.status == "approved",
+                    SiteMaterialMovement.event_type.in_(SITE_TRANSFER_USAGE_EVENTS),
+                )
+                .group_by(SiteMaterialMovement.product_id, SiteMaterialMovement.uom)
+                .all()
+            )
+            for product_id, uom, quantity in transfer_rows:
+                key = product_key_by_id.get(int(product_id or 0), "")
+                if key in tracked_keys:
+                    uom_key = normalize_usage_key(uom or product_uom_by_id.get(int(product_id or 0)) or "PCS")
+                    identity = f"{key}|{uom_key}"
+                    transfer_by_key[identity] = transfer_by_key.get(identity, 0.0) + safe_float(quantity)
+        elif len(site_ids) > 1:
+            transfer_scope_warning = True
+
+    items = []
+    for current in current_by_key.values():
+        key = current["material_key"]
+        identity = f"{key}|{current['uom_key']}" if key else ""
+        map_limit = design["limits"].get(key) if key else None
+        if map_limit is None:
+            items.append({
+                **current,
+                "map_limit": None,
+                "prior_mr_qty": 0.0,
+                "confirmed_return_qty": 0.0,
+                "transfer_net_qty": 0.0,
+                "projected_qty": None,
+                "remaining_qty": None,
+                "status": "not_tracked",
+            })
+            continue
+        prior_mr = prior_by_key.get(identity, 0.0)
+        returned = returned_by_key.get(identity, 0.0)
+        transfer_net = transfer_by_key.get(identity, 0.0)
+        projected = prior_mr - returned + transfer_net + current["request_qty"]
+        remaining = map_limit - projected
+        is_cable = key.startswith(("distributioncable", "4corecable"))
+        is_box = key in {"subbox", "endbox", "hubbox", "xbox"}
+        if (
+            current["uom_key"] != "pcs"
+            or (is_cable and design["incomplete_cable_rows"])
+            or (is_box and design["incomplete_box_rows"])
+        ):
+            status = "map_check"
+        else:
+            status = "exceeds" if remaining < -0.000001 else "within"
+        items.append({
+            **current,
+            "map_limit": map_limit,
+            "prior_mr_qty": prior_mr,
+            "confirmed_return_qty": returned,
+            "transfer_net_qty": transfer_net,
+            "projected_qty": projected,
+            "remaining_qty": remaining,
+            "status": status,
+        })
+    items.sort(key=lambda item: (item["status"] == "within", item["status"], item["material"].lower()))
+    return {
+        "available": True,
+        "area": area,
+        "incomplete_box_rows": design["incomplete_box_rows"],
+        "incomplete_cable_rows": design["incomplete_cable_rows"],
+        "transfer_scope_warning": transfer_scope_warning,
+        "items": items,
+    }
+
+
 def rollout_code_reference_rows(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> list[dict]:
     program_key = normalize_program(program)
     map_revision = 0
@@ -10286,6 +10604,18 @@ def get_material_requisition(requisition_id: int, request: Request, viewer: str 
     if not user_can_view_requisition(row, viewer, role, requester_identity, manager_can_request):
         raise HTTPException(status_code=403, detail="Not allowed to view this material requisition")
     result = requisition_to_dict(row)
+    if program_key != SINGLE_RAN_PROGRAM and normalize_usage_key(role) in {"admin", "approval", "approver"}:
+        try:
+            result["map_allowance"] = mr_map_allowance_summary(db, row, program_key)
+        except Exception:
+            db.rollback()
+            logger.exception("Could not build map allowance summary for MR %s", requisition_id)
+            result["map_allowance"] = {
+                "available": False,
+                "area": result.get("site_id") or result.get("site_address") or "",
+                "items": [],
+                "reason": "Map comparison is temporarily unavailable.",
+            }
     if program_key == SINGLE_RAN_PROGRAM:
         signed_copy = db.query(SrMaterialRequisitionSignedCopy).filter(
             SrMaterialRequisitionSignedCopy.requisition_id == row.id
