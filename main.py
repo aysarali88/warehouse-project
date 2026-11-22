@@ -2990,6 +2990,15 @@ def rollout_entry_mode(data: dict) -> str:
     return ""
 
 
+def rollout_box_type_mismatch_message(expected_box: str, selected_material: str) -> str:
+    expected = rollout_norm(expected_box)
+    selected = rollout_norm(selected_material)
+    for token, label in (("end", "END BOX"), ("sub", "SUB BOX"), ("hub", "HUB BOX")):
+        if token in expected:
+            return "" if token in selected else f"Map reference is {label}, selected material is different"
+    return ""
+
+
 def load_fiber_map_reference(db: Session | None = None, program: str = DEFAULT_PROGRAM) -> dict:
     data: dict = {"boxes": [], "routes": [], "area_plans": [], "schematics": []}
     try:
@@ -7295,7 +7304,6 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         warnings.append({"type": "duplicate_in_progress", "message": "Code exists in another non-Done record", "record": rollout_duplicate_details(in_progress)})
 
     material_type = str(first_value(data, "material type", "Material Type", "material_type", default="") or "").strip()
-    material_norm = rollout_norm(material_type)
     ref = matches[0] if matches else {}
     expected_len = int(ref.get("cable_length_m") or 0)
     if code_type == "cable" and expected_len:
@@ -7304,12 +7312,9 @@ def save_rollout_field_entry(data: dict, request: Request, db: Session = Depends
         if entered_len and entered_len != expected_len:
             warnings.append({"type": "cable_length_mismatch", "message": f"Planned length is {expected_len}m, selected material looks {entered_len}m"})
     if code_type == "box":
-        expected_box = rollout_norm(ref.get("box_type") or "")
-        if expected_box:
-            if "end" in expected_box and "end" not in material_norm:
-                warnings.append({"type": "box_type_mismatch", "message": "Map reference is END BOX, selected material is different"})
-            if "sub" in expected_box and "sub" not in material_norm:
-                warnings.append({"type": "box_type_mismatch", "message": "Map reference is SUB BOX, selected material is different"})
+        mismatch = rollout_box_type_mismatch_message(ref.get("box_type") or "", material_type)
+        if mismatch:
+            warnings.append({"type": "box_type_mismatch", "message": mismatch})
 
     if warnings and not first_value(data, "confirm_warnings", "confirmed", default=False):
         return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
@@ -7605,7 +7610,6 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
     if in_progress:
         warnings.append({"type": "duplicate_in_progress", "message": "Code exists in another non-Done record", "record": rollout_duplicate_details(in_progress)})
 
-    material_norm = rollout_norm(material_type)
     ref = matches[0] if matches else {}
     expected_len = int(ref.get("cable_length_m") or 0)
     if code_type == "cable" and expected_len:
@@ -7614,12 +7618,9 @@ def edit_rollout_field_entry(record_id: str, data: dict, request: Request, db: S
         if entered_len and entered_len != expected_len:
             warnings.append({"type": "cable_length_mismatch", "message": f"Planned length is {expected_len}m, selected material looks {entered_len}m"})
     if code_type == "box":
-        expected_box = rollout_norm(ref.get("box_type") or "")
-        if expected_box:
-            if "end" in expected_box and "end" not in material_norm:
-                warnings.append({"type": "box_type_mismatch", "message": "Map reference is END BOX, selected material is different"})
-            if "sub" in expected_box and "sub" not in material_norm:
-                warnings.append({"type": "box_type_mismatch", "message": "Map reference is SUB BOX, selected material is different"})
+        mismatch = rollout_box_type_mismatch_message(ref.get("box_type") or "", material_type)
+        if mismatch:
+            warnings.append({"type": "box_type_mismatch", "message": mismatch})
 
     if warnings and not first_value(data, "confirm_warnings", "confirmed", default=False):
         return {"success": False, "needs_confirmation": True, "warnings": warnings, "message": "Confirm warnings before saving"}
