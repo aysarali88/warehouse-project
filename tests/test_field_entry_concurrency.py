@@ -544,6 +544,57 @@ class FieldEntryConcurrencyTests(unittest.TestCase):
         self.assertEqual({main.rollout_area_label(value) for value in aliases}, {"Al-Mansoura"})
         self.assertEqual(main.rollout_usage_area_aliases("Al-Mansoura"), {"mansoura", "almansoura"})
 
+    def test_awlad_baeoo_aliases_use_one_warehouse_vs_field_name(self):
+        aliases = ("Awlad Baeoo", "Awlad-Bauo", "Awlad Bauo", "Awlad Baeo", "Awlad Baeou")
+        self.assertEqual({main.canonical_area_name(value) for value in aliases}, {"Awlad Baeoo"})
+        self.assertEqual({main.canonical_rollout_usage_area(value) for value in aliases}, {"Awlad Baeoo"})
+        self.assertEqual(main.rollout_usage_area_aliases("Awlad Baeoo"), {
+            "awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou",
+        })
+
+    def test_rollout_usage_combines_awlad_bauo_and_awlad_baeoo_sources(self):
+        db = SessionLocal()
+        warehouse = Warehouse(name="Awlad Baeoo Alias Test WH")
+        product = Product(sku="AWLAD-BAEOO-ALIAS-SUB-TEST", name="SUB BOX")
+        db.add_all([warehouse, product])
+        db.flush()
+        requisition = MaterialRequisition(
+            order_number="MR-AWLAD-BAEOO-ALIAS-TEST",
+            warehouse_id=warehouse.id,
+            site_id="Awlad Baeoo",
+            status="issued",
+        )
+        db.add(requisition)
+        db.flush()
+        db.add_all([
+            MaterialRequisitionItem(requisition_id=requisition.id, product_id=product.id, quantity=10),
+            RolloutRecord(
+                record_id="RDP-AWLAD-BAUO-ALIAS-TEST",
+                area="Awlad-Bauo",
+                material_type="SUB BOX",
+                actual=8,
+                status="Done",
+            ),
+        ])
+        db.commit()
+        main.clear_rollout_db_cache()
+
+        admin_request = SimpleNamespace(
+            state=SimpleNamespace(current_user=SimpleNamespace(role="Admin", name="Admin", username="admin"))
+        )
+        usage = main.list_rollout_material_usage(admin_request, db, program="FTTH")["usage"]
+        rows = [row for row in usage if row["area"] == "Awlad Baeoo" and row["sku"] == product.sku]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["mr_issued_qty"], 10)
+        self.assertEqual(rows[0]["rollout_used_qty"], 8)
+        self.assertEqual(rows[0]["remaining_after_rollout"], 2)
+
+        details = main.list_rollout_material_usage_details(
+            admin_request, area="Awlad Baeoo", material="SUB BOX", db=db, program="FTTH"
+        )
+        self.assertEqual(details["total"], 8)
+        db.close()
+
     def test_rollout_usage_combines_mansoura_and_al_mansoura_sources(self):
         db = SessionLocal()
         warehouse = Warehouse(name="Mansoura Alias Test WH")

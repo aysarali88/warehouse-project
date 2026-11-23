@@ -6068,6 +6068,8 @@ def user_can_view_transfer(row: MaterialTransfer, viewer: str = "", role: str = 
 def canonical_area_name(value: str) -> str:
     text_value = canonical_site_area_name(value)
     key = normalize_usage_key(text_value)
+    if key in {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"}:
+        return "Awlad Baeoo"
     if key in {"haydamascus", "haydemascus", "haydemashq"}:
         return "Hay Demascus"
     if key in {"maqawba", "magawba"}:
@@ -6090,6 +6092,7 @@ def canonical_rollout_usage_area(value: str) -> str:
 def rollout_usage_area_aliases(value: str) -> set[str]:
     key = normalize_usage_key(canonical_rollout_usage_area(value))
     aliases = {
+        "awladbaeoo": {"awladbaeo", "awladbaeoo", "awladbauo", "awladbaeou"},
         "berawtaleem": {"berawtaleem", "albera"},
         "haydemascus": {"haydemascus", "haydamascus", "haydemashq"},
         "maqawba": {"maqawba", "magawba"},
