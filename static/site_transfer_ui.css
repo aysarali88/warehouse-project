@@ -13,6 +13,9 @@
 .site-transfer-form .field{min-width:0}
 .site-transfer-form input[readonly]{background:#f4f8fa;color:#42576b}
 .site-transfer-hint{color:var(--muted);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.site-transfer-availability-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.site-transfer-availability-head label{margin:0}
+.site-transfer-refresh-availability{min-height:28px;padding:3px 8px;font-size:11px}
 .site-transfer-lines-wrap{grid-column:1/-1;min-width:0}
 .site-transfer-lines-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
 .site-transfer-lines-head strong{color:var(--brand);font-size:13px}
