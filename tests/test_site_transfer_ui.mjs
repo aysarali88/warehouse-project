@@ -341,14 +341,12 @@ test('each material is checked against its own available quantity before creatin
   assert.equal(mock.createCount, 0);
 });
 
-test('manual availability refresh replaces a stale quantity with the latest Site Inventory value', async () => {
+test('selecting a material loads its latest Site Inventory quantity', async () => {
   const mock = makeApi();
   const controller = await readyController(mock.api);
   const line = controller.state.form.lines[0];
-  assert.equal(line.availableQty, '100');
-
-  mock.setAvailable(7, 31, '64');
-  assert.equal(await controller.refreshLineAvailability(line.id), true);
+  mock.setAvailable(7, 32, '64');
+  assert.equal(await controller.updateLine(line.id, 'productId', '32'), true);
   assert.equal(line.availableQty, '64');
   assert.equal(line.availabilityLoaded, true);
 });
@@ -472,7 +470,7 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(ui, /<th>Requested<\/th>/);
   assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
   assert.match(ui, /data-site-transfer-action="receive-all"/);
-  assert.match(ui, /data-site-transfer-command="refresh-availability"/);
+  assert.doesNotMatch(ui, /data-site-transfer-command="refresh-availability"/);
   assert.doesNotMatch(ui, /rowspan=/);
   assert.match(css, /\.site-transfer-order-route\{[^}]*direction:ltr/);
   assert.match(html, /site-transfer-create-only hidden/);

@@ -595,7 +595,7 @@
 
     return {
       state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine,
-      refreshLineAvailability, refreshAllAvailability,
+      refreshAllAvailability,
       createTransfer, approve, reject, dispatch, openReceipt, closeReceipt, receive, receiveAll, reverseDispatch,
     };
   }
@@ -730,7 +730,7 @@
         return `<div class="site-transfer-line" data-site-transfer-line="${escapeHtml(line.id)}">
           <div class="field"><label for="siteTransferProduct-${escapeHtml(line.id)}">Material ${index + 1}</label><select id="siteTransferProduct-${escapeHtml(line.id)}" data-site-transfer-line-field="productId" data-line-id="${escapeHtml(line.id)}"${state.busy ? ' disabled' : ''} required>${productOptions}</select></div>
           <div class="field"><label>UOM</label><input type="text" readonly aria-readonly="true" value="${escapeHtml(selectedProduct?.uom || '')}"></div>
-          <div class="field"><div class="site-transfer-availability-head"><label>Available Qty at From Site</label><button class="btn soft site-transfer-refresh-availability" type="button" data-site-transfer-command="refresh-availability" data-line-id="${escapeHtml(line.id)}" aria-label="Refresh available quantity for material ${index + 1}" title="Refresh available quantity"${state.busy || line.availabilityLoading || !state.form.fromSiteId || !line.productId ? ' disabled' : ''}>Refresh</button></div><input type="text" readonly aria-readonly="true" value="${line.availabilityLoading ? 'Loading…' : displayQuantity(line.availableQty)}"><small class="site-transfer-hint">${escapeHtml(line.availabilityError || (line.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a material.'))}</small></div>
+          <div class="field"><label>Available Qty at From Site</label><input type="text" readonly aria-readonly="true" value="${line.availabilityLoading ? 'Loading…' : displayQuantity(line.availableQty)}"><small class="site-transfer-hint">${escapeHtml(line.availabilityError || (line.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a material.'))}</small></div>
           <div class="field"><label for="siteTransferQuantity-${escapeHtml(line.id)}">Transfer Qty</label><input id="siteTransferQuantity-${escapeHtml(line.id)}" data-site-transfer-line-field="quantity" data-line-id="${escapeHtml(line.id)}" type="number" min="0.000001" step="0.000001" inputmode="decimal" value="${escapeHtml(line.quantity)}"${state.busy ? ' disabled' : ''} required></div>
           <button class="btn soft site-transfer-remove-line" type="button" data-site-transfer-command="remove-line" data-line-id="${escapeHtml(line.id)}" aria-label="Remove material ${index + 1}"${state.busy || state.form.lines.length <= 1 ? ' disabled' : ''}>Remove</button>
         </div>`;
@@ -888,7 +888,6 @@
       else if (action === 'previous') await controller.setPage(controller.state.page - 1);
       else if (action === 'next') await controller.setPage(controller.state.page + 1);
       else if (action === 'add-line') controller.addLine();
-      else if (action === 'refresh-availability') await controller.refreshLineAvailability(event.target.closest('[data-site-transfer-command]')?.dataset.lineId);
       else if (action === 'remove-line') controller.removeLine(event.target.closest('[data-site-transfer-command]')?.dataset.lineId);
       else if (action === 'close-receipt') controller.closeReceipt();
       else if (action === 'retry-gate') await controller.open();
