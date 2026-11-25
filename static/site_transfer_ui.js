@@ -205,6 +205,7 @@
         publish();
         return false;
       }
+      line.availableQty = '0';
       line.availabilityLoading = true;
       line.availabilityLoaded = false;
       publish();
@@ -238,7 +239,7 @@
     }
 
     function updateForm(field, value) {
-      if (!['fromSiteId', 'toSiteId', 'approverUserId'].includes(field) || !canCreate()) return;
+      if (state.busy || !['fromSiteId', 'toSiteId', 'approverUserId'].includes(field) || !canCreate()) return;
       state.form[field] = value;
       state.error = '';
       publish();
@@ -314,6 +315,7 @@
         return false;
       }
       const seenProducts = new Set();
+      const productsByLine = new Map();
       for (const line of lines) {
         const product = state.products.find(row => String(row.id) === String(line.productId));
         if (!product) {
@@ -327,30 +329,40 @@
           return false;
         }
         seenProducts.add(String(product.id));
-        if (line.availabilityLoading || !line.availabilityLoaded) {
-          state.error = 'Wait for the available quantity to load for every material.';
-          publish();
-          return false;
-        }
-        const validation = validateTransferForm({
-          fromSiteId: form.fromSiteId,
-          toSiteId: form.toSiteId,
-          productId: product.id,
-          uom: product.uom,
-          productUom: product.uom,
-          quantity: line.quantity,
-        }, line.availableQty);
-        if (validation) {
-          state.error = `${product.name}: ${validation}`;
-          publish();
-          return false;
-        }
+        productsByLine.set(line.id, product);
       }
       state.busy = true;
       state.error = '';
       state.message = '';
       publish();
       try {
+        if (!await refreshAllAvailability()) {
+          state.error = 'Could not refresh the available quantity. Check the marked material and retry.';
+          publish();
+          return false;
+        }
+        for (const line of lines) {
+          const currentLine = state.form.lines.find(row => row.id === line.id);
+          const product = productsByLine.get(line.id);
+          if (!currentLine?.availabilityLoaded) {
+            state.error = `${product.name}: Could not load the current Site Inventory balance.`;
+            publish();
+            return false;
+          }
+          const validation = validateTransferForm({
+            fromSiteId: form.fromSiteId,
+            toSiteId: form.toSiteId,
+            productId: product.id,
+            uom: product.uom,
+            productUom: product.uom,
+            quantity: currentLine.quantity,
+          }, currentLine.availableQty);
+          if (validation) {
+            state.error = `${product.name}: ${validation}`;
+            publish();
+            return false;
+          }
+        }
         const data = await api(url('/api/warehouse/site-transfers'), {
           method: 'POST',
           body: JSON.stringify({
@@ -582,7 +594,8 @@
     }
 
     return {
-      state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine, refreshAllAvailability,
+      state, open, loadPage, setPage, setStatus, updateForm, updateLine, addLine, removeLine,
+      refreshLineAvailability, refreshAllAvailability,
       createTransfer, approve, reject, dispatch, openReceipt, closeReceipt, receive, receiveAll, reverseDispatch,
     };
   }
@@ -698,6 +711,7 @@
       const linesRoot = element('siteTransferLines');
       if (!from || !to || !linesRoot) return;
       from.innerHTML = optionList(state.sites, state.form.fromSiteId, 'Select source site', row => row.name);
+      from.disabled = state.busy;
       const approverSelect = element('siteTransferApprover');
       if (approverSelect) {
         approverSelect.innerHTML = optionList(state.approvers, state.form.approverUserId, 'Select regional manager', row => `${row.name} · ${row.username}`);
@@ -706,6 +720,7 @@
       to.innerHTML = `<option value="">Select destination site</option>${state.sites.map(row =>
         `<option value="${Number(row.id)}"${String(row.id) === String(state.form.toSiteId) ? ' selected' : ''}${String(row.id) === String(state.form.fromSiteId) ? ' disabled' : ''}>${escapeHtml(row.name)}</option>`
       ).join('')}`;
+      to.disabled = state.busy;
       linesRoot.innerHTML = state.form.lines.map((line, index) => {
         const selectedProduct = state.products.find(row => String(row.id) === String(line.productId));
         const usedElsewhere = new Set(state.form.lines.filter(other => other.id !== line.id).map(other => String(other.productId)));
@@ -713,16 +728,19 @@
           `<option value="${Number(row.id)}"${String(row.id) === String(line.productId) ? ' selected' : ''}${usedElsewhere.has(String(row.id)) ? ' disabled' : ''}>${escapeHtml(row.name)}${row.sku ? ` · ${escapeHtml(row.sku)}` : ''}</option>`
         ).join('')}`;
         return `<div class="site-transfer-line" data-site-transfer-line="${escapeHtml(line.id)}">
-          <div class="field"><label for="siteTransferProduct-${escapeHtml(line.id)}">Material ${index + 1}</label><select id="siteTransferProduct-${escapeHtml(line.id)}" data-site-transfer-line-field="productId" data-line-id="${escapeHtml(line.id)}" required>${productOptions}</select></div>
+          <div class="field"><label for="siteTransferProduct-${escapeHtml(line.id)}">Material ${index + 1}</label><select id="siteTransferProduct-${escapeHtml(line.id)}" data-site-transfer-line-field="productId" data-line-id="${escapeHtml(line.id)}"${state.busy ? ' disabled' : ''} required>${productOptions}</select></div>
           <div class="field"><label>UOM</label><input type="text" readonly aria-readonly="true" value="${escapeHtml(selectedProduct?.uom || '')}"></div>
-          <div class="field"><label>Available Qty at From Site</label><input type="text" readonly aria-readonly="true" value="${line.availabilityLoading ? 'Loading…' : displayQuantity(line.availableQty)}"><small class="site-transfer-hint">${escapeHtml(line.availabilityError || (line.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a material.'))}</small></div>
-          <div class="field"><label for="siteTransferQuantity-${escapeHtml(line.id)}">Transfer Qty</label><input id="siteTransferQuantity-${escapeHtml(line.id)}" data-site-transfer-line-field="quantity" data-line-id="${escapeHtml(line.id)}" type="number" min="0.000001" step="0.000001" inputmode="decimal" value="${escapeHtml(line.quantity)}" required></div>
+          <div class="field"><div class="site-transfer-availability-head"><label>Available Qty at From Site</label><button class="btn soft site-transfer-refresh-availability" type="button" data-site-transfer-command="refresh-availability" data-line-id="${escapeHtml(line.id)}" aria-label="Refresh available quantity for material ${index + 1}" title="Refresh available quantity"${state.busy || line.availabilityLoading || !state.form.fromSiteId || !line.productId ? ' disabled' : ''}>Refresh</button></div><input type="text" readonly aria-readonly="true" value="${line.availabilityLoading ? 'Loading…' : displayQuantity(line.availableQty)}"><small class="site-transfer-hint">${escapeHtml(line.availabilityError || (line.availabilityLoaded ? 'Current Site Inventory balance' : 'Select a material.'))}</small></div>
+          <div class="field"><label for="siteTransferQuantity-${escapeHtml(line.id)}">Transfer Qty</label><input id="siteTransferQuantity-${escapeHtml(line.id)}" data-site-transfer-line-field="quantity" data-line-id="${escapeHtml(line.id)}" type="number" min="0.000001" step="0.000001" inputmode="decimal" value="${escapeHtml(line.quantity)}"${state.busy ? ' disabled' : ''} required></div>
           <button class="btn soft site-transfer-remove-line" type="button" data-site-transfer-command="remove-line" data-line-id="${escapeHtml(line.id)}" aria-label="Remove material ${index + 1}"${state.busy || state.form.lines.length <= 1 ? ' disabled' : ''}>Remove</button>
         </div>`;
       }).join('');
       for (const [name, value] of Object.entries({ reference: state.form.reference, notes: state.form.notes })) {
         const input = root.querySelector(`[name="${name}"]`);
-        if (input && input.value !== value) input.value = value;
+        if (input) {
+          if (input.value !== value) input.value = value;
+          input.disabled = state.busy;
+        }
       }
       const addButton = element('siteTransferAddLine');
       if (addButton) addButton.disabled = state.busy || state.form.lines.length >= MAX_TRANSFER_LINES;
@@ -870,6 +888,7 @@
       else if (action === 'previous') await controller.setPage(controller.state.page - 1);
       else if (action === 'next') await controller.setPage(controller.state.page + 1);
       else if (action === 'add-line') controller.addLine();
+      else if (action === 'refresh-availability') await controller.refreshLineAvailability(event.target.closest('[data-site-transfer-command]')?.dataset.lineId);
       else if (action === 'remove-line') controller.removeLine(event.target.closest('[data-site-transfer-command]')?.dataset.lineId);
       else if (action === 'close-receipt') controller.closeReceipt();
       else if (action === 'retry-gate') await controller.open();

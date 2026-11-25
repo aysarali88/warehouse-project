@@ -48,7 +48,9 @@ function responseForTransfer(transfer) {
 function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creatorUserId = 7 } = {}) {
   const calls = [];
   const transfer = { id: null, from_site_id: 7, to_site_id: 9, status: 'draft', dispatched: false, items: [] };
+  const availableQuantities = new Map([['7:31', '100'], ['7:32', '30']]);
   let createCount = 0;
+  let failAvailability = false;
 
   async function api(url, options = {}) {
     const parsed = new URL(url, 'https://warehouse.test');
@@ -64,8 +66,10 @@ function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creato
     if (path === '/api/warehouse/site-transfers/approvers') return approverOptions;
     if (path === '/api/warehouse/site-transfers/inbox-count') return { count: transfer.approval?.status === 'pending' ? 1 : 0 };
     if (path === '/api/warehouse/site-inventory') {
+      if (failAvailability) throw new Error('Site Inventory is temporarily unavailable');
+      const siteId = Number(parsed.searchParams.get('site_id'));
       const productId = Number(parsed.searchParams.get('product_id'));
-      const available = productId === 31 ? '100' : productId === 32 ? '30' : '0';
+      const available = availableQuantities.get(`${siteId}:${productId}`) || '0';
       return { items: [{ site_id: 7, product_id: productId, uom: productId === 31 ? 'M' : 'PCS', on_hand_qty: available }] };
     }
     if (path === '/api/warehouse/site-transfers' && method === 'POST') {
@@ -113,7 +117,12 @@ function makeApi({ disabled = false, failCreate = false, delayCreate = 0, creato
     throw new Error(`Unexpected API call: ${method} ${path}`);
   }
 
-  return { api, calls, transfer, get createCount() { return createCount; } };
+  return {
+    api, calls, transfer,
+    setAvailable(siteId, productId, quantity) { availableQuantities.set(`${siteId}:${productId}`, String(quantity)); },
+    setAvailabilityFailure(value) { failAvailability = Boolean(value); },
+    get createCount() { return createCount; },
+  };
 }
 
 async function readyController(api, { isAdmin = () => false, isRequester = () => true, getUserId = () => 7, confirm } = {}) {
@@ -313,7 +322,7 @@ test('one transfer can contain multiple materials with independent UOM and avail
     { product_id: 32, quantity: '20', uom: 'PCS' },
   ]);
   const balanceQueries = mock.calls.filter(call => call.path === '/api/warehouse/site-inventory');
-  assert.deepEqual(balanceQueries.map(call => call.query.get('product_id')), ['31', '32']);
+  assert.deepEqual(balanceQueries.slice(-2).map(call => call.query.get('product_id')), ['31', '32']);
   assert.equal(controller.state.transfers[0].items.length, 2);
 });
 
@@ -329,6 +338,45 @@ test('each material is checked against its own available quantity before creatin
 
   assert.equal(await controller.createTransfer(), false);
   assert.match(controller.state.error, /Hub Box.*available Site Inventory balance/);
+  assert.equal(mock.createCount, 0);
+});
+
+test('manual availability refresh replaces a stale quantity with the latest Site Inventory value', async () => {
+  const mock = makeApi();
+  const controller = await readyController(mock.api);
+  const line = controller.state.form.lines[0];
+  assert.equal(line.availableQty, '100');
+
+  mock.setAvailable(7, 31, '64');
+  assert.equal(await controller.refreshLineAvailability(line.id), true);
+  assert.equal(line.availableQty, '64');
+  assert.equal(line.availabilityLoaded, true);
+});
+
+test('transfer submission refreshes availability and rejects a quantity based on a stale balance', async () => {
+  const mock = makeApi();
+  const controller = await readyController(mock.api);
+  const line = controller.state.form.lines[0];
+  await controller.updateLine(line.id, 'quantity', '80');
+  mock.setAvailable(7, 31, '60');
+
+  assert.equal(await controller.createTransfer(), false);
+  assert.equal(line.availableQty, '60');
+  assert.match(controller.state.error, /cannot exceed the available Site Inventory balance/i);
+  assert.equal(mock.createCount, 0);
+});
+
+test('failed availability refresh clears the stale quantity and prevents transfer submission', async () => {
+  const mock = makeApi();
+  const controller = await readyController(mock.api);
+  const line = controller.state.form.lines[0];
+  await controller.updateLine(line.id, 'quantity', '1');
+  mock.setAvailabilityFailure(true);
+
+  assert.equal(await controller.createTransfer(), false);
+  assert.equal(line.availableQty, '0');
+  assert.equal(line.availabilityLoaded, false);
+  assert.match(line.availabilityError, /temporarily unavailable/);
   assert.equal(mock.createCount, 0);
 });
 
@@ -424,6 +472,7 @@ test('page keeps transfer controls hidden until readiness and restricts navigati
   assert.match(ui, /<th>Requested<\/th>/);
   assert.match(ui, /displayQuantity\(item\.requested_qty\)/);
   assert.match(ui, /data-site-transfer-action="receive-all"/);
+  assert.match(ui, /data-site-transfer-command="refresh-availability"/);
   assert.doesNotMatch(ui, /rowspan=/);
   assert.match(css, /\.site-transfer-order-route\{[^}]*direction:ltr/);
   assert.match(html, /site-transfer-create-only hidden/);
