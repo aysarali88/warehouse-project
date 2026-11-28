@@ -158,6 +158,35 @@ test('Dashboard and Productivity Ranking share the same 80/20 scoring helper and
   assert.deepEqual(Array.from(scores), [100, 100]);
 });
 
+test('Al-Mansoura dashboard targets match the confirmed completed scope', () => {
+  const planSource = html.match(/^\s*\{city:'Tripoli',area:'Al-Mansoura',[^\n]+/m)?.[0]?.trim();
+  assert.ok(planSource);
+  const plan = vm.runInNewContext(`(${planSource.replace(/,$/, '')})`);
+  const context = vm.createContext({
+    ROLLOUT_DASHBOARD_PLAN: [plan],
+    normalizeText: value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, ''),
+    sameRolloutDashboardArea: (left, right) => String(left).toLowerCase() === String(right).toLowerCase(),
+    isMaqawbaRolloutArea: () => false,
+    wfmDesignTargetFor: () => null,
+    Number,
+  });
+  const start = html.indexOf('function rolloutPlanFor(');
+  const end = html.indexOf('\nfunction applyRolloutDashboardMetricOverrides(', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  vm.runInContext(html.slice(start, end), context);
+  const target = vm.runInContext("rolloutTargetFor('Tripoli', 'Al-Mansoura')", context);
+  assert.deepEqual(JSON.parse(JSON.stringify(target)), {
+    cableMeters: 40000,
+    subEndBox: 393,
+    hubBox: 30,
+    xbox: 2,
+    totalBoxes: 425,
+    singleCoreCableQty: 393,
+    users: 3144,
+  });
+});
+
 test('Manqosh project timeline uses the existing start date and updated November 23 end date', () => {
   assert.match(html, /\{city:'Misurata',area:'Manqosh',start:'2026-11-04',end:'2026-11-23'\}/);
 });
