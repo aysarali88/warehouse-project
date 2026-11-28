@@ -732,6 +732,7 @@ class FiberMapManagerTests(unittest.TestCase):
             ("berawtaleem", "X2", "H8", "L4"),
             ("berawtaleem", "X2", "H9", "L4"),
             ("manqosh", "X1", "H10", "L4"),
+            ("rwaisat", "X3", "H11", "L4"),
         }
         actual = {
             (area, xbox, hub, line)
